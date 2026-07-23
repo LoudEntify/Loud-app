@@ -60,6 +60,11 @@ export async function GET(request) {
     roomJoin: true,
     canPublish: assignedContestant === 'a' || assignedContestant === 'b',
     canSubscribe: true,
+    // Reactions, go-loud taps, and comments all travel as data messages,
+    // which is a separate permission from publishing video/audio. Everyone
+    // -- viewers included -- needs this, or their taps/comments never
+    // leave their own client.
+    canPublishData: true,
   });
 
   const token = await at.toJwt();
