@@ -27,38 +27,59 @@ const REACTION_EMOJI = {
   riff: '\uD83C\uDFB8', run: '\u2b06\ufe0f', rap: '\uD83C\uDFA4',
 };
 
-// --- Join screen -----------------------------------------------------
+// --- Join flow: performance mode first, then role -----------------------
 
 export default function LiveDemo() {
-  const [joined, setJoined] = useState(false);
+  const [step, setStep] = useState('mode'); // 'mode' | 'role' | 'joined'
+  const [performanceMode, setPerformanceMode] = useState(null); // 'solo' | 'versus'
   const [name, setName] = useState('');
-  const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b'
-  const [conn, setConn] = useState(null); // { token, url }
+  const [role, setRole] = useState('viewer'); // requested role
+  const [conn, setConn] = useState(null); // { token, url, assignedRole }
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   async function handleJoin() {
     setError('');
-    const identity = role === 'viewer'
-      ? (name || `viewer-${Date.now()}`)
-      : `contestant-${role}-${name || Date.now()}`;
-    const contestantParam = role === 'viewer' ? '' : `&contestant=${role}`;
+    setNotice('');
+    const contestantRequest = role === 'viewer' ? null : role; // 'a' | 'b' | null
+    const identity = contestantRequest
+      ? `contestant-${contestantRequest}-${name || Date.now()}`
+      : (name || `viewer-${Date.now()}`);
+    const contestantParam = contestantRequest ? `&contestant=${contestantRequest}` : '';
+
     try {
       const res = await fetch(
         `/api/token?room=${ROOM_NAME}&identity=${encodeURIComponent(identity)}${contestantParam}`
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Token request failed');
-      setConn({ token: data.token, url: data.url });
-      setJoined(true);
+
+      if (data.slotTaken) {
+        setNotice(`Performer ${contestantRequest?.toUpperCase()} is already in the show -- joining you as a viewer instead.`);
+      }
+
+      setConn({ token: data.token, url: data.url, assignedRole: data.assignedRole });
+      setStep('joined');
     } catch (e) {
       setError(e.message);
     }
   }
 
-  if (!joined) {
+  if (step === 'mode') {
     return (
       <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif' }}>
-        <h2>Join pilot room</h2>
+        <h2>Pilot show</h2>
+        <p style={{ color: '#888780', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
+        <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={{ padding: 12 }}>Solo</button>
+        <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={{ padding: 12 }}>Versus</button>
+      </div>
+    );
+  }
+
+  if (step === 'role') {
+    return (
+      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif' }}>
+        <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
         <input
           placeholder="your name"
           value={name}
@@ -67,8 +88,8 @@ export default function LiveDemo() {
         />
         <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: 8 }}>
           <option value="viewer">Viewer</option>
-          <option value="a">Performer A</option>
-          <option value="b">Performer B</option>
+          <option value="a">{performanceMode === 'solo' ? 'Performer' : 'Performer A'}</option>
+          {performanceMode === 'versus' && <option value="b">Performer B</option>}
         </select>
         <button onClick={handleJoin} style={{ padding: 10 }}>Join</button>
         {error && <p style={{ color: '#e24b4a' }}>{error}</p>}
@@ -82,42 +103,65 @@ export default function LiveDemo() {
       serverUrl={conn.url}
       connect
       audio={false}
-      video={role !== 'viewer'}
+      video={conn.assignedRole === 'a' || conn.assignedRole === 'b'}
       data-lk-theme="default"
       style={{ minHeight: '100vh' }}
     >
       <RoomAudioRenderer />
-      <RoomInner role={role} />
+      <RoomInner performanceMode={performanceMode} role={conn.assignedRole} notice={notice} />
     </LiveKitRoom>
   );
 }
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ role }) {
+function RoomInner({ performanceMode, role, notice }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const streamRef = useRef(null);
   const [goLoudTotal, setGoLoudTotal] = useState(0);
   const [goLoudKey, setGoLoudKey] = useState(null);
   const [superVisible, setSuperVisible] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [left, setLeft] = useState(false);
+  const audioHandleRef = useRef(null);
+
+  const isPerformer = role === 'a' || role === 'b';
 
   // Publish the Case 2 processed audio track for performers only.
   useEffect(() => {
-    if (role !== 'a' && role !== 'b') return;
-    let handle;
+    if (!isPerformer) return;
     (async () => {
-      handle = await createPilotAudioTrack();
+      const handle = await createPilotAudioTrack();
+      audioHandleRef.current = handle;
       await room.localParticipant.publishTrack(handle.processedTrack, {
         source: Track.Source.Microphone,
       });
     })();
     return () => {
-      if (handle) {
-        room.localParticipant.unpublishTrack(handle.processedTrack);
+      if (audioHandleRef.current) {
+        room.localParticipant.unpublishTrack(audioHandleRef.current.processedTrack);
       }
     };
-  }, [role, room]);
+  }, [isPerformer, room]);
+
+  const toggleMic = useCallback(() => {
+    const track = audioHandleRef.current?.processedTrack;
+    if (!track) return;
+    track.enabled = micOn ? false : true;
+    setMicOn((v) => !v);
+  }, [micOn]);
+
+  const toggleCam = useCallback(async () => {
+    await room.localParticipant.setCameraEnabled(camOn ? false : true);
+    setCamOn((v) => !v);
+  }, [camOn, room]);
+
+  const leaveCall = useCallback(() => {
+    room.disconnect();
+    setLeft(true);
+  }, [room]);
 
   // Incoming reactions and go-loud taps arrive as data messages.
   const { send } = useDataChannel((msg) => {
@@ -157,15 +201,29 @@ function RoomInner({ role }) {
     return t ? (
       <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
     ) : (
-      <span>waiting for contestant {letter}...</span>
+      <span>waiting for {performanceMode === 'solo' ? 'performer' : `contestant ${letter}`}...</span>
     );
   };
 
+  if (left) {
+    return (
+      <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center', fontFamily: 'sans-serif' }}>
+        <p>You left the show.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
+      {notice && (
+        <p style={{ background: '#2C2C2A', color: '#eee', padding: 8, borderRadius: 8, fontSize: 13 }}>
+          {notice}
+        </p>
+      )}
+
       <div style={{ position: 'relative', height: 260 }}>
         <VersusSplit
-          mode="versus"
+          mode={performanceMode}
           renderA={renderSlot('a')}
           renderB={renderSlot('b')}
           onReactA={sendReaction}
@@ -176,6 +234,18 @@ function RoomInner({ role }) {
           <GoLoudBurst triggerKey={goLoudKey} />
         </div>
       </div>
+
+      {isPerformer && (
+        <div className="mic-cam-controls">
+          <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
+            {micOn ? 'Mute mic' : 'Unmute mic'}
+          </button>
+          <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+            {camOn ? 'Camera off' : 'Camera on'}
+          </button>
+          <button className="control-btn" onClick={leaveCall}>Leave</button>
+        </div>
+      )}
 
       <ReactionBar
         onReact={sendReaction}

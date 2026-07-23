@@ -166,10 +166,74 @@
 
 .divider {
   background: #444441;
-  cursor: ns-resize;
   flex: 0 0 4px;
+  position: relative;
 }
 
-.versus-stage.landscape .divider {
+.drag-divider {
   cursor: ew-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.versus-stage.portrait .drag-divider {
+  cursor: ns-resize;
+}
+
+.drag-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: #2C2C2A;
+  border: 1px solid #55544f;
+  border-radius: 10px;
+  z-index: 2;
+}
+
+.drag-handle.landscape {
+  width: 18px;
+  height: 44px;
+  flex-direction: column;
+}
+
+.drag-handle.portrait {
+  width: 44px;
+  height: 18px;
+  flex-direction: row;
+}
+
+.drag-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #B4B2A9;
+}
+
+.mic-cam-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.control-btn {
+  border: 0.5px solid #55544f;
+  border-radius: 18px;
+  background: #2C2C2A;
+  color: #eee;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.control-btn.off {
+  background: #D85A30;
+  border-color: #D85A30;
 }
