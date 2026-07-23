@@ -237,3 +237,157 @@
   background: #D85A30;
   border-color: #D85A30;
 }
+
+.leave-btn-floating {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: #E24B4A;
+  color: #fff;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.comments-panel {
+  display: flex;
+  flex-direction: column;
+  height: 20vh;
+  min-height: 140px;
+  border-top: 0.5px solid #3a3a37;
+  background: #1a1a19;
+  transition: height 0.2s ease;
+  overflow: hidden;
+}
+
+.comments-panel.expanded {
+  height: 50vh;
+}
+
+.comments-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.comment-row {
+  padding: 6px 0;
+  border-bottom: 0.5px solid #2a2a28;
+  position: relative;
+}
+
+.comment-body {
+  font-size: 13px;
+  color: #eee;
+}
+
+.reply-indicator {
+  font-size: 11px;
+  color: #888780;
+  padding-left: 14px;
+  margin-bottom: 2px;
+}
+
+.reply-arrow {
+  margin-right: 4px;
+}
+
+.quote-block {
+  font-size: 12px;
+  color: #6DA8E0;
+  padding-left: 14px;
+  margin-bottom: 2px;
+}
+
+.comment-action-menu {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.comment-action-menu button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 0.5px solid #55544f;
+  background: #2C2C2A;
+  color: #eee;
+  cursor: pointer;
+}
+
+.composing-context {
+  font-size: 12px;
+  color: #888780;
+  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composing-context button {
+  border: none;
+  background: none;
+  color: #888780;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.comment-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 0.5px solid #2a2a28;
+}
+
+.comment-input-row textarea {
+  flex: 1;
+  resize: none;
+  height: 32px;
+  border-radius: 16px;
+  border: 0.5px solid #55544f;
+  background: #2C2C2A;
+  color: #eee;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.comment-input-row button {
+  border: none;
+  background: #534AB7;
+  color: #fff;
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.emoji-toggle {
+  background: none !important;
+  border: none !important;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: 8px;
+  border-top: 0.5px solid #2a2a28;
+}
+
+.emoji-grid button {
+  border: none;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+}

@@ -16,6 +16,7 @@ import ReactionBar, { GO_LOUD_THRESHOLD } from './ReactionBar';
 import SuperReactionPanel from './SuperReactionPanel';
 import ReactionStream, { GoLoudBurst } from './ReactionStream';
 import VersusSplit from './VersusSplit';
+import CommentsPanel from './CommentsPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import './reactions.css';
 
@@ -30,18 +31,18 @@ const REACTION_EMOJI = {
 // --- Join flow: performance mode first, then role -----------------------
 
 export default function LiveDemo() {
-  const [step, setStep] = useState('mode'); // 'mode' | 'role' | 'joined'
-  const [performanceMode, setPerformanceMode] = useState(null); // 'solo' | 'versus'
+  const [step, setStep] = useState('mode');
+  const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
-  const [role, setRole] = useState('viewer'); // requested role
-  const [conn, setConn] = useState(null); // { token, url, assignedRole }
+  const [role, setRole] = useState('viewer');
+  const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   async function handleJoin() {
     setError('');
     setNotice('');
-    const contestantRequest = role === 'viewer' ? null : role; // 'a' | 'b' | null
+    const contestantRequest = role === 'viewer' ? null : role;
     const identity = contestantRequest
       ? `contestant-${contestantRequest}-${name || Date.now()}`
       : (name || `viewer-${Date.now()}`);
@@ -58,7 +59,7 @@ export default function LiveDemo() {
         setNotice(`Performer ${contestantRequest?.toUpperCase()} is already in the show -- joining you as a viewer instead.`);
       }
 
-      setConn({ token: data.token, url: data.url, assignedRole: data.assignedRole });
+      setConn({ token: data.token, url: data.url, assignedRole: data.assignedRole, name: name || 'guest' });
       setStep('joined');
     } catch (e) {
       setError(e.message);
@@ -108,14 +109,14 @@ export default function LiveDemo() {
       style={{ minHeight: '100vh' }}
     >
       <RoomAudioRenderer />
-      <RoomInner performanceMode={performanceMode} role={conn.assignedRole} notice={notice} />
+      <RoomInner performanceMode={performanceMode} role={conn.assignedRole} notice={notice} selfName={conn.name} />
     </LiveKitRoom>
   );
 }
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice }) {
+function RoomInner({ performanceMode, role, notice, selfName }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const streamRef = useRef(null);
@@ -125,11 +126,12 @@ function RoomInner({ performanceMode, role, notice }) {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [left, setLeft] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentsExpanded, setCommentsExpanded] = useState(false);
   const audioHandleRef = useRef(null);
 
   const isPerformer = role === 'a' || role === 'b';
 
-  // Publish the Case 2 processed audio track for performers only.
   useEffect(() => {
     if (!isPerformer) return;
     (async () => {
@@ -149,12 +151,12 @@ function RoomInner({ performanceMode, role, notice }) {
   const toggleMic = useCallback(() => {
     const track = audioHandleRef.current?.processedTrack;
     if (!track) return;
-    track.enabled = micOn ? false : true;
+    track.enabled = !micOn;
     setMicOn((v) => !v);
   }, [micOn]);
 
   const toggleCam = useCallback(async () => {
-    await room.localParticipant.setCameraEnabled(camOn ? false : true);
+    await room.localParticipant.setCameraEnabled(!camOn);
     setCamOn((v) => !v);
   }, [camOn, room]);
 
@@ -163,7 +165,8 @@ function RoomInner({ performanceMode, role, notice }) {
     setLeft(true);
   }, [room]);
 
-  // Incoming reactions and go-loud taps arrive as data messages.
+  // Stickers (reactions/go-loud) and comments both travel as data messages,
+  // distinguished by `type`.
   const { send } = useDataChannel((msg) => {
     const text = new TextDecoder().decode(msg.payload);
     let payload;
@@ -182,6 +185,9 @@ function RoomInner({ performanceMode, role, notice }) {
         return next;
       });
     }
+    if (payload.type === 'comment') {
+      setComments((prev) => [...prev, payload.comment]);
+    }
   });
 
   const sendReaction = useCallback((key) => {
@@ -192,6 +198,19 @@ function RoomInner({ performanceMode, role, notice }) {
   const sendGoLoud = useCallback(() => {
     send(new TextEncoder().encode(JSON.stringify({ type: 'goloud-tap' })), {});
   }, [send]);
+
+  const sendComment = useCallback((text, replyTarget) => {
+    const comment = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      author: selfName,
+      text,
+      replyMode: replyTarget?.mode || null,
+      replyAuthor: replyTarget?.author || null,
+      quoteText: replyTarget?.mode === 'quote' ? replyTarget.text : null,
+    };
+    setComments((prev) => [...prev, comment]);
+    send(new TextEncoder().encode(JSON.stringify({ type: 'comment', comment })), {});
+  }, [send, selfName]);
 
   const trackForContestant = (letter) =>
     tracks.find((t) => t.participant.identity.startsWith(`contestant-${letter}`));
@@ -214,46 +233,71 @@ function RoomInner({ performanceMode, role, notice }) {
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'sans-serif' }}>
-      {notice && (
-        <p style={{ background: '#2C2C2A', color: '#eee', padding: 8, borderRadius: 8, fontSize: 13 }}>
-          {notice}
-        </p>
-      )}
+    <div style={{ maxWidth: 480, margin: '0 auto', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div style={{ padding: '0 16px' }}>
+        {notice && (
+          <p style={{ background: '#2C2C2A', color: '#eee', padding: 8, borderRadius: 8, fontSize: 13 }}>
+            {notice}
+          </p>
+        )}
 
-      <div style={{ position: 'relative', height: 260 }}>
-        <VersusSplit
-          mode={performanceMode}
-          renderA={renderSlot('a')}
-          renderB={renderSlot('b')}
-          onReactA={sendReaction}
-          onReactB={sendReaction}
-        />
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          <ReactionStream streamRef={streamRef} />
-          <GoLoudBurst triggerKey={goLoudKey} />
+        <div
+          style={{ position: 'relative', height: 260 }}
+          onClick={() => commentsExpanded && setCommentsExpanded(false)}
+        >
+          <VersusSplit
+            mode={performanceMode}
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+            onReactA={sendReaction}
+            onReactB={sendReaction}
+          />
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            <ReactionStream streamRef={streamRef} />
+            <GoLoudBurst triggerKey={goLoudKey} />
+          </div>
+          {isPerformer && (
+            <button className="leave-btn-floating" onClick={leaveCall} aria-label="leave call">
+              Leave
+            </button>
+          )}
         </div>
+
+        {isPerformer && (
+          <div className="mic-cam-controls">
+            <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
+              {micOn ? 'Mute mic' : 'Unmute mic'}
+            </button>
+            <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+              {camOn ? 'Camera off' : 'Camera on'}
+            </button>
+          </div>
+        )}
+
+        {/* Stickers are fan-only -- artists get the production/comments
+            panel below instead of the sticker bar. */}
+        {!isPerformer && (
+          <>
+            <ReactionBar
+              onReact={sendReaction}
+              onSuperToggle={() => setSuperVisible((v) => !v)}
+              goLoudCount={goLoudTotal}
+              onGoLoud={sendGoLoud}
+            />
+            <SuperReactionPanel visible={superVisible} onReact={sendReaction} />
+          </>
+        )}
       </div>
 
-      {isPerformer && (
-        <div className="mic-cam-controls">
-          <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
-            {micOn ? 'Mute mic' : 'Unmute mic'}
-          </button>
-          <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
-            {camOn ? 'Camera off' : 'Camera on'}
-          </button>
-          <button className="control-btn" onClick={leaveCall}>Leave</button>
-        </div>
-      )}
-
-      <ReactionBar
-        onReact={sendReaction}
-        onSuperToggle={() => setSuperVisible((v) => !v)}
-        goLoudCount={goLoudTotal}
-        onGoLoud={sendGoLoud}
-      />
-      <SuperReactionPanel visible={superVisible} onReact={sendReaction} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <CommentsPanel
+          comments={comments}
+          onSend={sendComment}
+          expanded={commentsExpanded}
+          onExpand={() => setCommentsExpanded(true)}
+          onCollapse={() => setCommentsExpanded(false)}
+        />
+      </div>
     </div>
   );
 }
