@@ -28,6 +28,58 @@ const REACTION_EMOJI = {
   riff: '\uD83C\uDFB8', run: '\u2b06\ufe0f', rap: '\uD83C\uDFA4',
 };
 
+const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
+
+// A single video layer that fades itself in on mount. Stacking one of
+// these per recent track (see CrossfadeVideo) is what produces the
+// dissolve -- the old layer stays fully visible underneath while the new
+// one fades in on top, so there's never a dark/empty frame between them.
+function FadeLayer({ trackRef, placeholder }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div style={{ position: 'absolute', inset: 0, opacity: visible ? 1 : 0, transition: 'opacity 400ms ease' }}>
+      {trackRef ? (
+        <VideoTrack trackRef={trackRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : placeholder}
+    </div>
+  );
+}
+
+// Renders whichever track is "current" for a slot, but keeps the previous
+// track mounted just long enough to crossfade into the new one instead of
+// hard-cutting (which is what caused the dark flash during camera
+// switches). Only the two most recent layers ever exist at once.
+function CrossfadeVideo({ trackRef, placeholder }) {
+  const [layers, setLayers] = useState(() => (trackRef ? [{ key: 'init', trackRef }] : []));
+  const currentKeyRef = useRef(trackKey(trackRef));
+
+  useEffect(() => {
+    const newKey = trackKey(trackRef);
+    if (newKey === currentKeyRef.current) return;
+    currentKeyRef.current = newKey;
+    const layerKey = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setLayers((prev) => [...prev, { key: layerKey, trackRef }]);
+    const timer = setTimeout(() => {
+      setLayers((prev) => prev.slice(-1));
+    }, 450); // slightly longer than the 400ms fade so it never clips
+    return () => clearTimeout(timer);
+  }, [trackRef]);
+
+  if (layers.length === 0) return placeholder;
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+      {layers.map((l) => (
+        <FadeLayer key={l.key} trackRef={l.trackRef} placeholder={placeholder} />
+      ))}
+    </div>
+  );
+}
+
 // --- Join flow: performance mode first, then role -----------------------
 // PRD ref: Multi-Camera & Production (Artist, Should/Phase 2).
 // Scaling ref: Real-time video/audio -- camera feeds are just additional
@@ -263,11 +315,8 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     const chosen = (activeId && candidates.find((t) => t.participant.identity === activeId))
       || candidates.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`))
       || candidates[0];
-    return chosen ? (
-      <VideoTrack trackRef={chosen} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-    ) : (
-      <span>waiting for {performanceMode === 'solo' ? 'performer' : `contestant ${letter}`}...</span>
-    );
+    const placeholder = <span>waiting for {performanceMode === 'solo' ? 'performer' : `contestant ${letter}`}...</span>;
+    return <CrossfadeVideo trackRef={chosen} placeholder={placeholder} />;
   };
 
   if (left) {
