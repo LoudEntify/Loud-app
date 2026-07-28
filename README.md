@@ -33,6 +33,31 @@ super reactions, and versus/solo split, exactly as previewed in chat.
   rumble) and a compressor (balances vocal vs instrument volume). Call
   `createPilotAudioTrack()` to get a processed track ready to publish.
 
+## Multi-camera (3-camera sync)
+
+The join screen now offers "Extra camera" alongside Viewer/Performer, per
+slot (A/B). A performer's main phone plus up to 2 extra camera-feed
+devices (3 total) can all publish video into the same room:
+
+- Extra camera devices join video-only (`canPublish: true`,
+  `canPublishSources: ['camera']`, `canPublishData: false`) -- they never
+  publish audio and can't send reactions/comments, since they're just
+  camera hardware, not a person interacting with the show.
+- The main performer sees a **director panel** (thumbnail row) listing
+  every camera tagged to their own slot, and taps one to make it live.
+  That choice broadcasts to everyone as an `active-camera` data message.
+- Everyone else's screen (other viewers, the other contestant) renders
+  only whichever feed was last marked active for that slot -- never
+  multiple feeds at once.
+- This is manual switching only. No auto-director, no emotion-based shot
+  selection, no staccato-timed auto cuts -- those are explicitly deferred
+  per the PRD (Won't now / Future Roadmap).
+
+PRD ref: Multi-Camera & Production (Artist category). Scaling ref:
+Real-time video/audio -- camera feeds are just additional LiveKit
+participants in the same room; this scales exactly the way the rest of
+the room already does, no new infrastructure needed.
+
 ## Two versions included
 
 - **`components/LiveDemo.jsx`** — the real, LiveKit-connected version.

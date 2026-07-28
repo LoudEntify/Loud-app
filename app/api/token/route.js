@@ -30,7 +30,24 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const room = searchParams.get('room') || 'pilot-room';
   const identity = searchParams.get('identity') || `guest-${Date.now()}`;
-  const requestedContestant = searchParams.get('contestant'); // 'a' | 'b' | null
+  const requestedContestant = searchParams.get('contestant'); // 'a' | 'b' | null -- main performer
+  const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
+
+  // Extra camera feeds: video-only, no data messages, no slot-exclusivity
+  // check (multiple camera devices per artist are expected and allowed).
+  if (camfeed === 'a' || camfeed === 'b') {
+    const at = new AccessToken(apiKey, apiSecret, { identity });
+    at.addGrant({
+      room,
+      roomJoin: true,
+      canPublish: true,
+      canPublishSources: ['camera'],
+      canSubscribe: true,
+      canPublishData: false,
+    });
+    const token = await at.toJwt();
+    return NextResponse.json({ token, url: livekitUrl, slotTaken: false, assignedRole: `camfeed-${camfeed}` });
+  }
 
   // Check whether the requested contestant slot is already occupied by a
   // currently-connected participant, so a third person can't also publish

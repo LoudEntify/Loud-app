@@ -29,12 +29,16 @@ const REACTION_EMOJI = {
 };
 
 // --- Join flow: performance mode first, then role -----------------------
+// PRD ref: Multi-Camera & Production (Artist, Should/Phase 2).
+// Scaling ref: Real-time video/audio -- camera feeds are just additional
+// LiveKit participants in the same room; no architecture change needed,
+// this scales the same way the rest of the room does.
 
 export default function LiveDemo() {
   const [step, setStep] = useState('mode');
   const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
-  const [role, setRole] = useState('viewer');
+  const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' | 'camfeed-a' | 'camfeed-b'
   const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -42,15 +46,26 @@ export default function LiveDemo() {
   async function handleJoin() {
     setError('');
     setNotice('');
-    const contestantRequest = role === 'viewer' ? null : role;
-    const identity = contestantRequest
-      ? `contestant-${contestantRequest}-${name || Date.now()}`
-      : (name || `viewer-${Date.now()}`);
-    const contestantParam = contestantRequest ? `&contestant=${contestantRequest}` : '';
+
+    const isCamFeed = role.startsWith('camfeed-');
+    const contestantRequest = (!isCamFeed && role !== 'viewer') ? role : null;
+    const camfeedSlot = isCamFeed ? role.split('-')[1] : null;
+
+    let identity;
+    let extraParam = '';
+    if (contestantRequest) {
+      identity = `contestant-${contestantRequest}-${name || Date.now()}`;
+      extraParam = `&contestant=${contestantRequest}`;
+    } else if (camfeedSlot) {
+      identity = `camfeed-${camfeedSlot}-${Date.now()}-${name || 'cam'}`;
+      extraParam = `&camfeed=${camfeedSlot}`;
+    } else {
+      identity = name || `viewer-${Date.now()}`;
+    }
 
     try {
       const res = await fetch(
-        `/api/token?room=${ROOM_NAME}&identity=${encodeURIComponent(identity)}${contestantParam}`
+        `/api/token?room=${ROOM_NAME}&identity=${encodeURIComponent(identity)}${extraParam}`
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Token request failed');
@@ -89,8 +104,10 @@ export default function LiveDemo() {
         />
         <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: 8 }}>
           <option value="viewer">Viewer</option>
-          <option value="a">{performanceMode === 'solo' ? 'Performer' : 'Performer A'}</option>
-          {performanceMode === 'versus' && <option value="b">Performer B</option>}
+          <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
+          {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
+          <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
+          {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
         </select>
         <button onClick={handleJoin} style={{ padding: 10 }}>Join</button>
         {error && <p style={{ color: '#e24b4a' }}>{error}</p>}
@@ -98,13 +115,16 @@ export default function LiveDemo() {
     );
   }
 
+  const isCamFeedRole = conn.assignedRole?.startsWith('camfeed-');
+  const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
+
   return (
     <LiveKitRoom
       token={conn.token}
       serverUrl={conn.url}
       connect
       audio={false}
-      video={conn.assignedRole === 'a' || conn.assignedRole === 'b'}
+      video={publishesVideo}
       data-lk-theme="default"
       style={{ minHeight: '100vh' }}
     >
@@ -128,12 +148,18 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
   const [left, setLeft] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
+  const [activeCamera, setActiveCamera] = useState({ a: null, b: null }); // slot -> identity of the live feed
   const audioHandleRef = useRef(null);
 
-  const isPerformer = role === 'a' || role === 'b';
+  const isMainPerformer = role === 'a' || role === 'b';
+  const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
+  const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
+  const isPerformer = isMainPerformer || isCamFeed;
 
+  // Only the main performer publishes the Case 2 processed audio track.
+  // Extra camera-feed devices are video-only, never audio.
   useEffect(() => {
-    if (!isPerformer) return;
+    if (!isMainPerformer) return;
     (async () => {
       const handle = await createPilotAudioTrack();
       audioHandleRef.current = handle;
@@ -146,7 +172,7 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
         room.localParticipant.unpublishTrack(audioHandleRef.current.processedTrack);
       }
     };
-  }, [isPerformer, room]);
+  }, [isMainPerformer, room]);
 
   const toggleMic = useCallback(() => {
     const track = audioHandleRef.current?.processedTrack;
@@ -165,8 +191,10 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     setLeft(true);
   }, [room]);
 
-  // Stickers (reactions/go-loud) and comments both travel as data messages,
-  // distinguished by `type`.
+  // Reactions, go-loud, comments, and camera-switch signals all travel as
+  // data messages, distinguished by `type`. Camera-feed devices have
+  // canPublishData: false server-side, so they never send any of these --
+  // they can still receive, which is harmless and unused by their UI.
   const { send } = useDataChannel((msg) => {
     const text = new TextDecoder().decode(msg.payload);
     let payload;
@@ -187,6 +215,9 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     }
     if (payload.type === 'comment') {
       setComments((prev) => [...prev, payload.comment]);
+    }
+    if (payload.type === 'active-camera') {
+      setActiveCamera((prev) => ({ ...prev, [payload.slot]: payload.identity }));
     }
   });
 
@@ -212,13 +243,28 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     send(new TextEncoder().encode(JSON.stringify({ type: 'comment', comment })), {});
   }, [send, selfName]);
 
-  const trackForContestant = (letter) =>
-    tracks.find((t) => t.participant.identity.startsWith(`contestant-${letter}`));
+  // All video tracks (main performer + any extra camera feeds) tagged to a
+  // given slot, for the director panel to list and for the audience view
+  // to pick the currently-active one from.
+  const tracksForSlot = useCallback((letter) =>
+    tracks.filter((t) =>
+      t.participant.identity.startsWith(`contestant-${letter}-`) ||
+      t.participant.identity.startsWith(`camfeed-${letter}-`)
+    ), [tracks]);
+
+  const setActiveForSlot = useCallback((letter, identity) => {
+    setActiveCamera((prev) => ({ ...prev, [letter]: identity }));
+    send(new TextEncoder().encode(JSON.stringify({ type: 'active-camera', slot: letter, identity })), {});
+  }, [send]);
 
   const renderSlot = (letter) => () => {
-    const t = trackForContestant(letter);
-    return t ? (
-      <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    const candidates = tracksForSlot(letter);
+    const activeId = activeCamera[letter];
+    const chosen = (activeId && candidates.find((t) => t.participant.identity === activeId))
+      || candidates.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`))
+      || candidates[0];
+    return chosen ? (
+      <VideoTrack trackRef={chosen} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
     ) : (
       <span>waiting for {performanceMode === 'solo' ? 'performer' : `contestant ${letter}`}...</span>
     );
@@ -228,6 +274,32 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     return (
       <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center', fontFamily: 'sans-serif' }}>
         <p>You left the show.</p>
+      </div>
+    );
+  }
+
+  // Camera-feed devices get a minimal screen: their own preview, a camera
+  // toggle, and leave. They are not part of the audience-facing layout and
+  // don't see comments/stickers (they have no publish-data permission).
+  if (isCamFeed) {
+    const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
+    return (
+      <div style={{ maxWidth: 400, margin: '40px auto', textAlign: 'center', fontFamily: 'sans-serif' }}>
+        <h3>Camera feed -- side {camFeedSlot?.toUpperCase()}</h3>
+        <p style={{ color: '#888780', fontSize: 13 }}>Keep this open and propped in place. The performer picks when this shot goes live.</p>
+        <div style={{ position: 'relative', height: 220, background: '#2C2C2A', borderRadius: 12, overflow: 'hidden' }}>
+          {myTrack ? (
+            <VideoTrack trackRef={myTrack} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <span>starting camera...</span>
+          )}
+        </div>
+        <div className="mic-cam-controls">
+          <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+            {camOn ? 'Camera off' : 'Camera on'}
+          </button>
+          <button className="control-btn" onClick={leaveCall}>Leave</button>
+        </div>
       </div>
     );
   }
@@ -256,14 +328,14 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
             <ReactionStream streamRef={streamRef} />
             <GoLoudBurst triggerKey={goLoudKey} />
           </div>
-          {isPerformer && (
+          {isMainPerformer && (
             <button className="leave-btn-floating" onClick={leaveCall} aria-label="leave call">
               Leave
             </button>
           )}
         </div>
 
-        {isPerformer && (
+        {isMainPerformer && (
           <div className="mic-cam-controls">
             <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
               {micOn ? 'Mute mic' : 'Unmute mic'}
@@ -274,8 +346,19 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
           </div>
         )}
 
-        {/* Stickers are fan-only -- artists get the production/comments
-            panel below instead of the sticker bar. */}
+        {/* Director control -- only the main performer for this slot sees
+            it, and only lists feeds tagged to their own slot. */}
+        {isMainPerformer && (
+          <DirectorPanel
+            slot={role}
+            candidates={tracksForSlot(role)}
+            activeIdentity={activeCamera[role]}
+            onPick={(identity) => setActiveForSlot(role, identity)}
+          />
+        )}
+
+        {/* Stickers are fan-only -- performers (main or camera feed) get
+            the production/comments panel instead. */}
         {!isPerformer && (
           <>
             <ReactionBar
@@ -297,6 +380,38 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
           onExpand={() => setCommentsExpanded(true)}
           onCollapse={() => setCommentsExpanded(false)}
         />
+      </div>
+    </div>
+  );
+}
+
+// Small thumbnail row letting the main performer pick which of their own
+// camera feeds (main phone + any extra cameras) is currently live to the
+// audience. Manual only -- no auto-director in this build (see PRD:
+// Multi-Camera & Production, auto-director rows are Won't now/Future).
+function DirectorPanel({ slot, candidates, activeIdentity, onPick }) {
+  if (candidates.length <= 1) return null;
+  return (
+    <div style={{ padding: '8px 0' }}>
+      <p style={{ fontSize: 12, color: '#888780', margin: '0 0 6px' }}>Choose your live shot ({candidates.length} camera{candidates.length > 1 ? 's' : ''} connected)</p>
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
+        {candidates.map((t) => {
+          const isActive = t.participant.identity === activeIdentity
+            || (!activeIdentity && t.participant.identity.startsWith(`contestant-${slot}-`));
+          return (
+            <button
+              key={t.participant.identity}
+              onClick={() => onPick(t.participant.identity)}
+              style={{
+                width: 72, height: 54, borderRadius: 8, overflow: 'hidden', padding: 0,
+                border: isActive ? '2px solid #534AB7' : '1px solid #55544f',
+                background: '#2C2C2A', cursor: 'pointer', flexShrink: 0,
+              }}
+            >
+              <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </button>
+          );
+        })}
       </div>
     </div>
   );
