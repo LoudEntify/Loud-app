@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { NextResponse } from 'next/server';
 
 // This route is the only place the LiveKit API secret is ever touched.
@@ -16,80 +16,91 @@ function toHttpUrl(wsUrl) {
 }
 
 export async function GET(request) {
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-  const livekitUrl = process.env.LIVEKIT_URL;
+  try {
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL;
 
-  if (!apiKey || !apiSecret || !livekitUrl) {
-    return NextResponse.json(
-      { error: 'Server missing LiveKit environment variables' },
-      { status: 500 }
-    );
-  }
+    if (!apiKey || !apiSecret || !livekitUrl) {
+      return NextResponse.json(
+        { error: 'Server missing LiveKit environment variables' },
+        { status: 500 }
+      );
+    }
 
-  const { searchParams } = new URL(request.url);
-  const room = searchParams.get('room') || 'pilot-room';
-  const identity = searchParams.get('identity') || `guest-${Date.now()}`;
-  const requestedContestant = searchParams.get('contestant'); // 'a' | 'b' | null -- main performer
-  const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
+    const { searchParams } = new URL(request.url);
+    const room = searchParams.get('room') || 'pilot-room';
+    const identity = searchParams.get('identity') || `guest-${Date.now()}`;
+    const requestedContestant = searchParams.get('contestant'); // 'a' | 'b' | null -- main performer
+    const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
 
-  // Extra camera feeds: video-only, no data messages, no slot-exclusivity
-  // check (multiple camera devices per artist are expected and allowed).
-  if (camfeed === 'a' || camfeed === 'b') {
+    // Extra camera feeds: video-only, no data messages, no slot-exclusivity
+    // check (multiple camera devices per artist are expected and allowed).
+    if (camfeed === 'a' || camfeed === 'b') {
+      const at = new AccessToken(apiKey, apiSecret, { identity });
+      at.addGrant({
+        room,
+        roomJoin: true,
+        canPublish: true,
+        canPublishSources: [TrackSource.CAMERA],
+        canSubscribe: true,
+        canPublishData: false,
+      });
+      const token = await at.toJwt();
+      return NextResponse.json({ token, url: livekitUrl, slotTaken: false, assignedRole: `camfeed-${camfeed}` });
+    }
+
+    // Check whether the requested contestant slot is already occupied by a
+    // currently-connected participant, so a third person can't also publish
+    // as "contestant A" over an existing performer.
+    let slotTaken = false;
+    if (requestedContestant === 'a' || requestedContestant === 'b') {
+      try {
+        const svc = new RoomServiceClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
+        const participants = await svc.listParticipants(room);
+        const prefix = `contestant-${requestedContestant}-`;
+        slotTaken = participants.some(
+          (p) => p.identity.startsWith(prefix) && p.identity !== identity
+        );
+      } catch (e) {
+        // Room doesn't exist yet (first person joining) -- not taken.
+        slotTaken = false;
+      }
+    }
+
+    // If the slot is taken, silently fall back to a viewer-only token rather
+    // than erroring, so a late joiner isn't blocked -- they just watch instead.
+    const assignedContestant = slotTaken ? null : requestedContestant;
+
     const at = new AccessToken(apiKey, apiSecret, { identity });
     at.addGrant({
       room,
       roomJoin: true,
-      canPublish: true,
-      canPublishSources: ['camera'],
+      canPublish: assignedContestant === 'a' || assignedContestant === 'b',
       canSubscribe: true,
-      canPublishData: false,
+      // Reactions, go-loud taps, and comments all travel as data messages,
+      // which is a separate permission from publishing video/audio. Everyone
+      // -- viewers included -- needs this, or their taps/comments never
+      // leave their own client.
+      canPublishData: true,
     });
+
     const token = await at.toJwt();
-    return NextResponse.json({ token, url: livekitUrl, slotTaken: false, assignedRole: `camfeed-${camfeed}` });
+
+    return NextResponse.json({
+      token,
+      url: livekitUrl,
+      slotTaken,
+      assignedRole: assignedContestant || 'viewer',
+    });
+  } catch (err) {
+    // Any unexpected crash returns readable JSON instead of an empty body --
+    // an empty body is what caused the confusing "Unexpected end of JSON
+    // input" client-side error this bug produced.
+    console.error('Token route error:', err);
+    return NextResponse.json(
+      { error: 'Token generation failed', detail: String(err?.message || err) },
+      { status: 500 }
+    );
   }
-
-  // Check whether the requested contestant slot is already occupied by a
-  // currently-connected participant, so a third person can't also publish
-  // as "contestant A" over an existing performer.
-  let slotTaken = false;
-  if (requestedContestant === 'a' || requestedContestant === 'b') {
-    try {
-      const svc = new RoomServiceClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
-      const participants = await svc.listParticipants(room);
-      const prefix = `contestant-${requestedContestant}-`;
-      slotTaken = participants.some(
-        (p) => p.identity.startsWith(prefix) && p.identity !== identity
-      );
-    } catch (e) {
-      // Room doesn't exist yet (first person joining) -- not taken.
-      slotTaken = false;
-    }
-  }
-
-  // If the slot is taken, silently fall back to a viewer-only token rather
-  // than erroring, so a late joiner isn't blocked -- they just watch instead.
-  const assignedContestant = slotTaken ? null : requestedContestant;
-
-  const at = new AccessToken(apiKey, apiSecret, { identity });
-  at.addGrant({
-    room,
-    roomJoin: true,
-    canPublish: assignedContestant === 'a' || assignedContestant === 'b',
-    canSubscribe: true,
-    // Reactions, go-loud taps, and comments all travel as data messages,
-    // which is a separate permission from publishing video/audio. Everyone
-    // -- viewers included -- needs this, or their taps/comments never
-    // leave their own client.
-    canPublishData: true,
-  });
-
-  const token = await at.toJwt();
-
-  return NextResponse.json({
-    token,
-    url: livekitUrl,
-    slotTaken,
-    assignedRole: assignedContestant || 'viewer',
-  });
 }
