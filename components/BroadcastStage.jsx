@@ -42,7 +42,6 @@ export default function BroadcastStage({
           mode={performanceMode}
           renderA={renderSlot(role)}
           renderB={renderSlot(otherSlot)}
-          interactive={false}
         />
 
         <TopBar label="YOU'RE LIVE" maximized={maximized} onToggleMaximize={onToggleMaximize} />

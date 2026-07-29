@@ -7,9 +7,8 @@ import SuperReactionPanel from './SuperReactionPanel';
 import CommentsPanel from './CommentsPanel';
 
 // Desktop fan view -- matches Fan Viewer.dc.html. Versus shows the split
-// stage with a per-side reaction rail on each contestant; solo drops the
-// split and the dual rails, keeping just the general sticker row in the
-// side panel. Every handler is passed straight through from RoomInner.
+// stage with a drag divider between contestants; solo drops the split
+// entirely. Every handler is passed straight through from RoomInner.
 export default function ViewerStage({
   performanceMode,
   renderSlot,
@@ -36,9 +35,6 @@ export default function ViewerStage({
           mode={performanceMode}
           renderA={renderSlot('a')}
           renderB={renderSlot('b')}
-          onReactA={sendReaction}
-          onReactB={sendReaction}
-          interactive={isVersus}
         />
 
         <TopBar

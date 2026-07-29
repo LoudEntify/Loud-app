@@ -5,16 +5,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 const MIN_PERCENT = 25;
 const MAX_PERCENT = 75;
 
-// The design's per-side reaction rail is a compact 4-icon subset of the
-// full sticker set, floating over each contestant's own video -- distinct
-// from the full sticker row + GO LOUD in the comments column.
-const RAIL_STICKERS = [
-  { key: 'heart', emoji: '❤', className: 'heart' },
-  { key: 'fire', emoji: '🔥', className: 'fire' },
-  { key: 'clap', emoji: '👏', className: 'clap' },
-  { key: 'laugh', emoji: '😂', className: 'laugh' },
-];
-
 function useOrientation() {
   const getOrientation = () => {
     if (typeof window === 'undefined') return 'landscape';
@@ -36,30 +26,10 @@ function useOrientation() {
   return orientation;
 }
 
-function ReactionRail({ side, onReact }) {
-  if (!onReact) return null;
-  return (
-    <div className={`reaction-rail rail-${side}`}>
-      {RAIL_STICKERS.map((s) => (
-        <button
-          key={s.key}
-          className={`reaction-btn ${s.className}`}
-          aria-label={s.key}
-          onClick={() => onReact(s.key)}
-        >
-          {s.emoji}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // VersusSplit renders either solo (single panel, no divider) or versus
 // (two panels with a drag-to-resize divider) depending on the `mode` prop.
-// The divider itself is the drag handle. `interactive` gates the per-side
-// reaction rails -- the broadcaster's own preview (BroadcastStage) never
-// shows them, only the fan-facing versus view (ViewerStage) does.
-export default function VersusSplit({ mode = 'versus', renderA, renderB, onReactA, onReactB, interactive = true }) {
+// The divider itself is the drag handle.
+export default function VersusSplit({ mode = 'versus', renderA, renderB }) {
   const orientation = useOrientation();
   const [split, setSplit] = useState(50);
   const stageRef = useRef(null);
@@ -109,7 +79,6 @@ export default function VersusSplit({ mode = 'versus', renderA, renderB, onReact
     >
       <div className="contestant-panel slot-a" style={{ flexBasis: `${split}%` }}>
         {renderA ? renderA() : 'contestant a'}
-        {interactive && <ReactionRail side="a" onReact={onReactA} />}
       </div>
 
       <div
@@ -138,7 +107,6 @@ export default function VersusSplit({ mode = 'versus', renderA, renderB, onReact
 
       <div className="contestant-panel slot-b" style={{ flexBasis: `${100 - split}%` }}>
         {renderB ? renderB() : 'contestant b'}
-        {interactive && <ReactionRail side="b" onReact={onReactB} />}
       </div>
     </div>
   );
