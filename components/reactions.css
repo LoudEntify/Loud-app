@@ -864,7 +864,11 @@ button {
     width: 100%;
     height: auto;
     padding: 0 16px;
-    overflow: hidden;
+    /* visible, not hidden -- same reasoning as the desktop fix: the
+       fixed-height emoji picker popup needs more room than this drawer's
+       20vh/140px box gives it. .comments-list still clips/scrolls its own
+       overflow independently via overflow-y: auto. */
+    overflow: visible;
   }
 
   .stage-comments-label {
@@ -876,7 +880,7 @@ button {
     min-height: 140px;
     background: #011627;
     border-top: 0.5px solid rgba(253, 255, 252, 0.15);
-    overflow: hidden;
+    overflow: visible;
   }
 
   .stage-side-panel .comments-panel.expanded {

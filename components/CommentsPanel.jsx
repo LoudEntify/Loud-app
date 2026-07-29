@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import EmojiPicker, { Theme } from 'emoji-picker-react';
+import EmojiPicker, { Theme, EmojiStyle } from 'emoji-picker-react';
 import { SmileyIcon as SmileyFallback } from '@phosphor-icons/react';
 
 // Full emoji library (emoji-picker-react, MIT licensed, actively
@@ -111,6 +111,7 @@ export default function CommentsPanel({ comments, onSend, expanded, onExpand, on
           <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 20 }}>
             <EmojiPicker
               theme={Theme.DARK}
+              emojiStyle={EmojiStyle.NATIVE}
               onEmojiClick={(emojiData) => {
                 setText((t) => t + emojiData.emoji);
                 setShowEmoji(false);
