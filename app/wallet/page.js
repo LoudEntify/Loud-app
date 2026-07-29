@@ -1,4 +1,5 @@
 import TokenWallet from '../../components/TokenWallet';
+import PageShell from '../../components/PageShell';
 
 export const metadata = {
   title: 'Wallet · Loudentify pilot',
@@ -7,8 +8,8 @@ export const metadata = {
 
 export default function WalletPage() {
   return (
-    <main>
+    <PageShell active="wallet">
       <TokenWallet />
-    </main>
+    </PageShell>
   );
 }

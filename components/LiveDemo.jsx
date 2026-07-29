@@ -10,23 +10,23 @@ import {
   useRoomContext,
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
+import { VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
-import ReactionBar, { GO_LOUD_THRESHOLD } from './ReactionBar';
-import SuperReactionPanel from './SuperReactionPanel';
+import { GO_LOUD_THRESHOLD } from './ReactionBar';
 import ReactionStream, { GoLoudBurst } from './ReactionStream';
-import VersusSplit from './VersusSplit';
-import CommentsPanel from './CommentsPanel';
+import PageShell from './PageShell';
+import BroadcastStage from './BroadcastStage';
+import ViewerStage from './ViewerStage';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
 
 const REACTION_EMOJI = {
-  heart: '\u2764', fire: '\uD83D\uDD25', clap: '\uD83D\uDC4F',
-  laugh: '\uD83D\uDE02', plusone: '+1',
-  riff: '\uD83C\uDFB8', run: '\u2b06\ufe0f', rap: '\uD83C\uDFA4',
+  heart: '❤', fire: '🔥', clap: '👏',
+  laugh: '😂', plusone: '+1',
+  riff: '🎸', run: '⬆️', rap: '🎤',
 };
 
 const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
@@ -95,6 +95,8 @@ export default function LiveDemo() {
   const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [maximized, setMaximized] = useState(false);
+  const toggleMaximize = useCallback(() => setMaximized((v) => !v), []);
 
   async function handleJoin() {
     setError('');
@@ -145,35 +147,39 @@ export default function LiveDemo() {
 
   if (step === 'mode') {
     return (
-      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h2>Pilot show</h2>
-        <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
-        <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={primaryBtnStyle}>Solo</button>
-        <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={primaryBtnStyle}>Versus</button>
-      </div>
+      <PageShell active="live">
+        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2>Pilot show</h2>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
+          <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={primaryBtnStyle}>Solo</button>
+          <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={primaryBtnStyle}>Versus</button>
+        </div>
+      </PageShell>
     );
   }
 
   if (step === 'role') {
     return (
-      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
-        <input
-          placeholder="your name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={fieldStyle}
-        />
-        <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
-          <option value="viewer">Viewer</option>
-          <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
-          {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
-          <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
-          {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
-        </select>
-        <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
-        {error && <p style={{ color: '#e71d36' }}>{error}</p>}
-      </div>
+      <PageShell active="live">
+        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
+          <input
+            placeholder="your name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={fieldStyle}
+          />
+          <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
+            <option value="viewer">Viewer</option>
+            <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
+            {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
+            <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
+            {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
+          </select>
+          <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
+          {error && <p style={{ color: '#e71d36' }}>{error}</p>}
+        </div>
+      </PageShell>
     );
   }
 
@@ -181,24 +187,35 @@ export default function LiveDemo() {
   const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
 
   return (
-    <LiveKitRoom
-      token={conn.token}
-      serverUrl={conn.url}
-      connect
-      audio={false}
-      video={publishesVideo}
-      data-lk-theme="default"
-      style={{ minHeight: '100vh' }}
-    >
-      <RoomAudioRenderer />
-      <RoomInner performanceMode={performanceMode} role={conn.assignedRole} notice={notice} selfName={conn.name} />
-    </LiveKitRoom>
+    <PageShell active="live" hideSidebar={maximized}>
+      <div className="live-room-shell">
+        <LiveKitRoom
+          token={conn.token}
+          serverUrl={conn.url}
+          connect
+          audio={false}
+          video={publishesVideo}
+          data-lk-theme="default"
+          style={{ height: '100%', width: '100%' }}
+        >
+          <RoomAudioRenderer />
+          <RoomInner
+            performanceMode={performanceMode}
+            role={conn.assignedRole}
+            notice={notice}
+            selfName={conn.name}
+            maximized={maximized}
+            onToggleMaximize={toggleMaximize}
+          />
+        </LiveKitRoom>
+      </div>
+    </PageShell>
   );
 }
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName }) {
+function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const streamRef = useRef(null);
@@ -216,7 +233,6 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
   const isMainPerformer = role === 'a' || role === 'b';
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
-  const isPerformer = isMainPerformer || isCamFeed;
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
@@ -329,6 +345,13 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     return <CrossfadeVideo trackRef={chosen} placeholder={placeholder} />;
   };
 
+  // Tapping the video collapses an expanded (mobile) comments drawer --
+  // a no-op on desktop, where the comments column has no expand/collapse
+  // state to begin with.
+  const collapseComments = useCallback(() => {
+    if (commentsExpanded) setCommentsExpanded(false);
+  }, [commentsExpanded]);
+
   if (left) {
     return (
       <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center' }}>
@@ -366,116 +389,50 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
     );
   }
 
+  const stageProps = {
+    performanceMode,
+    renderSlot,
+    maximized,
+    onToggleMaximize,
+    onStageClick: collapseComments,
+    comments,
+    sendComment,
+    commentsExpanded,
+    onCommentsExpand: () => setCommentsExpanded(true),
+    onCommentsCollapse: () => setCommentsExpanded(false),
+  };
+
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div style={{ padding: '0 24px' }}>
-        {notice && (
-          <p style={{ background: 'rgba(253, 255, 252, 0.08)', color: '#fdfffc', padding: 8, borderRadius: 8, fontSize: 13 }}>
-            {notice}
-          </p>
-        )}
+    <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+      {notice && <div className="stage-notice">{notice}</div>}
 
-        <div
-          style={{ position: 'relative', height: 260 }}
-          onClick={() => commentsExpanded && setCommentsExpanded(false)}
-        >
-          <VersusSplit
-            mode={performanceMode}
-            renderA={renderSlot('a')}
-            renderB={renderSlot('b')}
-            onReactA={sendReaction}
-            onReactB={sendReaction}
-          />
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-            <ReactionStream streamRef={streamRef} />
-            <GoLoudBurst triggerKey={goLoudKey} />
-          </div>
-          {isMainPerformer && (
-            <button className="leave-btn-floating" onClick={leaveCall} aria-label="leave call">
-              <PhoneDisconnect size={20} weight="bold" />
-            </button>
-          )}
-        </div>
-
-        {isMainPerformer && (
-          <div className="mic-cam-controls">
-            <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
-              {micOn ? <Microphone size={16} weight="bold" /> : <MicrophoneSlash size={16} weight="bold" />}
-              {micOn ? 'Mute mic' : 'Unmute mic'}
-            </button>
-            <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
-              {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
-              {camOn ? 'Camera off' : 'Camera on'}
-            </button>
-          </div>
-        )}
-
-        {/* Director control -- only the main performer for this slot sees
-            it, and only lists feeds tagged to their own slot. */}
-        {isMainPerformer && (
-          <DirectorPanel
-            slot={role}
-            candidates={tracksForSlot(role)}
-            activeIdentity={activeCamera[role]}
-            onPick={(identity) => setActiveForSlot(role, identity)}
-          />
-        )}
-
-        {/* Stickers are fan-only -- performers (main or camera feed) get
-            the production/comments panel instead. */}
-        {!isPerformer && (
-          <>
-            <ReactionBar
-              onReact={sendReaction}
-              onSuperToggle={() => setSuperVisible((v) => !v)}
-              goLoudCount={goLoudTotal}
-              onGoLoud={sendGoLoud}
-            />
-            <SuperReactionPanel visible={superVisible} onReact={sendReaction} />
-          </>
-        )}
-      </div>
-
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <CommentsPanel
-          comments={comments}
-          onSend={sendComment}
-          expanded={commentsExpanded}
-          onExpand={() => setCommentsExpanded(true)}
-          onCollapse={() => setCommentsExpanded(false)}
+      {isMainPerformer ? (
+        <BroadcastStage
+          {...stageProps}
+          role={role}
+          leaveCall={leaveCall}
+          micOn={micOn}
+          camOn={camOn}
+          toggleMic={toggleMic}
+          toggleCam={toggleCam}
+          tracksForSlot={tracksForSlot}
+          activeCamera={activeCamera}
+          setActiveForSlot={setActiveForSlot}
         />
-      </div>
-    </div>
-  );
-}
+      ) : (
+        <ViewerStage
+          {...stageProps}
+          sendReaction={sendReaction}
+          goLoudTotal={goLoudTotal}
+          sendGoLoud={sendGoLoud}
+          superVisible={superVisible}
+          onSuperToggle={() => setSuperVisible((v) => !v)}
+        />
+      )}
 
-// Small thumbnail row letting the main performer pick which of their own
-// camera feeds (main phone + any extra cameras) is currently live to the
-// audience. Manual only -- no auto-director in this build (see PRD:
-// Multi-Camera & Production, auto-director rows are Won't now/Future).
-function DirectorPanel({ slot, candidates, activeIdentity, onPick }) {
-  if (candidates.length <= 1) return null;
-  return (
-    <div style={{ padding: '8px 0' }}>
-      <p style={{ fontSize: 12, color: 'rgba(253, 255, 252, 0.55)', margin: '0 0 6px' }}>Choose your live shot ({candidates.length} camera{candidates.length > 1 ? 's' : ''} connected)</p>
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
-        {candidates.map((t) => {
-          const isActive = t.participant.identity === activeIdentity
-            || (!activeIdentity && t.participant.identity.startsWith(`contestant-${slot}-`));
-          return (
-            <button
-              key={t.participant.identity}
-              onClick={() => onPick(t.participant.identity)}
-              className={isActive ? 'btn-active' : ''}
-              style={{
-                width: 72, height: 54, clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', overflow: 'hidden', padding: 0,
-                background: '#011627', cursor: 'pointer', flexShrink: 0,
-              }}
-            >
-              <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            </button>
-          );
-        })}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
+        <ReactionStream streamRef={streamRef} />
+        <GoLoudBurst triggerKey={goLoudKey} />
       </div>
     </div>
   );

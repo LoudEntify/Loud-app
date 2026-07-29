@@ -187,13 +187,14 @@ button {
 
 /* Structural containers (video/stage panels, thumbnail frames) use a
    single-corner chamfer via clip-path -- never rounded rectangles. This is
-   a distinct corner grammar from the pill/circle radius buttons use. */
+   a distinct corner grammar from the pill/circle radius buttons use. Each
+   video panel chamfers its own outer corner (top-left for slot A, top-right
+   for slot B) rather than the whole stage sharing one cut. */
 .versus-stage {
   display: flex;
   width: 100%;
   height: 100%;
-  clip-path: polygon(20px 0, 100% 0, 100% 100%, 0 100%, 0 20px);
-  overflow: hidden;
+  gap: 2px;
 }
 
 .versus-stage.portrait {
@@ -212,28 +213,38 @@ button {
   color: rgba(253, 255, 252, 0.55);
   font-size: 14px;
   position: relative;
+  overflow: hidden;
   transition: flex-basis 0.15s ease;
 }
 
-.edge-rail {
-  width: 32px;
-  background: #011627;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+.contestant-panel.slot-a {
+  clip-path: polygon(20px 0, 100% 0, 100% 100%, 0 100%, 0 20px);
 }
 
-.versus-stage.portrait .edge-rail {
-  width: 100%;
-  height: 32px;
-  flex-direction: row;
+.contestant-panel.slot-b {
+  clip-path: polygon(0 0, 100% 0, 100% 20px, 100% 100%, 0 100%);
 }
 
+.contestant-panel.solo {
+  flex: 1;
+}
+
+/* Wide draggable hit area with a thin centered line -- matches the design's
+   16px-wide handle zone instead of a 4px sliver. */
 .divider {
-  background: rgba(253, 255, 252, 0.2);
-  flex: 0 0 4px;
+  flex: 0 0 16px;
   position: relative;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(253, 255, 252, 0.2);
 }
 
 .drag-divider {
@@ -246,6 +257,48 @@ button {
 
 .versus-stage.portrait .drag-divider {
   cursor: ns-resize;
+}
+
+/* Compact 4-icon reaction rail floating over each contestant's own video --
+   distinct from the full sticker row + GO LOUD in the side panel. Only
+   rendered in fan-versus mode (VersusSplit's `interactive` prop). */
+.reaction-rail {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 4;
+}
+
+.reaction-rail.rail-a {
+  left: 20px;
+}
+
+.reaction-rail.rail-b {
+  right: 20px;
+}
+
+.reaction-rail .reaction-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+}
+
+.versus-stage.portrait .reaction-rail {
+  top: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  flex-direction: row;
+}
+
+.versus-stage.portrait .reaction-rail.rail-a {
+  bottom: 12px;
+}
+
+.versus-stage.portrait .reaction-rail.rail-b {
+  top: 12px;
 }
 
 /* Hexagonal chamfered chip, teal border+dots+glow -- not a rounded pill. */
@@ -313,7 +366,7 @@ button {
 
 .leave-btn-floating {
   position: absolute;
-  right: 8px;
+  right: 24px;
   top: 50%;
   transform: translateY(-50%);
   width: 56px;
@@ -467,4 +520,402 @@ button {
   background: none;
   font-size: 18px;
   cursor: pointer;
+}
+
+/* ===== Desktop-first page layout (sidebar + full-viewport stage) =====
+   Everything below is the default (desktop) behavior; the single
+   max-width media query at the bottom is the mobile *adaptation* --
+   the desktop layout is the real design, not the other way round. */
+
+.sidebar {
+  width: 232px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  background: #011627;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(253, 255, 252, 0.08);
+}
+
+.sidebar-header {
+  padding: 0 24px 28px;
+}
+
+.sidebar-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fdfffc;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-subtitle {
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  color: rgba(253, 255, 252, 0.35);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-item {
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 24px;
+  position: relative;
+  cursor: pointer;
+}
+
+.sidebar-item.inert {
+  cursor: default;
+}
+
+.sidebar-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: transparent;
+}
+
+.sidebar-item.active::before {
+  background: #2ec4b6;
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.6);
+}
+
+.sidebar-item:hover:not(.inert) {
+  background: rgba(46, 196, 182, 0.08);
+  color: #2ec4b6;
+}
+
+.sidebar-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.page-shell {
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  background: #011627;
+}
+
+.page-shell-main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.live-room-shell {
+  height: 100vh;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  background: #011627;
+}
+
+.stage-root {
+  position: absolute;
+  inset: 0;
+  background: #011627;
+}
+
+.stage-video-area {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.stage-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.stage-topbar-left {
+  pointer-events: auto;
+}
+
+.stage-live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e71d36;
+  box-shadow: 0 0 8px #e71d36;
+  animation: glowPulse 1.4s ease-in-out infinite;
+}
+
+.stage-live-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #fdfffc;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+.stage-viewer-count {
+  font-size: 11px;
+  color: rgba(253, 255, 252, 0.75);
+  margin-top: 3px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+.stage-maximize-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #fdfffc;
+}
+
+.stage-maximize-btn:hover {
+  opacity: 0.7;
+}
+
+.stage-notice {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(253, 255, 252, 0.08);
+  color: #fdfffc;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 6;
+}
+
+.stage-camera-thumbs {
+  position: absolute;
+  left: 32px;
+  bottom: 24px;
+  display: flex;
+  gap: 10px;
+  z-index: 4;
+}
+
+.camera-thumb {
+  width: 96px;
+  height: 60px;
+  flex-shrink: 0;
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 0;
+  clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
+  background: #011627;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.camera-thumb:not(.btn-active) {
+  border: 1px solid rgba(253, 255, 252, 0.3);
+}
+
+.camera-thumb:not(.btn-active):hover {
+  border-color: rgba(46, 196, 182, 0.7);
+  box-shadow: 0 0 14px rgba(46, 196, 182, 0.4);
+}
+
+.stage-mic-cam {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  z-index: 4;
+}
+
+.stage-side-panel {
+  position: absolute;
+  right: 24px;
+  top: 80px;
+  bottom: 24px;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  overflow: hidden;
+}
+
+.stage-side-panel--broadcast {
+  bottom: 110px;
+  width: 320px;
+}
+
+.stage-comments-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(253, 255, 252, 0.8);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+/* Comments float directly over video in the side panel -- no background of
+   their own, legibility comes from text-shadow instead (matches the
+   design's "NO BACKGROUND OF ITS OWN" comments overlay). */
+.stage-side-panel .comments-panel {
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+  border-top: none;
+}
+
+.stage-side-panel .comment-row {
+  border-bottom: none;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85);
+}
+
+.stage-side-panel .comment-input-row {
+  border-top: none;
+}
+
+.stage-side-panel .comment-input-row textarea {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(253, 255, 252, 0.4);
+  border-radius: 0;
+}
+
+.stage-side-panel .reaction-bar,
+.stage-side-panel .super-panel {
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: flex-end;
+}
+
+/* ===== Mobile adaptation (below this breakpoint only) =====
+   The desktop layout above is the real design; this reflows it for
+   narrow viewports -- sidebar collapses to icons-only, the side panel
+   drops below the video into the original stacked/scrollable drawer. */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 72px;
+  }
+
+  .sidebar-header,
+  .sidebar-label {
+    display: none;
+  }
+
+  .sidebar-item {
+    justify-content: center;
+    padding: 14px 0;
+    gap: 0;
+  }
+
+  .live-room-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .stage-root {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .stage-video-area {
+    position: relative;
+    inset: auto;
+    height: 45vh;
+    flex-shrink: 0;
+  }
+
+  .stage-camera-thumbs {
+    left: 12px;
+    bottom: 12px;
+  }
+
+  .camera-thumb {
+    width: 64px;
+    height: 40px;
+  }
+
+  .stage-mic-cam {
+    bottom: 12px;
+    gap: 14px;
+  }
+
+  .stage-topbar {
+    padding: 12px 16px;
+  }
+
+  .reaction-rail {
+    display: none;
+  }
+
+  .stage-side-panel,
+  .stage-side-panel--broadcast {
+    position: static;
+    width: 100%;
+    height: auto;
+    padding: 0 16px;
+  }
+
+  .stage-comments-label {
+    padding-top: 8px;
+  }
+
+  .stage-side-panel .comments-panel {
+    height: 20vh;
+    min-height: 140px;
+    background: #011627;
+    border-top: 0.5px solid rgba(253, 255, 252, 0.15);
+  }
+
+  .stage-side-panel .comments-panel.expanded {
+    height: 50vh;
+  }
+
+  .stage-side-panel .comment-row {
+    border-bottom: 0.5px solid rgba(253, 255, 252, 0.1);
+    text-shadow: none;
+  }
+
+  .stage-side-panel .comment-input-row {
+    border-top: 0.5px solid rgba(253, 255, 252, 0.1);
+  }
+
+  .stage-side-panel .comment-input-row textarea {
+    background: rgba(253, 255, 252, 0.06);
+    border: 0.5px solid rgba(253, 255, 252, 0.2);
+    border-radius: 16px;
+  }
 }
