@@ -10,6 +10,7 @@ import {
   useRoomContext,
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
+import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
 import ReactionBar, { GO_LOUD_THRESHOLD } from './ReactionBar';
@@ -345,9 +346,12 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
         </div>
         <div className="mic-cam-controls">
           <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+            {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
             {camOn ? 'Camera off' : 'Camera on'}
           </button>
-          <button className="control-btn" onClick={leaveCall}>Leave</button>
+          <button className="control-btn" onClick={leaveCall}>
+            <PhoneDisconnect size={16} weight="bold" /> Leave
+          </button>
         </div>
       </div>
     );
@@ -379,7 +383,7 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
           </div>
           {isMainPerformer && (
             <button className="leave-btn-floating" onClick={leaveCall} aria-label="leave call">
-              Leave
+              <PhoneDisconnect size={20} weight="bold" />
             </button>
           )}
         </div>
@@ -387,9 +391,11 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
         {isMainPerformer && (
           <div className="mic-cam-controls">
             <button className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
+              {micOn ? <Microphone size={16} weight="bold" /> : <MicrophoneSlash size={16} weight="bold" />}
               {micOn ? 'Mute mic' : 'Unmute mic'}
             </button>
             <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+              {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
               {camOn ? 'Camera off' : 'Camera on'}
             </button>
           </div>
@@ -451,9 +457,9 @@ function DirectorPanel({ slot, candidates, activeIdentity, onPick }) {
             <button
               key={t.participant.identity}
               onClick={() => onPick(t.participant.identity)}
+              className={isActive ? 'btn-active' : ''}
               style={{
                 width: 72, height: 54, borderRadius: 8, overflow: 'hidden', padding: 0,
-                border: isActive ? '2px solid #534AB7' : '1px solid #55544f',
                 background: '#2C2C2A', cursor: 'pointer', flexShrink: 0,
               }}
             >

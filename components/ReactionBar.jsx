@@ -1,5 +1,7 @@
 'use client';
 
+import { Star } from '@phosphor-icons/react';
+
 // GENERIC_REACTIONS: each fires onReact(key) — wire this to a LiveKit data
 // message in the real build. Kept dependency-free so it can be dropped in
 // before the LiveKit connection exists.
@@ -43,7 +45,7 @@ export default function ReactionBar({ onReact, onSuperToggle, goLoudCount = 0, o
         aria-label="toggle super reactions"
         onClick={() => onSuperToggle && onSuperToggle()}
       >
-        {'\u2605'}
+        <Star size={18} weight="fill" />
       </button>
     </div>
   );

@@ -1,26 +1,19 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
+import { SmileyIcon as SmileyFallback } from '@phosphor-icons/react';
 
-// A small, common emoji set for the comment composer -- not the sticker
-// set. This is the "regular messaging app" emoji library referenced in
-// the spec, kept as a fixed grid rather than relying on any external
-// emoji-picker package.
-const EMOJI_SET = [
-  '\u{1F600}', '\u{1F602}', '\u{1F60D}', '\u{1F525}', '\u{1F44F}', '\u{1F622}',
-  '\u{1F62E}', '\u{1F64F}', '\u{1F4AF}', '\u{1F389}', '\u{1F605}', '\u{1F60E}',
-  '\u{1F914}', '\u{1F621}', '\u{1F44D}', '\u{1F44E}', '\u{2764}', '\u{1F494}',
-  '\u{1F634}', '\u{1F92F}', '\u{1F64C}', '\u{2728}', '\u{1F62D}', '\u{1F973}',
-];
+// Full emoji library (emoji-picker-react, MIT licensed, actively
+// maintained) replaces the earlier hand-picked 24-emoji grid -- this is
+// the "full library of emojis / open-source reactions that messaging apps
+// use" piece, standing in until custom Loudentify stickers are designed.
+// Note: this is the comment composer's emoji picker, separate from the
+// sticker bar (hearts/fire/riff/run/rap) which stays custom-designed.
 
-// CommentsPanel is shared by both artists and fans. Long-press (hold) a
-// comment to reply or quote it. Expands to half the screen while the
-// composer is focused, and collapses back to its resting size on a
-// swipe-down inside the panel or a tap on the main stage (handled by the
-// parent via `onCollapseRequest` / controlled `expanded` prop).
 export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse }) {
   const [text, setText] = useState('');
-  const [replyTarget, setReplyTarget] = useState(null); // { id, author, text, mode }
+  const [replyTarget, setReplyTarget] = useState(null);
   const [actionMenuFor, setActionMenuFor] = useState(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const pressTimer = useRef(null);
@@ -101,8 +94,10 @@ export default function CommentsPanel({ comments, onSend, expanded, onExpand, on
         </div>
       )}
 
-      <div className="comment-input-row">
-        <button className="emoji-toggle" onClick={() => setShowEmoji((v) => !v)}>{'\u{1F600}'}</button>
+      <div className="comment-input-row" style={{ position: 'relative' }}>
+        <button className="emoji-toggle" onClick={() => setShowEmoji((v) => !v)} aria-label="open emoji picker">
+          <SmileyFallback size={22} weight="regular" />
+        </button>
         <textarea
           ref={textareaRef}
           value={text}
@@ -111,15 +106,23 @@ export default function CommentsPanel({ comments, onSend, expanded, onExpand, on
           placeholder="Add a comment..."
         />
         <button onClick={handleSend}>Send</button>
-      </div>
 
-      {showEmoji && (
-        <div className="emoji-grid">
-          {EMOJI_SET.map((e) => (
-            <button key={e} onClick={() => setText((t) => t + e)}>{e}</button>
-          ))}
-        </div>
-      )}
+        {showEmoji && (
+          <div style={{ position: 'absolute', bottom: '100%', left: 0, zIndex: 20 }}>
+            <EmojiPicker
+              theme={Theme.DARK}
+              onEmojiClick={(emojiData) => {
+                setText((t) => t + emojiData.emoji);
+                setShowEmoji(false);
+                textareaRef.current?.focus();
+              }}
+              width={300}
+              height={360}
+              searchDisabled={false}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

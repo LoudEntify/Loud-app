@@ -33,6 +33,30 @@ super reactions, and versus/solo split, exactly as previewed in chat.
   rumble) and a compressor (balances vocal vs instrument volume). Call
   `createPilotAudioTrack()` to get a processed track ready to publish.
 
+## Visual system pass (fonts, icons, buttons, full emoji library)
+
+Brings the running pilot in line with the Claude Design prototype:
+
+- **Font**: Space Grotesk applied app-wide via `app/layout.js` (assumption
+  -- swap this one import if the actual Claude Design prototype landed on
+  a different font; nothing else depends on it).
+- **Icons**: `@phosphor-icons/react` used for mic, camera, and leave
+  controls (`LiveDemo.jsx`), the super-reactions star toggle
+  (`ReactionBar.jsx`), and the emoji-picker trigger (`CommentsPanel.jsx`).
+- **Buttons**: global reset in `reactions.css` -- no default borders,
+  pill/rounded corners everywhere, bold labels. A border now only ever
+  appears via the new `.btn-active` class, used for genuinely
+  selected/current states (e.g. the active camera thumbnail in the
+  director panel) -- never as decoration.
+- **Full emoji library**: `emoji-picker-react` (MIT licensed) replaces the
+  earlier 24-emoji grid in the comments composer -- full searchable
+  Unicode emoji set, standing in until custom Loudentify stickers are
+  designed. This is separate from the sticker bar (hearts/fire/riff/run/
+  rap), which stays custom-designed, not swapped for a generic library.
+
+PRD ref: this is a pure frontend/visual pass -- no backend, database, or
+Scaling & Infrastructure tab implications.
+
 ## Multi-camera (3-camera sync)
 
 The join screen now offers "Extra camera" alongside Viewer/Performer, per

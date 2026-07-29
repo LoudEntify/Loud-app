@@ -1,3 +1,20 @@
+/* Global button reset -- this is the fix for the "AI-built" look: no
+   default borders anywhere, rounded/pill corners everywhere, bold labels.
+   A border only ever appears via .btn-active, signaling a genuinely
+   selected/current state, never as decoration. */
+button {
+  font-family: inherit;
+  border: none;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-active {
+  border: 2px solid #2ec4b6; /* teal accent, mildly neonized via glow below */
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+}
+
 .reaction-bar {
   display: flex;
   align-items: center;
@@ -51,11 +68,12 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  border: none;
   background: #534AB7;
   color: #fff;
-  font-size: 18px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .super-panel {
@@ -224,13 +242,15 @@
 }
 
 .control-btn {
-  border: 0.5px solid #55544f;
   border-radius: 18px;
   background: #2C2C2A;
   color: #eee;
   padding: 6px 14px;
   font-size: 13px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .control-btn.off {
@@ -317,7 +337,6 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 12px;
-  border: 0.5px solid #55544f;
   background: #2C2C2A;
   color: #eee;
   cursor: pointer;
