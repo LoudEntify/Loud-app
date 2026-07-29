@@ -1,12 +1,10 @@
-import { Space_Grotesk } from 'next/font/google';
+import { PT_Sans_Narrow } from 'next/font/google';
 
-// Font assumption: applying Space Grotesk as a sensible default matching
-// the brief given to Claude Design (clean, geometric, a little edgy).
-// Swap this single import if Claude Design's prototype landed on a
-// different one -- it's a one-line change, nothing else depends on it.
-const spaceGrotesk = Space_Grotesk({
+// Matches the Claude Design source files' Google Fonts request exactly
+// (PT+Sans+Narrow:wght@400;700) -- see VISUAL_SYSTEM_HANDOFF.md.
+const ptSansNarrow = PT_Sans_Narrow({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  weight: ['400', '700'],
   variable: '--font-app',
 });
 
@@ -17,7 +15,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={spaceGrotesk.variable}>
+    <html lang="en" className={ptSansNarrow.variable}>
       <body style={{ margin: 0, background: '#011627', color: '#fdfffc', fontFamily: 'var(--font-app), sans-serif' }}>
         {children}
       </body>

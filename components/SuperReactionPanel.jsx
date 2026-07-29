@@ -30,7 +30,6 @@ export default function SuperReactionPanel({ visible, onReact }) {
           <button
             key={r.key}
             className="reaction-btn"
-            style={{ background: '#534AB7' }}
             aria-label={r.key}
             onClick={() => handleClick(r)}
           >

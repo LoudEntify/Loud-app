@@ -1,3 +1,8 @@
+/* Palette (see VISUAL_SYSTEM_HANDOFF.md) -- only these five colors, ever:
+   Ink #011627, Porcelain #fdfffc, Teal #2ec4b6, Red #e71d36, Orange #ff9f1c.
+   Muted/secondary text reuses Porcelain or Ink at reduced opacity rather
+   than introducing a third neutral. */
+
 /* Global button reset -- this is the fix for the "AI-built" look: no
    default borders anywhere, rounded/pill corners everywhere, bold labels.
    A border only ever appears via .btn-active, signaling a genuinely
@@ -18,21 +23,24 @@ button {
 .reaction-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 8px 12px;
 }
 
+/* Floating icon controls over live video: no background/fill/border chrome
+   at all -- bare glyph + glow, state communicated through color alone. */
 .reaction-btn {
   width: 44px;
   height: 44px;
-  border-radius: 50%;
   border: none;
+  background: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 22px;
   cursor: pointer;
-  color: #fff;
+  color: #fdfffc;
+  filter: drop-shadow(0 0 6px rgba(253, 255, 252, 0.45));
   transition: transform 0.1s ease;
 }
 
@@ -40,36 +48,73 @@ button {
   transform: scale(0.9);
 }
 
-.reaction-btn.heart { background: #E24B4A; }
-.reaction-btn.fire { background: #EF9F27; }
-.reaction-btn.clap { background: #378ADD; }
-.reaction-btn.laugh { background: #639922; }
-.reaction-btn.plusone { background: #7F77DD; }
-
-.go-loud-btn {
-  min-width: 84px;
-  height: 44px;
-  border-radius: 22px;
-  border: none;
-  background: #D85A30;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0 16px;
+/* Orange is reserved for fire/+1 glyphs (and the coins/wallet icon) --
+   every other sticker stays the default porcelain glow. */
+.reaction-btn.fire,
+.reaction-btn.plusone {
+  color: #ff9f1c;
+  filter: drop-shadow(0 0 8px rgba(255, 159, 28, 0.6));
 }
 
-.go-loud-progress {
-  font-size: 12px;
-  color: #888780;
-  margin-left: 4px;
+.sticker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.sticker-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(253, 255, 252, 0.6);
+}
+
+.go-loud-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* No button box in the source design -- glowing red text plus a thin
+   progress bar, nothing else. */
+.go-loud-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #e71d36;
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  filter: drop-shadow(0 0 6px rgba(231, 29, 54, 0.6));
+}
+
+.go-loud-track {
+  width: 60px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(253, 255, 252, 0.15);
+  overflow: hidden;
+}
+
+.go-loud-fill {
+  height: 100%;
+  background: #e71d36;
+  box-shadow: 0 0 6px rgba(231, 29, 54, 0.8);
+  transition: width 0.2s ease;
 }
 
 .super-toggle {
   width: 44px;
   height: 44px;
-  border-radius: 50%;
-  background: #534AB7;
-  color: #fff;
+  border: none;
+  background: none;
+  color: #2ec4b6;
+  filter: drop-shadow(0 0 8px rgba(46, 196, 182, 0.55));
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -79,13 +124,13 @@ button {
 .super-panel {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 8px 12px 0;
 }
 
 .super-label {
   font-size: 13px;
-  color: #5F5E5A;
+  color: rgba(253, 255, 252, 0.6);
   min-height: 16px;
 }
 
@@ -124,13 +169,13 @@ button {
 .go-loud-burst {
   width: 60px;
   height: 60px;
-  border-radius: 50%;
-  background: #D85A30;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #e71d36;
   font-weight: 700;
+  font-size: 28px;
+  filter: drop-shadow(0 0 20px rgba(231, 29, 54, 0.9));
   animation: burst-pulse 0.6s ease-out forwards;
 }
 
@@ -140,11 +185,14 @@ button {
   100% { transform: scale(2.4); opacity: 0; }
 }
 
+/* Structural containers (video/stage panels, thumbnail frames) use a
+   single-corner chamfer via clip-path -- never rounded rectangles. This is
+   a distinct corner grammar from the pill/circle radius buttons use. */
 .versus-stage {
   display: flex;
   width: 100%;
   height: 100%;
-  border-radius: 12px;
+  clip-path: polygon(20px 0, 100% 0, 100% 100%, 0 100%, 0 20px);
   overflow: hidden;
 }
 
@@ -157,11 +205,11 @@ button {
 }
 
 .contestant-panel {
-  background: #2C2C2A;
+  background: #011627;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #B4B2A9;
+  color: rgba(253, 255, 252, 0.55);
   font-size: 14px;
   position: relative;
   transition: flex-basis 0.15s ease;
@@ -169,7 +217,7 @@ button {
 
 .edge-rail {
   width: 32px;
-  background: #1a1a19;
+  background: #011627;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -183,7 +231,7 @@ button {
 }
 
 .divider {
-  background: #444441;
+  background: rgba(253, 255, 252, 0.2);
   flex: 0 0 4px;
   position: relative;
 }
@@ -200,6 +248,7 @@ button {
   cursor: ns-resize;
 }
 
+/* Hexagonal chamfered chip, teal border+dots+glow -- not a rounded pill. */
 .drag-handle {
   position: absolute;
   top: 50%;
@@ -209,9 +258,10 @@ button {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  background: #2C2C2A;
-  border: 1px solid #55544f;
-  border-radius: 10px;
+  background: #011627;
+  border: 1px solid #2ec4b6;
+  clip-path: polygon(50% 0, 100% 20%, 100% 80%, 50% 100%, 0 80%, 0 20%);
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.5);
   z-index: 2;
 }
 
@@ -231,7 +281,7 @@ button {
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: #B4B2A9;
+  background: #2ec4b6;
 }
 
 .mic-cam-controls {
@@ -241,12 +291,16 @@ button {
   padding: 8px 0;
 }
 
+/* Borderless icon+label control -- state communicated only through color
+   (porcelain = on/default, red = off/muted). */
 .control-btn {
-  border-radius: 18px;
-  background: #2C2C2A;
-  color: #eee;
-  padding: 6px 14px;
-  font-size: 13px;
+  background: none;
+  border: none;
+  color: #fdfffc;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -254,8 +308,7 @@ button {
 }
 
 .control-btn.off {
-  background: #D85A30;
-  border-color: #D85A30;
+  color: #e71d36;
 }
 
 .leave-btn-floating {
@@ -263,16 +316,17 @@ button {
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   border: none;
-  background: #E24B4A;
-  color: #fff;
+  background: #e71d36;
+  color: #fdfffc;
   font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 16px rgba(231, 29, 54, 0.6);
   cursor: pointer;
   z-index: 5;
 }
@@ -282,8 +336,8 @@ button {
   flex-direction: column;
   height: 20vh;
   min-height: 140px;
-  border-top: 0.5px solid #3a3a37;
-  background: #1a1a19;
+  border-top: 0.5px solid rgba(253, 255, 252, 0.15);
+  background: #011627;
   transition: height 0.2s ease;
   overflow: hidden;
 }
@@ -299,20 +353,24 @@ button {
 }
 
 .comment-row {
-  padding: 6px 0;
-  border-bottom: 0.5px solid #2a2a28;
+  padding: 5px 0;
+  border-bottom: 0.5px solid rgba(253, 255, 252, 0.1);
   position: relative;
 }
 
 .comment-body {
   font-size: 13px;
-  color: #eee;
+  color: #fdfffc;
+}
+
+.comment-body strong {
+  font-weight: 700;
 }
 
 .reply-indicator {
   font-size: 11px;
-  color: #888780;
-  padding-left: 14px;
+  color: rgba(253, 255, 252, 0.55);
+  padding-left: 18px;
   margin-bottom: 2px;
 }
 
@@ -322,8 +380,8 @@ button {
 
 .quote-block {
   font-size: 12px;
-  color: #6DA8E0;
-  padding-left: 14px;
+  color: #2ec4b6;
+  padding-left: 18px;
   margin-bottom: 2px;
 }
 
@@ -336,15 +394,14 @@ button {
 .comment-action-menu button {
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 12px;
-  background: #2C2C2A;
-  color: #eee;
+  background: rgba(253, 255, 252, 0.08);
+  color: #fdfffc;
   cursor: pointer;
 }
 
 .composing-context {
   font-size: 12px;
-  color: #888780;
+  color: rgba(253, 255, 252, 0.55);
   padding: 4px 12px;
   display: flex;
   align-items: center;
@@ -354,7 +411,7 @@ button {
 .composing-context button {
   border: none;
   background: none;
-  color: #888780;
+  color: rgba(253, 255, 252, 0.55);
   cursor: pointer;
   font-size: 14px;
 }
@@ -364,7 +421,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 8px;
-  border-top: 0.5px solid #2a2a28;
+  border-top: 0.5px solid rgba(253, 255, 252, 0.1);
 }
 
 .comment-input-row textarea {
@@ -372,18 +429,18 @@ button {
   resize: none;
   height: 32px;
   border-radius: 16px;
-  border: 0.5px solid #55544f;
-  background: #2C2C2A;
-  color: #eee;
+  border: 0.5px solid rgba(253, 255, 252, 0.2);
+  background: rgba(253, 255, 252, 0.06);
+  color: #fdfffc;
   padding: 6px 12px;
   font-size: 13px;
+  font-family: inherit;
 }
 
 .comment-input-row button {
   border: none;
-  background: #534AB7;
-  color: #fff;
-  border-radius: 16px;
+  background: #2ec4b6;
+  color: #011627;
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
@@ -392,6 +449,7 @@ button {
 .emoji-toggle {
   background: none !important;
   border: none !important;
+  color: #fdfffc;
   font-size: 20px;
   cursor: pointer;
 }
@@ -401,7 +459,7 @@ button {
   grid-template-columns: repeat(8, 1fr);
   gap: 4px;
   padding: 8px;
-  border-top: 0.5px solid #2a2a28;
+  border-top: 0.5px solid rgba(253, 255, 252, 0.1);
 }
 
 .emoji-grid button {

@@ -20,25 +20,31 @@ const GO_LOUD_THRESHOLD = 50;
 // and reports taps upward — it doesn't keep its own tally, since a shared
 // threshold has to reflect everyone in the room, not one client's clicks.
 export default function ReactionBar({ onReact, onSuperToggle, goLoudCount = 0, onGoLoud }) {
+  const goLoudPct = (Math.min(goLoudCount, GO_LOUD_THRESHOLD) / GO_LOUD_THRESHOLD) * 100;
+
   return (
     <div className="reaction-bar">
       {GENERIC_REACTIONS.map((r) => (
-        <button
-          key={r.key}
-          className={`reaction-btn ${r.className}`}
-          aria-label={r.key}
-          onClick={() => onReact && onReact(r.key)}
-        >
-          {r.emoji}
-        </button>
+        <div className="sticker" key={r.key}>
+          <button
+            className={`reaction-btn ${r.className}`}
+            aria-label={r.key}
+            onClick={() => onReact && onReact(r.key)}
+          >
+            {r.emoji}
+          </button>
+          <span className="sticker-label">{r.key === 'plusone' ? '+1' : r.key}</span>
+        </div>
       ))}
 
-      <button className="go-loud-btn" onClick={() => onGoLoud && onGoLoud()}>
-        go loud
-      </button>
-      <span className="go-loud-progress">
-        {Math.min(goLoudCount, GO_LOUD_THRESHOLD)}/{GO_LOUD_THRESHOLD}
-      </span>
+      <div className="go-loud-wrap">
+        <button className="go-loud-btn" onClick={() => onGoLoud && onGoLoud()}>
+          go loud
+        </button>
+        <div className="go-loud-track">
+          <div className="go-loud-fill" style={{ width: `${goLoudPct}%` }} />
+        </div>
+      </div>
 
       <button
         className="super-toggle"

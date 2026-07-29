@@ -134,36 +134,45 @@ export default function LiveDemo() {
     }
   }
 
+  const primaryBtnStyle = { padding: 12, background: '#2ec4b6', color: '#011627' };
+  const fieldStyle = {
+    padding: 8,
+    background: 'rgba(253, 255, 252, 0.06)',
+    border: '1px solid rgba(253, 255, 252, 0.2)',
+    borderRadius: 8,
+    color: '#fdfffc',
+  };
+
   if (step === 'mode') {
     return (
-      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2>Pilot show</h2>
-        <p style={{ color: '#888780', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
-        <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={{ padding: 12 }}>Solo</button>
-        <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={{ padding: 12 }}>Versus</button>
+        <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
+        <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={primaryBtnStyle}>Solo</button>
+        <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={primaryBtnStyle}>Versus</button>
       </div>
     );
   }
 
   if (step === 'role') {
     return (
-      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
         <input
           placeholder="your name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          style={{ padding: 8 }}
+          style={fieldStyle}
         />
-        <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: 8 }}>
+        <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
           <option value="viewer">Viewer</option>
           <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
           {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
           <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
           {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
         </select>
-        <button onClick={handleJoin} style={{ padding: 10 }}>Join</button>
-        {error && <p style={{ color: '#e24b4a' }}>{error}</p>}
+        <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
+        {error && <p style={{ color: '#e71d36' }}>{error}</p>}
       </div>
     );
   }
@@ -322,7 +331,7 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
 
   if (left) {
     return (
-      <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center', fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center' }}>
         <p>You left the show.</p>
       </div>
     );
@@ -334,10 +343,10 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
   if (isCamFeed) {
     const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
     return (
-      <div style={{ maxWidth: 400, margin: '40px auto', textAlign: 'center', fontFamily: 'sans-serif' }}>
+      <div style={{ maxWidth: 400, margin: '40px auto', textAlign: 'center' }}>
         <h3>Camera feed -- side {camFeedSlot?.toUpperCase()}</h3>
-        <p style={{ color: '#888780', fontSize: 13 }}>Keep this open and propped in place. The performer picks when this shot goes live.</p>
-        <div style={{ position: 'relative', height: 220, background: '#2C2C2A', borderRadius: 12, overflow: 'hidden' }}>
+        <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>Keep this open and propped in place. The performer picks when this shot goes live.</p>
+        <div style={{ position: 'relative', height: 220, background: '#011627', clipPath: 'polygon(16px 0,100% 0,100% 100%,0 100%,0 16px)', overflow: 'hidden' }}>
           {myTrack ? (
             <VideoTrack trackRef={myTrack} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           ) : (
@@ -358,10 +367,10 @@ function RoomInner({ performanceMode, role, notice, selfName }) {
   }
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div style={{ padding: '0 16px' }}>
+    <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div style={{ padding: '0 24px' }}>
         {notice && (
-          <p style={{ background: '#2C2C2A', color: '#eee', padding: 8, borderRadius: 8, fontSize: 13 }}>
+          <p style={{ background: 'rgba(253, 255, 252, 0.08)', color: '#fdfffc', padding: 8, borderRadius: 8, fontSize: 13 }}>
             {notice}
           </p>
         )}
@@ -448,7 +457,7 @@ function DirectorPanel({ slot, candidates, activeIdentity, onPick }) {
   if (candidates.length <= 1) return null;
   return (
     <div style={{ padding: '8px 0' }}>
-      <p style={{ fontSize: 12, color: '#888780', margin: '0 0 6px' }}>Choose your live shot ({candidates.length} camera{candidates.length > 1 ? 's' : ''} connected)</p>
+      <p style={{ fontSize: 12, color: 'rgba(253, 255, 252, 0.55)', margin: '0 0 6px' }}>Choose your live shot ({candidates.length} camera{candidates.length > 1 ? 's' : ''} connected)</p>
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto' }}>
         {candidates.map((t) => {
           const isActive = t.participant.identity === activeIdentity
@@ -459,8 +468,8 @@ function DirectorPanel({ slot, candidates, activeIdentity, onPick }) {
               onClick={() => onPick(t.participant.identity)}
               className={isActive ? 'btn-active' : ''}
               style={{
-                width: 72, height: 54, borderRadius: 8, overflow: 'hidden', padding: 0,
-                background: '#2C2C2A', cursor: 'pointer', flexShrink: 0,
+                width: 72, height: 54, clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', overflow: 'hidden', padding: 0,
+                background: '#011627', cursor: 'pointer', flexShrink: 0,
               }}
             >
               <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
