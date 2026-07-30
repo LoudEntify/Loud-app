@@ -177,9 +177,12 @@ export default function LiveDemo() {
 
   const isCamFeedRole = conn.assignedRole?.startsWith('camfeed-');
   const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
+  // Only a plain fan viewer gets the auto-hiding mobile sidebar -- main
+  // performers and camera-feed devices keep the sidebar's normal behavior.
+  const isViewerRole = conn.assignedRole === 'viewer';
 
   return (
-    <PageShell active="live" hideSidebar={maximized}>
+    <PageShell active="live" hideSidebar={maximized} autoHideSidebar={isViewerRole}>
       <div className="live-room-shell">
         <LiveKitRoom
           token={conn.token}

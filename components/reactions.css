@@ -402,6 +402,15 @@ button {
   letter-spacing: 0.08em;
 }
 
+/* Reveal tab for the auto-hiding fan-mobile sidebar. Hidden by default --
+   the auto-hide timer runs regardless of viewport (see Sidebar.jsx), so
+   without this base rule the tab could render unstyled on desktop once
+   the idle timer fires there too. Only actually shown inside the mobile
+   media query below. */
+.sidebar-reveal-tab {
+  display: none;
+}
+
 .page-shell {
   display: flex;
   width: 100%;
@@ -718,5 +727,134 @@ button {
     background: rgba(253, 255, 252, 0.06);
     border: 0.5px solid rgba(253, 255, 252, 0.2);
     border-radius: 16px;
+  }
+
+  /* ===== Fan mobile redesign (viewer only) =====
+     Scoped via :not(.stage-root--performer) / :not(.stage-side-panel--
+     broadcast) -- the artist's mobile broadcast screen never matches
+     these selectors (BroadcastStage.jsx always adds those modifiers,
+     ViewerStage.jsx never does), so everything above this point stays
+     exactly as it was for the artist. Sidebar scoping uses .sidebar--fan
+     instead, set via Sidebar's autoHide prop, which LiveDemo.jsx only
+     ever passes true for the plain viewer role. Fullscreen video is the
+     base layer; comments and the sidebar float on top of it -- nothing
+     else competes. */
+
+  .stage-root:not(.stage-root--performer) .stage-video-area {
+    position: fixed;
+    inset: 0;
+    height: 100%;
+  }
+
+  .stage-root:not(.stage-root--performer) .contestant-panel {
+    /* True edge-to-edge fullscreen -- a chamfered corner is a container
+       shape, which contradicts "fills the entire viewport". Covers solo
+       too, since .contestant-panel.solo still carries .slot-a. */
+    clip-path: none;
+  }
+
+  .stage-root:not(.stage-root--performer) .drag-handle {
+    /* The only actual background chrome on the divider/handle -- the
+       thin divider line itself is the divider's own visual identity,
+       not chrome around it, so that stays. */
+    background: transparent;
+  }
+
+  .stage-root:not(.stage-root--performer) .stage-maximize-btn {
+    /* Dead functionality now that fullscreen is the default here --
+       nothing left for it to toggle. The LIVE/VERSUS badge next to it
+       stays (it's the only live-vs-recorded signal once VOD playback
+       exists), just gets the same glow treatment as everything else. */
+    display: none;
+  }
+
+  .stage-root:not(.stage-root--performer) .stage-live-label {
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7), 0 0 8px rgba(46, 196, 182, 0.5);
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    max-height: 48vh;
+    padding: 0 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 15;
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comments-panel {
+    background: transparent;
+    border-top: none;
+    height: auto;
+    max-height: 48vh;
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comment-row {
+    border-bottom: none;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.5);
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .quote-block {
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.6);
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comment-input-row {
+    border-top: none;
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comment-action-menu button,
+  .stage-side-panel:not(.stage-side-panel--broadcast) .composing-context {
+    background: transparent;
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comment-input-row textarea {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(46, 196, 182, 0.4);
+    border-radius: 0;
+    box-shadow: 0 0 8px rgba(46, 196, 182, 0.25);
+  }
+
+  .stage-side-panel:not(.stage-side-panel--broadcast) .comment-input-row textarea:focus {
+    outline: none;
+    border-bottom-color: #2ec4b6;
+    box-shadow: 0 0 10px rgba(46, 196, 182, 0.6);
+  }
+
+  /* Sidebar auto-hide -- fan viewer only. */
+  .sidebar--fan {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    background: transparent;
+    border-right: none;
+    z-index: 20;
+    transition: transform 0.25s ease;
+  }
+
+  .sidebar--fan.sidebar--hidden {
+    transform: translateX(-100%);
+  }
+
+  .sidebar-reveal-tab {
+    display: flex;
+    position: fixed;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 56px;
+    background: rgba(1, 22, 39, 0.6);
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+    color: #2ec4b6;
+    z-index: 20;
   }
 }
