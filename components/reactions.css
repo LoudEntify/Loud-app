@@ -429,10 +429,32 @@ button {
   background: #011627;
 }
 
+/* Performer view stacks video / mic-cam row / deck top to bottom instead
+   of overlaying everything on the video -- .stage-side-panel stays
+   position:absolute (comments still float over the video), but these
+   three are real flex children. */
+.stage-root--performer {
+  display: flex;
+  flex-direction: column;
+}
+
 .stage-video-area {
   position: absolute;
   inset: 0;
   z-index: 1;
+}
+
+/* Scoped to min-width so it never fights the mobile media query's own
+   .stage-video-area{height:45vh} override on specificity -- this only
+   ever applies above that breakpoint. */
+@media (min-width: 1025px) {
+  .stage-root--performer .stage-video-area {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
 }
 
 @keyframes glowPulse {
@@ -516,46 +538,17 @@ button {
   z-index: 6;
 }
 
-.stage-camera-thumbs {
-  position: absolute;
-  left: 32px;
-  bottom: 24px;
-  display: flex;
-  gap: 10px;
-  z-index: 4;
-}
-
-.camera-thumb {
-  width: 96px;
-  height: 60px;
-  flex-shrink: 0;
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
-  padding: 0;
-  clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
-  background: #011627;
-  transition: box-shadow 0.15s ease, border-color 0.15s ease;
-}
-
-.camera-thumb:not(.btn-active) {
-  border: 1px solid rgba(253, 255, 252, 0.3);
-}
-
-.camera-thumb:not(.btn-active):hover {
-  border-color: rgba(46, 196, 182, 0.7);
-  box-shadow: 0 0 14px rgba(46, 196, 182, 0.4);
-}
-
+/* Instant, no-menu-diving controls -- mic mute and camera on/off, both a
+   single tap, distinct from the tuning panels in PerformerDeck below. In
+   normal flex flow now (not an overlay), so it never covers the deck or
+   the video. */
 .stage-mic-cam {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 24px;
-  z-index: 4;
+  padding: 12px 0;
+  flex-shrink: 0;
 }
 
 /* The panel's own box is a sibling of .stage-video-area with a higher
@@ -590,8 +583,12 @@ button {
   pointer-events: auto;
 }
 
+/* .stage-side-panel stays position:absolute against .stage-root, so it
+   doesn't automatically know how tall the mic-cam row + PerformerDeck
+   below it are -- this bottom offset is a measured estimate, not a
+   computed value. Re-check it visually if either of those change size. */
 .stage-side-panel--broadcast {
-  bottom: 110px;
+  bottom: 340px;
   width: 320px;
 }
 
@@ -671,18 +668,7 @@ button {
     flex-shrink: 0;
   }
 
-  .stage-camera-thumbs {
-    left: 12px;
-    bottom: 12px;
-  }
-
-  .camera-thumb {
-    width: 64px;
-    height: 40px;
-  }
-
   .stage-mic-cam {
-    bottom: 12px;
     gap: 14px;
   }
 
