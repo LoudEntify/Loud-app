@@ -8,8 +8,6 @@ import { SmileyIcon as SmileyFallback } from '@phosphor-icons/react';
 // maintained) replaces the earlier hand-picked 24-emoji grid -- this is
 // the "full library of emojis / open-source reactions that messaging apps
 // use" piece, standing in until custom Loudentify stickers are designed.
-// Note: this is the comment composer's emoji picker, separate from the
-// sticker bar (hearts/fire/riff/run/rap) which stays custom-designed.
 
 export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse }) {
   const [text, setText] = useState('');

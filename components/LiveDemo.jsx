@@ -13,8 +13,6 @@ import { Track } from 'livekit-client';
 import { VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
-import { GO_LOUD_THRESHOLD } from './ReactionBar';
-import ReactionStream, { GoLoudBurst } from './ReactionStream';
 import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
@@ -22,12 +20,6 @@ import { createPilotAudioTrack } from '../lib/audioProcessing';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
-
-const REACTION_EMOJI = {
-  heart: '❤', fire: '🔥', clap: '👏',
-  laugh: '😂', plusone: '+1',
-  riff: '🎸', run: '⬆️', rap: '🎤',
-};
 
 const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
 
@@ -218,10 +210,6 @@ export default function LiveDemo() {
 function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
-  const streamRef = useRef(null);
-  const [goLoudTotal, setGoLoudTotal] = useState(0);
-  const [goLoudKey, setGoLoudKey] = useState(null);
-  const [superVisible, setSuperVisible] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [left, setLeft] = useState(false);
@@ -269,28 +257,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     setLeft(true);
   }, [room]);
 
-  // Reactions, go-loud, comments, and camera-switch signals all travel as
-  // data messages, distinguished by `type`. Camera-feed devices have
-  // canPublishData: false server-side, so they never send any of these --
-  // they can still receive, which is harmless and unused by their UI.
+  // Comments and camera-switch signals travel as data messages,
+  // distinguished by `type`. Camera-feed devices have canPublishData:
+  // false server-side, so they never send any of these -- they can still
+  // receive, which is harmless and unused by their UI.
   const { send } = useDataChannel((msg) => {
     const text = new TextDecoder().decode(msg.payload);
     let payload;
     try { payload = JSON.parse(text); } catch { return; }
 
-    if (payload.type === 'reaction' && streamRef.current) {
-      streamRef.current.push(REACTION_EMOJI[payload.key] || payload.key);
-    }
-    if (payload.type === 'goloud-tap') {
-      setGoLoudTotal((prev) => {
-        const next = prev + 1;
-        if (next >= GO_LOUD_THRESHOLD) {
-          setGoLoudKey(Date.now());
-          return 0;
-        }
-        return next;
-      });
-    }
     if (payload.type === 'comment') {
       setComments((prev) => [...prev, payload.comment]);
     }
@@ -298,15 +273,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       setActiveCamera((prev) => ({ ...prev, [payload.slot]: payload.identity }));
     }
   });
-
-  const sendReaction = useCallback((key) => {
-    if (streamRef.current) streamRef.current.push(REACTION_EMOJI[key] || key);
-    send(new TextEncoder().encode(JSON.stringify({ type: 'reaction', key })), {});
-  }, [send]);
-
-  const sendGoLoud = useCallback(() => {
-    send(new TextEncoder().encode(JSON.stringify({ type: 'goloud-tap' })), {});
-  }, [send]);
 
   const sendComment = useCallback((text, replyTarget) => {
     const comment = {
@@ -362,7 +328,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
   // Camera-feed devices get a minimal screen: their own preview, a camera
   // toggle, and leave. They are not part of the audience-facing layout and
-  // don't see comments/stickers (they have no publish-data permission).
+  // don't see comments (they have no publish-data permission).
   if (isCamFeed) {
     const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
     return (
@@ -420,20 +386,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           setActiveForSlot={setActiveForSlot}
         />
       ) : (
-        <ViewerStage
-          {...stageProps}
-          sendReaction={sendReaction}
-          goLoudTotal={goLoudTotal}
-          sendGoLoud={sendGoLoud}
-          superVisible={superVisible}
-          onSuperToggle={() => setSuperVisible((v) => !v)}
-        />
+        <ViewerStage {...stageProps} />
       )}
-
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
-        <ReactionStream streamRef={streamRef} />
-        <GoLoudBurst triggerKey={goLoudKey} />
-      </div>
     </div>
   );
 }

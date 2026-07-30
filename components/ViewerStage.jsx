@@ -2,8 +2,6 @@
 
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
-import ReactionBar from './ReactionBar';
-import SuperReactionPanel from './SuperReactionPanel';
 import CommentsPanel from './CommentsPanel';
 
 // Desktop fan view -- matches Fan Viewer.dc.html. Versus shows the split
@@ -12,11 +10,6 @@ import CommentsPanel from './CommentsPanel';
 export default function ViewerStage({
   performanceMode,
   renderSlot,
-  sendReaction,
-  goLoudTotal,
-  sendGoLoud,
-  superVisible,
-  onSuperToggle,
   comments,
   sendComment,
   commentsExpanded,
@@ -45,13 +38,6 @@ export default function ViewerStage({
       </div>
 
       <div className="stage-side-panel">
-        <ReactionBar
-          onReact={sendReaction}
-          onSuperToggle={onSuperToggle}
-          goLoudCount={goLoudTotal}
-          onGoLoud={sendGoLoud}
-        />
-        <SuperReactionPanel visible={superVisible} onReact={sendReaction} />
         <CommentsPanel
           comments={comments}
           onSend={sendComment}

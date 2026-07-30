@@ -20,171 +20,6 @@ button {
   box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
 }
 
-.reaction-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 12px;
-}
-
-/* Floating icon controls over live video: no background/fill/border chrome
-   at all -- bare glyph + glow, state communicated through color alone. */
-.reaction-btn {
-  width: 44px;
-  height: 44px;
-  border: none;
-  background: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  cursor: pointer;
-  color: #fdfffc;
-  filter: drop-shadow(0 0 6px rgba(253, 255, 252, 0.45));
-  transition: transform 0.1s ease;
-}
-
-.reaction-btn:active {
-  transform: scale(0.9);
-}
-
-/* Orange is reserved for fire/+1 glyphs (and the coins/wallet icon) --
-   every other sticker stays the default porcelain glow. */
-.reaction-btn.fire,
-.reaction-btn.plusone {
-  color: #ff9f1c;
-  filter: drop-shadow(0 0 8px rgba(255, 159, 28, 0.6));
-}
-
-.sticker {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.sticker-label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(253, 255, 252, 0.6);
-}
-
-.go-loud-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-/* No button box in the source design -- glowing red text plus a thin
-   progress bar, nothing else. */
-.go-loud-btn {
-  background: none;
-  border: none;
-  padding: 0;
-  color: #e71d36;
-  font-weight: 700;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  filter: drop-shadow(0 0 6px rgba(231, 29, 54, 0.6));
-}
-
-.go-loud-track {
-  width: 60px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(253, 255, 252, 0.15);
-  overflow: hidden;
-}
-
-.go-loud-fill {
-  height: 100%;
-  background: #e71d36;
-  box-shadow: 0 0 6px rgba(231, 29, 54, 0.8);
-  transition: width 0.2s ease;
-}
-
-.super-toggle {
-  width: 44px;
-  height: 44px;
-  border: none;
-  background: none;
-  color: #2ec4b6;
-  filter: drop-shadow(0 0 8px rgba(46, 196, 182, 0.55));
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.super-panel {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 12px 0;
-}
-
-.super-label {
-  font-size: 13px;
-  color: rgba(253, 255, 252, 0.6);
-  min-height: 16px;
-}
-
-.reaction-stream {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.floating-icon {
-  position: absolute;
-  bottom: -10%;
-  font-size: 22px;
-  animation-name: rise-fade;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
-@keyframes rise-fade {
-  0% { transform: translate(0, 0); opacity: 1; }
-  80% { opacity: 0.6; }
-  100% { transform: translate(var(--wander, 0px), -100%); opacity: 0; }
-}
-
-.go-loud-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.go-loud-burst {
-  width: 60px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #e71d36;
-  font-weight: 700;
-  font-size: 28px;
-  filter: drop-shadow(0 0 20px rgba(231, 29, 54, 0.9));
-  animation: burst-pulse 0.6s ease-out forwards;
-}
-
-@keyframes burst-pulse {
-  0% { transform: scale(0.6); opacity: 0; }
-  40% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(2.4); opacity: 0; }
-}
-
 /* Structural containers (video/stage panels, thumbnail frames) use a
    single-corner chamfer via clip-path -- never rounded rectangles. This is
    a distinct corner grammar from the pill/circle radius buttons use. Each
@@ -458,9 +293,15 @@ button {
 }
 
 .emoji-toggle {
+  /* !important on all three: .comment-input-row button (higher specificity
+     via the extra type selector) sets background/color for the Send
+     button and incidentally matches this button too, since both are plain
+     <button> children of .comment-input-row. Its color: #011627 silently
+     won over this rule's plain color declaration -- ink icon on an ink
+     panel, invisible. */
   background: none !important;
   border: none !important;
-  color: #fdfffc;
+  color: #fdfffc !important;
   font-size: 20px;
   cursor: pointer;
 }
@@ -745,9 +586,7 @@ button {
 .stage-side-panel .comment-row,
 .stage-side-panel .comment-input-row,
 .stage-side-panel .composing-context,
-.stage-side-panel .comment-action-menu,
-.stage-side-panel .reaction-bar,
-.stage-side-panel .super-panel {
+.stage-side-panel .comment-action-menu {
   pointer-events: auto;
 }
 
@@ -790,13 +629,6 @@ button {
   border: none;
   border-bottom: 1px solid rgba(253, 255, 252, 0.4);
   border-radius: 0;
-}
-
-.stage-side-panel .reaction-bar,
-.stage-side-panel .super-panel {
-  padding-left: 0;
-  padding-right: 0;
-  justify-content: flex-end;
 }
 
 /* ===== Mobile adaptation (below this breakpoint only) =====
