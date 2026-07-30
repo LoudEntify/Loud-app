@@ -26,6 +26,7 @@ export default function BroadcastStage({
   activeCamera,
   setActiveForSlot,
   audioNodes,
+  audioContext,
   comments,
   sendComment,
   commentsExpanded,
@@ -67,6 +68,7 @@ export default function BroadcastStage({
 
       <PerformerDeck
         audioNodes={audioNodes}
+        audioContext={audioContext}
         cameraCandidates={candidates}
         activeCameraIdentity={activeCamera[role]}
         onPickCamera={(identity) => setActiveForSlot(role, identity)}

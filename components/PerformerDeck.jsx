@@ -8,7 +8,7 @@ import VideoDeckPanel from './VideoDeckPanel';
 // and Video control panels. Not shown to viewers or camera-feed devices.
 // Styled with the app's own ink black / porcelain / teal palette rather
 // than the DAW reference's blue, per the existing brand system.
-export default function PerformerDeck({ audioNodes, cameraCandidates, activeCameraIdentity, onPickCamera }) {
+export default function PerformerDeck({ audioNodes, audioContext, cameraCandidates, activeCameraIdentity, onPickCamera }) {
   const [tab, setTab] = useState('audio'); // 'audio' | 'video'
 
   return (
@@ -35,7 +35,7 @@ export default function PerformerDeck({ audioNodes, cameraCandidates, activeCame
       </div>
 
       {tab === 'audio' ? (
-        <AudioDeckPanel nodes={audioNodes} />
+        <AudioDeckPanel nodes={audioNodes} audioContext={audioContext} />
       ) : (
         <VideoDeckPanel
           candidates={cameraCandidates}

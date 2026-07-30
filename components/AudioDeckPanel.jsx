@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Knob from './Knob';
 import LevelMeterFader from './LevelMeterFader';
+import BackingTrackPanel from './BackingTrackPanel';
 import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
   tuneInputGainDb, tuneOutputGainDb,
@@ -22,7 +23,7 @@ const PRESET = {
   outputDb: 0,
 };
 
-export default function AudioDeckPanel({ nodes }) {
+export default function AudioDeckPanel({ nodes, audioContext }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
 
@@ -139,6 +140,10 @@ export default function AudioDeckPanel({ nodes }) {
           ? 'Have someone play/sing at real volume and listen from a separate device while tuning. Input meter shows raw mic level; output meter shows what viewers actually hear.'
           : 'Going live uses this tested preset. Switch on Manual mix during soundcheck to adjust.'}
       </p>
+
+      <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
+        <BackingTrackPanel audioContext={audioContext} outputBus={nodes.outputBus} />
+      </div>
     </div>
   );
 }

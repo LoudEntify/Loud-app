@@ -217,6 +217,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({ a: null, b: null }); // slot -> identity of the live feed
   const [audioNodes, setAudioNodes] = useState(null);
+  const [audioContext, setAudioContext] = useState(null);
   const audioHandleRef = useRef(null);
 
   const isMainPerformer = role === 'a' || role === 'b';
@@ -233,8 +234,11 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       // audioHandleRef is a ref, not state -- setting it alone doesn't
       // trigger a re-render, so PerformerDeck's AudioDeckPanel would never
       // see the live Web Audio nodes once the async setup above resolves.
-      // This state mirror is what actually gets them there.
+      // This state mirror is what actually gets them there. audioContext
+      // is needed too now, for BackingTrackPanel to decode/play a file
+      // into the same graph.
       setAudioNodes(handle.nodes);
+      setAudioContext(handle.audioContext);
       await room.localParticipant.publishTrack(handle.processedTrack, {
         source: Track.Source.Microphone,
       });
@@ -391,6 +395,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           activeCamera={activeCamera}
           setActiveForSlot={setActiveForSlot}
           audioNodes={audioNodes}
+          audioContext={audioContext}
         />
       ) : (
         <ViewerStage {...stageProps} />
