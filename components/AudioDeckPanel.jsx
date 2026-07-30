@@ -2,18 +2,24 @@
 
 import { useState } from 'react';
 import Knob from './Knob';
-import { tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix } from '../lib/audioProcessing';
+import LevelMeterFader from './LevelMeterFader';
+import {
+  tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
+  tuneInputGainDb, tuneOutputGainDb,
+} from '../lib/audioProcessing';
 
 // The tested-good starting point every performer goes live with. Manual
 // mix is off by default -- these values are already applied by
 // createPilotAudioTrack()'s own defaults, this object just mirrors them so
 // the knobs display correctly and so re-enabling "preset" can restore them.
 const PRESET = {
+  inputDb: 0,
   highpass: 80,
   threshold: -24,
   ratio: 3,
   gainDb: 4,
   reverbMix: 0.12,
+  outputDb: 0,
 };
 
 export default function AudioDeckPanel({ nodes }) {
@@ -26,10 +32,12 @@ export default function AudioDeckPanel({ nodes }) {
 
   function applyPreset() {
     setValues(PRESET);
+    tuneInputGainDb(nodes, PRESET.inputDb);
     tuneHighpass(nodes, PRESET.highpass);
     tuneCompressor(nodes, { threshold: PRESET.threshold, ratio: PRESET.ratio });
     tuneMakeupGainDb(nodes, PRESET.gainDb);
     tuneReverbMix(nodes, PRESET.reverbMix);
+    tuneOutputGainDb(nodes, PRESET.outputDb);
   }
 
   function toggleManualMix() {
@@ -70,39 +78,65 @@ export default function AudioDeckPanel({ nodes }) {
         </label>
       </div>
 
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'space-around', padding: '4px 0' }}>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap', justifyContent: 'space-around', padding: '4px 0' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>INPUT</span>
+          <LevelMeterFader
+            label="Mic level"
+            analyser={nodes.inputAnalyser}
+            gainDb={values.inputDb}
+            onChangeGainDb={manualMix ? update('inputDb', (v) => tuneInputGainDb(nodes, v)) : () => {}}
+            minDb={-12}
+            maxDb={24}
+          />
+        </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>FILTER</span>
           <Knob label="Rumble cut" value={values.highpass} min={40} max={160} step={5} unit="Hz"
             disabled={!manualMix} onChange={update('highpass', (v) => tuneHighpass(nodes, v))} />
         </div>
 
-        <div style={{ display: 'flex', gap: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>COMPRESSOR</span>
-            <div style={{ display: 'flex', gap: 16 }}>
-              <Knob label="Threshold" value={values.threshold} min={-40} max={-10} step={1} unit="dB"
-                disabled={!manualMix} onChange={update('threshold', (v) => tuneCompressor(nodes, { threshold: v }))} />
-              <Knob label="Ratio" value={values.ratio} min={1} max={8} step={0.5} unit=":1"
-                disabled={!manualMix} onChange={update('ratio', (v) => tuneCompressor(nodes, { ratio: v }))} />
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>COMPRESSOR</span>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <Knob label="Threshold" value={values.threshold} min={-40} max={-10} step={1} unit="dB"
+              disabled={!manualMix} onChange={update('threshold', (v) => tuneCompressor(nodes, { threshold: v }))} />
+            <Knob label="Ratio" value={values.ratio} min={1} max={8} step={0.5} unit=":1"
+              disabled={!manualMix} onChange={update('ratio', (v) => tuneCompressor(nodes, { ratio: v }))} />
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          {/* This "Gain" knob is the makeup-gain stage -- it compensates for
+              level lost during compression, applied BEFORE the reverb send.
+              It is not the same as the OUTPUT fader on the right, which
+              controls the final published level after everything else. */}
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>SEND</span>
           <div style={{ display: 'flex', gap: 16 }}>
-            <Knob label="Gain" value={values.gainDb} min={0} max={12} step={0.5} unit="dB"
+            <Knob label="Makeup gain" value={values.gainDb} min={0} max={12} step={0.5} unit="dB"
               disabled={!manualMix} onChange={update('gainDb', (v) => tuneMakeupGainDb(nodes, v))} />
             <Knob label="Reverb" value={values.reverbMix} min={0} max={0.4} step={0.01} unit=""
               disabled={!manualMix} onChange={update('reverbMix', (v) => tuneReverbMix(nodes, v))} />
           </div>
         </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>OUTPUT</span>
+          <LevelMeterFader
+            label="Published level"
+            analyser={nodes.outputAnalyser}
+            gainDb={values.outputDb}
+            onChangeGainDb={manualMix ? update('outputDb', (v) => tuneOutputGainDb(nodes, v)) : () => {}}
+            minDb={-12}
+            maxDb={12}
+          />
+        </div>
       </div>
 
       <p style={{ fontSize: 11, color: '#888780', margin: 0 }}>
         {manualMix
-          ? 'Have someone play/sing at real volume and listen from a separate device while tuning.'
+          ? 'Have someone play/sing at real volume and listen from a separate device while tuning. Input meter shows raw mic level; output meter shows what viewers actually hear.'
           : 'Going live uses this tested preset. Switch on Manual mix during soundcheck to adjust.'}
       </p>
     </div>
