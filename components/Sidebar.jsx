@@ -3,15 +3,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight } from '@phosphor-icons/react';
+import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
 
 // Matches Sidebar.dc.html from the Claude Design project exactly (icons,
-// labels, active/wallet color rules). PROFILE still renders inert -- its
-// destination depends on the mock accountType (fan vs artist) wired up
-// alongside Auth/Account Settings/Artist Dashboard.
-const ITEMS = [
+// labels, active/wallet color rules). PROFILE's destination is the one
+// item that isn't static -- it routes off the mock accountType (see
+// lib/mockAccount.js): artists always land on the Artist Dashboard,
+// fans always land on Fan Profile, regardless of what page they were
+// just on.
+const BASE_ITEMS = [
   { key: 'discover', label: 'DISCOVER', href: '/discover', Icon: Compass },
   { key: 'live', label: 'LIVE', href: '/', Icon: Broadcast },
-  { key: 'profile', label: 'PROFILE', href: null, Icon: UserCircle },
   { key: 'notifications', label: 'NOTIFICATIONS', href: '/notifications', Icon: Bell },
   { key: 'wallet', label: 'WALLET', href: '/wallet', Icon: Coins },
 ];
@@ -30,6 +32,22 @@ const HIDE_DELAY_MS = 2000;
 export default function Sidebar({ active = 'live', autoHide = false }) {
   const [hidden, setHidden] = useState(false);
   const timerRef = useRef(null);
+
+  // Defaults to 'fan' for the first (server-matching) render, then
+  // corrects on mount -- localStorage isn't available during SSR, and
+  // reading it before hydration would cause a mismatch.
+  const [accountType, setAccountTypeState] = useState('fan');
+
+  useEffect(() => {
+    setAccountTypeState(getAccountType());
+    return onAccountTypeChange(() => setAccountTypeState(getAccountType()));
+  }, []);
+
+  const items = [
+    ...BASE_ITEMS.slice(0, 2),
+    { key: 'profile', label: 'PROFILE', href: accountType === 'artist' ? '/dashboard' : '/profile', Icon: UserCircle },
+    ...BASE_ITEMS.slice(2),
+  ];
 
   const resetTimer = useCallback(() => {
     if (!autoHide) return;
@@ -55,7 +73,7 @@ export default function Sidebar({ active = 'live', autoHide = false }) {
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
         </div>
         <div className="sidebar-nav">
-          {ITEMS.map((item) => {
+          {items.map((item) => {
             const isActive = item.key === active;
             const textColor = isActive ? TEAL : MUTED;
             const iconColor = item.key === 'wallet' ? ORANGE : textColor;
