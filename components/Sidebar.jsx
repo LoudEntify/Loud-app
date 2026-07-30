@@ -5,14 +5,14 @@ import Link from 'next/link';
 import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight } from '@phosphor-icons/react';
 
 // Matches Sidebar.dc.html from the Claude Design project exactly (icons,
-// labels, active/wallet color rules). Profile/Notifications don't have
-// pages in this codebase yet, so they still render inert -- present for
-// visual fidelity, not wired to a route until their batch lands.
+// labels, active/wallet color rules). PROFILE still renders inert -- its
+// destination depends on the mock accountType (fan vs artist) wired up
+// alongside Auth/Account Settings/Artist Dashboard.
 const ITEMS = [
   { key: 'discover', label: 'DISCOVER', href: '/discover', Icon: Compass },
   { key: 'live', label: 'LIVE', href: '/', Icon: Broadcast },
   { key: 'profile', label: 'PROFILE', href: null, Icon: UserCircle },
-  { key: 'notifications', label: 'NOTIFICATIONS', href: null, Icon: Bell },
+  { key: 'notifications', label: 'NOTIFICATIONS', href: '/notifications', Icon: Bell },
   { key: 'wallet', label: 'WALLET', href: '/wallet', Icon: Coins },
 ];
 
