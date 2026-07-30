@@ -560,6 +560,47 @@ button {
   flex-shrink: 0;
 }
 
+/* Vertical-drag divider between the mic/cam row and PerformerDeck --
+   desktop only (see BroadcastStage.jsx and the mobile override below).
+   Same drag-handle/drag-dot chip VersusSplit's own divider uses; this is
+   a separate element since it's a conceptually different split (video
+   area vs. deck, not contestant A vs. B). */
+.deck-divider {
+  flex: 0 0 16px;
+  flex-shrink: 0;
+  position: relative;
+  cursor: ns-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deck-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  background: rgba(253, 255, 252, 0.2);
+}
+
+.deck-wrapper {
+  flex-shrink: 0;
+}
+
+/* Scoped to min-width for the same reason as .stage-root--performer
+   .stage-video-area above -- the deck sizes naturally on mobile,
+   unconstrained by this desktop-only drag state. */
+@media (min-width: 1025px) {
+  .deck-wrapper {
+    height: var(--deck-height);
+    overflow-y: auto;
+  }
+}
+
 /* The panel's own box is a sibling of .stage-video-area with a higher
    z-index, so its full rectangle -- including empty space below a short
    comment list -- would otherwise intercept clicks meant for controls
@@ -592,12 +633,10 @@ button {
   pointer-events: auto;
 }
 
-/* .stage-side-panel stays position:absolute against .stage-root, so it
-   doesn't automatically know how tall the mic-cam row + PerformerDeck
-   below it are -- this bottom offset is a measured estimate, not a
-   computed value. Re-check it visually if either of those change size. */
+/* bottom is set inline in BroadcastStage.jsx, computed from the same
+   deckHeight state driving the drag divider -- a hardcoded value can't
+   work once the deck's height is user-adjustable. */
 .stage-side-panel--broadcast {
-  bottom: 340px;
   width: 320px;
 }
 
@@ -635,6 +674,29 @@ button {
   border: none;
   border-bottom: 1px solid rgba(253, 255, 252, 0.4);
   border-radius: 0;
+}
+
+/* Artist-only glow, layered on top of the shared rules above via source
+   order (equal specificity: one modifier class + one descendant class in
+   both cases) -- scoped to --broadcast specifically so the fan's desktop
+   comments (still plain dark text-shadow) are untouched. */
+.stage-side-panel--broadcast .comment-row {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.5);
+}
+
+.stage-side-panel--broadcast .quote-block {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.6);
+}
+
+.stage-side-panel--broadcast .comment-input-row textarea {
+  border-bottom: 1px solid rgba(46, 196, 182, 0.4);
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.25);
+}
+
+.stage-side-panel--broadcast .comment-input-row textarea:focus {
+  outline: none;
+  border-bottom-color: #2ec4b6;
+  box-shadow: 0 0 10px rgba(46, 196, 182, 0.6);
 }
 
 /* ===== Mobile adaptation (below this breakpoint only) =====
@@ -679,6 +741,13 @@ button {
 
   .stage-mic-cam {
     gap: 14px;
+  }
+
+  /* Drag-to-resize is a desktop-only interaction for now -- dragging a
+     handle conflicts with a normal scrolling touch page, which is what
+     the artist's mobile view still is. Deck sizes naturally in flow. */
+  .deck-divider {
+    display: none;
   }
 
   .stage-topbar {
