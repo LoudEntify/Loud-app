@@ -927,3 +927,130 @@ button {
     z-index: 20;
   }
 }
+
+/* Director shot panel (SHOT_INTEGRATION_LIVEDEMO.md Edit 5) -- a
+   collapsible bottom drawer. Fixed position so it never disturbs
+   .stage-root's fullscreen layout math; collapsed by default so it never
+   covers the video on mobile. Same on every breakpoint for now --
+   function over polish, restyle once the manual test plan passes. */
+.director-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 70vh;
+}
+
+.director-panel-toggle {
+  flex-shrink: 0;
+  padding: 10px 18px;
+  background: #011627;
+  color: #fdfffc;
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  box-shadow: 0 0 10px rgba(46, 196, 182, 0.3);
+}
+
+.director-panel-body {
+  width: 100%;
+  max-width: 480px;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  box-sizing: border-box;
+}
+
+/* Soundcheck/live banner (SHOW_LIFECYCLE_SPEC.md L2) -- artist-side only,
+   persistent (unlike .stage-notice, which is a one-off ephemeral
+   message). Sits below .director-panel's z-index since they're at
+   opposite ends of the screen and shouldn't compete for taps if a
+   narrow viewport ever brings them close. */
+.lifecycle-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  max-width: 90vw;
+  background: rgba(1, 22, 39, 0.85);
+}
+
+.soundcheck-reminder {
+  opacity: 0.6;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.lifecycle-banner.soundcheck {
+  color: #2ec4b6;
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  box-shadow: 0 0 10px rgba(46, 196, 182, 0.3);
+}
+
+.lifecycle-banner.live {
+  color: #e71d36;
+  border: 1px solid rgba(231, 29, 54, 0.5);
+  box-shadow: 0 0 10px rgba(231, 29, 54, 0.4);
+  text-shadow: 0 0 8px rgba(231, 29, 54, 0.6);
+}
+
+.lifecycle-banner.ended {
+  color: #fdfffc;
+  border: 1px solid rgba(253, 255, 252, 0.3);
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.end-show-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  background: rgba(231, 29, 54, 0.15);
+  color: #fdfffc;
+  border: 1px solid rgba(231, 29, 54, 0.5);
+  text-shadow: none;
+}
+
+/* Persistent write-failure warning, appended to the soundcheck/ended
+   banner (SHOW_LIFECYCLE_SPEC.md L2 fix) -- the retry already happened
+   silently once; this only ever shows after both attempts failed. */
+.lifecycle-warning {
+  color: #ff9f1c;
+  font-weight: 700;
+  text-shadow: none;
+}
+
+/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- same
+   collapsible-drawer pattern as .director-panel, top-right instead of
+   bottom-center so the two never compete for space. */
+.camera-qr-panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(90vw, 480px);
+}
+
+.camera-qr-panel-body {
+  background: #011627;
+  border: 1px solid rgba(46, 196, 182, 0.3);
+  border-radius: 8px;
+  padding: 14px;
+  box-sizing: border-box;
+}
