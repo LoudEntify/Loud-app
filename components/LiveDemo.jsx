@@ -1122,8 +1122,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // the slot's currently-shown targetIdentity mutes or drops mid-live,
   // fire an immediate auto cut to the best available shot (wide first)
   // instead of leaving a dead frame up until whatever the next
-  // scheduled auto cut (up to ~20s away, per autoDirector's
-  // MIN/MAX_HOLD_MS) or the next human tap happens to be. Gated on
+  // scheduled auto cut (up to ~18s away, per autoDirector's
+  // HOLD_RANGE_MS) or the next human tap happens to be. Gated on
   // autoStartedRef.current (not just displayShowState === 'live') so
   // this can never fire before L4's start trigger has actually run --
   // same "started" boundary the L4 bugfix made autoDirector itself
