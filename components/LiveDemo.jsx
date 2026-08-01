@@ -995,9 +995,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // activeShotRef (not tracks/activeShot directly), same reasoning as
   // everywhere else in this file: stays a stable reference across
   // unrelated re-renders.
-  const fireAutoShot = useCallback((shotKey, decisionSource = 'auto') => {
+  const fireAutoShot = useCallback((shotKey, decisionSource = 'auto', meta = {}) => {
     const roles = availableRoles(role, tracksRef.current);
-    const sourceRole = resolveSourceRole(shotKey, roles);
+    // meta.framingHint is the cycle's intended framing (e.g. 'wide') even
+    // when shotKey is a technique (zoomIn/zoomOut/pan) standing in for
+    // it -- resolving against the hint, not the technique's own ambiguous
+    // 'currentOrSelected' source, is what makes a themed zoom/pan land on
+    // the SAME feed the cycle actually chose instead of an arbitrary
+    // first-available role.
+    const sourceRole = resolveSourceRole(meta.framingHint || shotKey, roles);
     const targetIdentity = resolveTargetIdentity(tracksRef.current, role, sourceRole);
     const command = buildShotCommand({
       showId: ROOM_NAME,
@@ -1023,13 +1029,35 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     });
   }, [role]);
 
+  // The concrete feed (participant identity) a shot key would resolve to
+  // right now -- lets autoDirector's cycle compare "would this step land
+  // on a different camera than what's showing" without knowing about
+  // roles/tracks itself, and without a second resolver: same
+  // resolveSourceRole + resolveTargetIdentity Item 1 already fixed.
+  const resolveAutoFeed = useCallback((shotKey) => {
+    const roles = availableRoles(role, tracksRef.current);
+    const sourceRole = resolveSourceRole(shotKey, roles);
+    return resolveTargetIdentity(tracksRef.current, role, sourceRole);
+  }, [role]);
+
+  // What's ACTUALLY showing for this slot right now -- reflects the last
+  // command from ANY source (auto or human), not just auto's own last
+  // pick, so the cycle's same-feed check stays correct across human
+  // interruptions and resumes.
+  const getCurrentFeed = useCallback(
+    () => activeShotRef.current[role]?.targetIdentity ?? null,
+    [role]
+  );
+
   const auto = useMemo(() => {
     if (!isMainPerformer || !room) return null;
     return createAutoDirector({
       fireShot: fireAutoShot,
       getAvailableShots: getAutoAvailableShots,
+      resolveFeed: resolveAutoFeed,
+      getCurrentFeed,
     });
-  }, [isMainPerformer, room, fireAutoShot, getAutoAvailableShots]);
+  }, [isMainPerformer, room, fireAutoShot, getAutoAvailableShots, resolveAutoFeed, getCurrentFeed]);
 
   // Safety: stop whatever timer the previous instance had pending on
   // real unmount (or the rare case room/role itself changes) -- a stale
