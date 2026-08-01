@@ -64,6 +64,37 @@ async function updateShowStateWithRetry(nextState) {
   }
 }
 
+// Fire-and-forget egress start/stop -- recording is a nice-to-have layered
+// on top of a live show, never a dependency of it. Callers don't await
+// this; a failed request is logged and swallowed, same principle as
+// flywheel logging in lib/shotCommands.js (a broken recorder must never
+// take the show down).
+function triggerEgress(action, room) {
+  fetch(`/api/egress/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room }),
+  })
+    .then((res) => res.json())
+    .then((data) => {
+      if (data?.error) {
+        console.warn(`[egress] ${action} failed:`, data.error, data.detail);
+        return;
+      }
+      // status/error here is per-egress EgressInfo (see the route) --
+      // logged even on an HTTP-200 response so an upload-side failure
+      // (bad bucket/credential) isn't invisible just because the request
+      // itself succeeded.
+      const egresses = data?.egresses || (data?.egressId ? [data] : []);
+      egresses.forEach((e) => {
+        if (e.status === 'EGRESS_FAILED' || e.status === 'EGRESS_ABORTED' || e.error) {
+          console.warn(`[egress] ${action} reported failure:`, e.status, e.error);
+        }
+      });
+    })
+    .catch((e) => console.warn(`[egress] ${action} request failed:`, e));
+}
+
 // Pan direction -> start/end translate offsets (percent of overscan
 // slack). Ported from ShotRenderer.jsx.
 const PAN_VECTORS = {
@@ -792,6 +823,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       onShowWriteErrorChange?.(ok ? null : 'ended');
     });
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
+    triggerEgress('stop', ROOM_NAME); // Stage 3: stop the recording started at the live transition
   }, [onShowUpdate, onShowWriteErrorChange, send]);
 
   const sendComment = useCallback((text, replyTarget) => {
@@ -1115,6 +1147,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     if (showState === 'live' && !showLiveBroadcastSentRef.current) {
       showLiveBroadcastSentRef.current = true;
       send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_LIVE' })), {});
+      triggerEgress('start', ROOM_NAME); // Stage 3: server-side recording, same once-only guard as the broadcast above
     }
   }, [isMainPerformer, showState, send]);
 
