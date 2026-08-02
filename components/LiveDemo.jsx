@@ -1263,6 +1263,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           setActiveForSlot={setActiveForSlot}
           audioNodes={audioNodes}
           audioContext={audioContext}
+          showEnded={displayShowState === 'ended'}
         />
       ) : displayShowState === 'ended' ? (
         <EndedCard />

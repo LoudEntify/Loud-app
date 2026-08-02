@@ -57,7 +57,7 @@ function Waveform({ peaks, color }) {
 // (nothing uploaded, nothing stored), decodes it, and mixes it into the
 // same output bus the vocal chain feeds. Requires headphones -- see the
 // note in lib/audioProcessing.js for why.
-export default function BackingTrackPanel({ audioContext, outputBus }) {
+export default function BackingTrackPanel({ audioContext, outputBus, showEnded }) {
   const [fileName, setFileName] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -82,6 +82,21 @@ export default function BackingTrackPanel({ audioContext, outputBus }) {
     tick();
     return () => cancelAnimationFrame(rafRef.current);
   }, [duration]);
+
+  // End Show must stop the beat, not just the vocal graph -- otherwise it
+  // plays on indefinitely since AudioContext/outputBus stay alive for the
+  // rest of this device's session (see lib/audioProcessing.js's own note:
+  // there's no cleanup tied to the show's own lifecycle, only to the
+  // component unmounting entirely). player.stop() resets pausedAt to 0
+  // (not "paused at the end"), so this leaves the track ready to play
+  // again from the start for a new show without a page reload -- no need
+  // to re-decode or re-choose the file unless it's actually different.
+  useEffect(() => {
+    if (showEnded && playerRef.current) {
+      playerRef.current.stop();
+      setPlaying(false);
+    }
+  }, [showEnded]);
 
   async function handleFile(e) {
     const file = e.target.files?.[0];

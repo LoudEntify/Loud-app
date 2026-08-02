@@ -23,7 +23,7 @@ const PRESET = {
   outputDb: 0,
 };
 
-export default function AudioDeckPanel({ nodes, audioContext }) {
+export default function AudioDeckPanel({ nodes, audioContext, showEnded }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
 
@@ -142,7 +142,7 @@ export default function AudioDeckPanel({ nodes, audioContext }) {
       </p>
 
       <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
-        <BackingTrackPanel audioContext={audioContext} outputBus={nodes.outputBus} />
+        <BackingTrackPanel audioContext={audioContext} outputBus={nodes.outputBus} showEnded={showEnded} />
       </div>
     </div>
   );
