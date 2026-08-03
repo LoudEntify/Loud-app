@@ -10,9 +10,24 @@ const MAX_DB = 0;   // 0dB = digital ceiling, meter reads full at this point
 // paired with a vertical gain slider. Used for both the input meter
 // (mic level going into processing) and the output meter (final level
 // being published) -- same component, different analyser/gain node.
+// Named zone thresholds (dB) -- shared by the bar color and the word label
+// below it, so "what the color means" is never left for the artist to
+// infer from a bare traffic-light convention alone.
+const TOO_QUIET_MAX_DB = -36;
+const HEALTHY_MAX_DB = -12;
+const HOT_MAX_DB = -3;
+
+function zoneFor(db) {
+  if (db > HOT_MAX_DB) return { label: 'Clipping', color: '#e71d36' };
+  if (db > HEALTHY_MAX_DB) return { label: 'Hot -- pull back', color: '#ff9f1c' };
+  if (db > TOO_QUIET_MAX_DB) return { label: 'Healthy', color: '#2ec4b6' };
+  return { label: 'Too quiet', color: '#55544f' };
+}
+
 export default function LevelMeterFader({ label, analyser, gainDb, onChangeGainDb, minDb = -24, maxDb = 12 }) {
   const barRef = useRef(null);
   const rafRef = useRef(null);
+  const zoneLabelRef = useRef(null);
 
   useEffect(() => {
     if (!analyser) return;
@@ -26,12 +41,15 @@ export default function LevelMeterFader({ label, analyser, gainDb, onChangeGainD
       const db = rms > 0 ? 20 * Math.log10(rms) : MIN_DB;
       const clamped = Math.max(MIN_DB, Math.min(MAX_DB, db));
       const pct = ((clamped - MIN_DB) / (MAX_DB - MIN_DB)) * 100;
+      const zone = zoneFor(clamped);
 
       if (barRef.current) {
         barRef.current.style.height = `${pct}%`;
-        // Green under -6dB, amber approaching 0, red right at the ceiling --
-        // standard traffic-light convention so clipping is obvious at a glance.
-        barRef.current.style.background = clamped > -3 ? '#e71d36' : clamped > -12 ? '#ff9f1c' : '#2ec4b6';
+        barRef.current.style.background = zone.color;
+      }
+      if (zoneLabelRef.current) {
+        zoneLabelRef.current.textContent = zone.label;
+        zoneLabelRef.current.style.color = zone.color;
       }
       rafRef.current = requestAnimationFrame(tick);
     }
@@ -63,6 +81,7 @@ export default function LevelMeterFader({ label, analyser, gainDb, onChangeGainD
         </div>
       </div>
       <span style={{ fontSize: 11, fontWeight: 700, color: '#fdfffc' }}>{gainDb > 0 ? '+' : ''}{gainDb}dB</span>
+      <span ref={zoneLabelRef} style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }} />
     </div>
   );
 }

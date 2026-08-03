@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Knob from './Knob';
 import LevelMeterFader from './LevelMeterFader';
 import BackingTrackPanel from './BackingTrackPanel';
 import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
-  tuneInputGainDb, tuneOutputGainDb,
+  tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled,
 } from '../lib/audioProcessing';
+
+const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
 // The tested-good starting point every performer goes live with. Manual
 // mix is off by default -- these values are already applied by
@@ -23,12 +25,40 @@ const PRESET = {
   outputDb: 0,
 };
 
-export default function AudioDeckPanel({ nodes, audioContext, showEnded }) {
+export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPhase }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
+  const [monitorOn, setMonitorOn] = useState(false);
+  const [autoDisabledNotice, setAutoDisabledNotice] = useState(false);
+  const noticeTimerRef = useRef(null);
+
+  // Soundcheck-only feature -- the instant the show leaves soundcheck
+  // (goes live), force monitoring off regardless of what the artist left
+  // it at. This is the latency-during-performance guard, not just a UI
+  // default: monitoring delay that's fine while judging your own sound is
+  // NOT fine once you're actually performing. Only surfaces the "you're
+  // live" notice if monitoring was actually on -- no need to explain a
+  // no-op.
+  useEffect(() => {
+    if (showPhase !== 'soundcheck' && nodes && monitorOn) {
+      tuneMonitorEnabled(nodes, false);
+      setMonitorOn(false);
+      setAutoDisabledNotice(true);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => setAutoDisabledNotice(false), AUTO_DISABLED_NOTICE_MS);
+    }
+  }, [showPhase, monitorOn, nodes]);
+
+  useEffect(() => () => { if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current); }, []);
 
   if (!nodes) {
     return <p style={{ fontSize: 12, color: '#888780' }}>Connecting audio...</p>;
+  }
+
+  function toggleMonitor() {
+    const next = !monitorOn;
+    setMonitorOn(next);
+    tuneMonitorEnabled(nodes, next);
   }
 
   function applyPreset() {
@@ -140,6 +170,49 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded }) {
           ? 'Have someone play/sing at real volume and listen from a separate device while tuning. Input meter shows raw mic level; output meter shows what viewers actually hear.'
           : 'Going live uses this tested preset. Switch on Manual mix during soundcheck to adjust.'}
       </p>
+
+      {showPhase === 'soundcheck' && (
+        <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, letterSpacing: '0.1em', color: '#888780', textTransform: 'uppercase' }}>
+              Monitor my voice
+            </span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#fdfffc', cursor: 'pointer' }}>
+              {monitorOn ? 'On' : 'Off'}
+              <span
+                onClick={toggleMonitor}
+                style={{
+                  width: 36, height: 20, borderRadius: 10,
+                  background: monitorOn ? '#2ec4b6' : '#3a3a37',
+                  position: 'relative', transition: 'background 0.15s ease', display: 'inline-block',
+                }}
+              >
+                <span style={{
+                  position: 'absolute', top: 2, left: monitorOn ? 18 : 2,
+                  width: 16, height: 16, borderRadius: '50%', background: '#fdfffc',
+                  transition: 'left 0.15s ease',
+                }} />
+              </span>
+            </label>
+          </div>
+
+          <div style={{ border: '1px solid #ff9f1c', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#ff9f1c', lineHeight: 1.4 }}>
+            ⚠ Use earphones only. Monitoring through speakers feeds your own processed voice back into the mic and causes feedback.
+          </div>
+
+          <p style={{ fontSize: 11, color: '#888780', margin: 0 }}>
+            Hear your processed vocal (high-pass, compressor, reverb) live so you can judge it before going live. Off by
+            default every soundcheck -- turns off automatically the moment you go live, since monitoring delay that's fine
+            for judging your sound is not fine while actually performing.
+          </p>
+        </div>
+      )}
+
+      {autoDisabledNotice && (
+        <div style={{ border: '1px solid #2ec4b6', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#2ec4b6', lineHeight: 1.4 }}>
+          Monitoring off -- you're live
+        </div>
+      )}
 
       <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
         <BackingTrackPanel audioContext={audioContext} outputBus={nodes.outputBus} showEnded={showEnded} />
