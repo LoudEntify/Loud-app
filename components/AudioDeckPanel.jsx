@@ -6,7 +6,7 @@ import LevelMeterFader from './LevelMeterFader';
 import BackingTrackPanel from './BackingTrackPanel';
 import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
-  tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled,
+  tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
 } from '../lib/audioProcessing';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
@@ -28,6 +28,11 @@ const PRESET = {
 export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPhase }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
+  // Matches createPilotAudioTrack's own default (bypassGain 1 / processedGain
+  // 0) -- a pilot-only safety valve since the preset can't be tuned before
+  // pilot, not a verdict that processing is wrong in concept. Available in
+  // both soundcheck and live -- see toggleEffects.
+  const [effectsOn, setEffectsOn] = useState(false);
   const [monitorOn, setMonitorOn] = useState(false);
   const [autoDisabledNotice, setAutoDisabledNotice] = useState(false);
   const noticeTimerRef = useRef(null);
@@ -59,6 +64,16 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
     const next = !monitorOn;
     setMonitorOn(next);
     tuneMonitorEnabled(nodes, next);
+  }
+
+  // Live AND soundcheck -- this changes the actually-published signal, not
+  // just local monitoring, so unlike toggleMonitor there's no showPhase
+  // gate: an artist mid-show hearing the processing go wrong needs to be
+  // able to kill it immediately.
+  function toggleEffects() {
+    const next = !effectsOn;
+    setEffectsOn(next);
+    tuneEffectsBypass(nodes, next);
   }
 
   function applyPreset() {
@@ -109,6 +124,29 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
         </label>
       </div>
 
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 11, letterSpacing: '0.1em', color: '#888780', textTransform: 'uppercase' }}>
+          {effectsOn ? 'Effects on -- processed vocal' : 'Effects off -- raw vocal published'}
+        </span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#fdfffc', cursor: 'pointer' }}>
+          Effects
+          <span
+            onClick={toggleEffects}
+            style={{
+              width: 36, height: 20, borderRadius: 10,
+              background: effectsOn ? '#2ec4b6' : '#3a3a37',
+              position: 'relative', transition: 'background 0.15s ease', display: 'inline-block',
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 2, left: effectsOn ? 18 : 2,
+              width: 16, height: 16, borderRadius: '50%', background: '#fdfffc',
+              transition: 'left 0.15s ease',
+            }} />
+          </span>
+        </label>
+      </div>
+
       <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap', justifyContent: 'space-around', padding: '4px 0' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>INPUT</span>
@@ -125,16 +163,16 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>FILTER</span>
           <Knob label="Rumble cut" value={values.highpass} min={40} max={160} step={5} unit="Hz"
-            disabled={!manualMix} onChange={update('highpass', (v) => tuneHighpass(nodes, v))} />
+            disabled={!manualMix || !effectsOn} onChange={update('highpass', (v) => tuneHighpass(nodes, v))} />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>COMPRESSOR</span>
           <div style={{ display: 'flex', gap: 16 }}>
             <Knob label="Threshold" value={values.threshold} min={-40} max={-10} step={1} unit="dB"
-              disabled={!manualMix} onChange={update('threshold', (v) => tuneCompressor(nodes, { threshold: v }))} />
+              disabled={!manualMix || !effectsOn} onChange={update('threshold', (v) => tuneCompressor(nodes, { threshold: v }))} />
             <Knob label="Ratio" value={values.ratio} min={1} max={8} step={0.5} unit=":1"
-              disabled={!manualMix} onChange={update('ratio', (v) => tuneCompressor(nodes, { ratio: v }))} />
+              disabled={!manualMix || !effectsOn} onChange={update('ratio', (v) => tuneCompressor(nodes, { ratio: v }))} />
           </div>
         </div>
 
@@ -146,9 +184,9 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
           <span style={{ fontSize: 10, color: '#55544f', letterSpacing: '0.1em' }}>SEND</span>
           <div style={{ display: 'flex', gap: 16 }}>
             <Knob label="Makeup gain" value={values.gainDb} min={0} max={12} step={0.5} unit="dB"
-              disabled={!manualMix} onChange={update('gainDb', (v) => tuneMakeupGainDb(nodes, v))} />
+              disabled={!manualMix || !effectsOn} onChange={update('gainDb', (v) => tuneMakeupGainDb(nodes, v))} />
             <Knob label="Reverb" value={values.reverbMix} min={0} max={0.4} step={0.01} unit=""
-              disabled={!manualMix} onChange={update('reverbMix', (v) => tuneReverbMix(nodes, v))} />
+              disabled={!manualMix || !effectsOn} onChange={update('reverbMix', (v) => tuneReverbMix(nodes, v))} />
           </div>
         </div>
 
