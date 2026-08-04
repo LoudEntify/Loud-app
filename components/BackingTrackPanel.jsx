@@ -98,6 +98,19 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded }
     }
   }, [showEnded]);
 
+  // Catch-all for every OTHER way the performer session tears down --
+  // leaving via BroadcastStage's floating leave button, a room disconnect,
+  // or anything else that unmounts this panel -- none of which set
+  // showEnded, so the effect above never fires for them. Unmounting this
+  // component doesn't stop the Web Audio source node on its own (it keeps
+  // playing through the still-alive AudioContext), so this has to call
+  // stop() explicitly.
+  useEffect(() => {
+    return () => {
+      playerRef.current?.stop();
+    };
+  }, []);
+
   async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file || !audioContext || !outputBus) return;
