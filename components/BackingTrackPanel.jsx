@@ -57,7 +57,7 @@ function Waveform({ peaks, color }) {
 // (nothing uploaded, nothing stored), decodes it, and mixes it into the
 // same output bus the vocal chain feeds. Requires headphones -- see the
 // note in lib/audioProcessing.js for why.
-export default function BackingTrackPanel({ audioContext, outputBus, showEnded }) {
+export default function BackingTrackPanel({ audioContext, outputBus, showEnded, onPlayerChange }) {
   const [fileName, setFileName] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -124,6 +124,9 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded }
     setFileName(file.name);
     setPlaying(false);
     setLoading(false);
+    // trackGain/delayNode are created fresh per load -- the parent
+    // re-applies whatever sync compensation is currently calibrated.
+    onPlayerChange?.(player);
   }
 
   function togglePlay() {

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Knob from './Knob';
 import LevelMeterFader from './LevelMeterFader';
 import BackingTrackPanel from './BackingTrackPanel';
+import CalibrateSyncPanel from './CalibrateSyncPanel';
 import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
   tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
@@ -36,6 +37,12 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
   const [monitorOn, setMonitorOn] = useState(false);
   const [autoDisabledNotice, setAutoDisabledNotice] = useState(false);
   const noticeTimerRef = useRef(null);
+  // Session-scoped only -- resets on remount, never persisted, never
+  // inherited across artists/devices/shows. trackGain/delayNode are
+  // recreated per backing-track load, so backingPlayerRef lets a fresh
+  // load re-apply whatever's currently calibrated.
+  const [syncDelayMs, setSyncDelayMs] = useState(0);
+  const backingPlayerRef = useRef(null);
 
   // Soundcheck-only feature -- the instant the show leaves soundcheck
   // (goes live), force monitoring off regardless of what the artist left
@@ -97,6 +104,16 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
       setValues((prev) => ({ ...prev, [key]: v }));
       tuneFn(v);
     };
+  }
+
+  function handleBackingPlayerChange(player) {
+    backingPlayerRef.current = player;
+    player?.setSyncDelayMs(syncDelayMs);
+  }
+
+  function applySyncDelay(ms) {
+    setSyncDelayMs(ms);
+    backingPlayerRef.current?.setSyncDelayMs(ms);
   }
 
   return (
@@ -252,8 +269,20 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
         </div>
       )}
 
+      <CalibrateSyncPanel
+        audioContext={audioContext}
+        inputGain={nodes.inputGain}
+        syncDelayMs={syncDelayMs}
+        onApply={applySyncDelay}
+      />
+
       <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
-        <BackingTrackPanel audioContext={audioContext} outputBus={nodes.outputBus} showEnded={showEnded} />
+        <BackingTrackPanel
+          audioContext={audioContext}
+          outputBus={nodes.outputBus}
+          showEnded={showEnded}
+          onPlayerChange={handleBackingPlayerChange}
+        />
       </div>
     </div>
   );
