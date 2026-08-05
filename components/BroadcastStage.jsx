@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
@@ -42,6 +42,8 @@ export default function BroadcastStage({
   camOn,
   toggleMic,
   toggleCam,
+  facingMode,
+  toggleFacingMode,
   tracksForSlot,
   activeCamera,
   setActiveForSlot,
@@ -118,6 +120,10 @@ export default function BroadcastStage({
         <button type="button" className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
           {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
           {camOn ? 'CAM ON' : 'CAM OFF'}
+        </button>
+        <button type="button" className="control-btn" onClick={toggleFacingMode}>
+          <CameraRotate size={16} weight="bold" />
+          {facingMode === 'user' ? 'FRONT' : 'REAR'}
         </button>
       </div>
 

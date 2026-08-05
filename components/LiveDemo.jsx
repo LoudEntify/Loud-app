@@ -10,7 +10,7 @@ import {
   useRoomContext,
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { VideoCamera, VideoCameraSlash, PhoneDisconnect } from '@phosphor-icons/react';
+import { VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
 import PageShell from './PageShell';
@@ -26,6 +26,11 @@ import { effectiveState, canGoLive } from '../lib/showState';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
+
+// Ideal (not exact) so a device that can't hit 1080p/30fps or lacks the
+// requested facing camera still gets a working track -- getUserMedia only
+// hard-fails on {exact: ...}/min/max constraints, never on bare values.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1920, height: 1080 }, frameRate: { ideal: 30 } };
 
 const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
 
@@ -536,6 +541,9 @@ export default function LiveDemo() {
 
   const isCamFeedRole = conn.assignedRole?.startsWith('camfeed-');
   const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
+  // Camfeed phones are propped to film the artist -- rear by default.
+  // The artist's own device defaults to front so they can see themselves.
+  const defaultFacingMode = isCamFeedRole ? 'environment' : 'user';
   // Only a plain fan viewer gets the auto-hiding mobile sidebar -- main
   // performers and camera-feed devices keep the sidebar's normal behavior.
   const isViewerRole = conn.assignedRole === 'viewer';
@@ -548,7 +556,7 @@ export default function LiveDemo() {
           serverUrl={conn.url}
           connect
           audio={false}
-          video={publishesVideo}
+          video={publishesVideo ? { facingMode: defaultFacingMode, ...HIGH_RES_VIDEO_CAPTURE } : false}
           data-lk-theme="default"
           style={{ height: '100%', width: '100%' }}
         >
@@ -665,6 +673,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const tracks = useTracks([Track.Source.Camera]);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
+  const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
+  const [facingMode, setFacingMode] = useState(isCamFeed ? 'environment' : 'user');
   const [left, setLeft] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
@@ -685,7 +695,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [qrPanelOpen, setQrPanelOpen] = useState(false);
 
   const isMainPerformer = role === 'a' || role === 'b';
-  const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
   // Only the main performer publishes the Case 2 processed audio track.
@@ -725,6 +734,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     await room.localParticipant.setCameraEnabled(!camOn);
     setCamOn((v) => !v);
   }, [camOn, room]);
+
+  // Clean live swap: replaceTrack under the hood via LocalVideoTrack.restartTrack,
+  // no unpublish/republish and no renegotiation, so viewers see a straight cut
+  // rather than a freeze or a drop.
+  const toggleFacingMode = useCallback(async () => {
+    const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+    if (!videoTrack) return;
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
+    setFacingMode(next);
+  }, [facingMode, room]);
 
   const leaveCall = useCallback(() => {
     room.disconnect();
@@ -974,6 +994,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
             {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
             {camOn ? 'Camera off' : 'Camera on'}
+          </button>
+          <button className="control-btn" onClick={toggleFacingMode}>
+            <CameraRotate size={16} weight="bold" />
+            {facingMode === 'user' ? 'Front' : 'Rear'}
           </button>
           <button className="control-btn" onClick={leaveCall}>
             <PhoneDisconnect size={16} weight="bold" /> Leave
@@ -1256,6 +1280,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           leaveCall={leaveCall}
           micOn={micOn}
           camOn={camOn}
+          facingMode={facingMode}
+          toggleFacingMode={toggleFacingMode}
           toggleMic={toggleMic}
           toggleCam={toggleCam}
           tracksForSlot={tracksForSlot}

@@ -21,7 +21,7 @@
 // already used for camfeed devices in LiveDemo.jsx.
 // ─────────────────────────────────────────────────────────────
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   LiveKitRoom,
@@ -35,6 +35,11 @@ import '@livekit/components-styles';
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
+
+// Ideal (not exact) so a device that can't hit 1080p/30fps or lacks the
+// requested facing camera still gets a working track -- getUserMedia only
+// hard-fails on {exact: ...}/min/max constraints, never on bare values.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1920, height: 1080 }, frameRate: { ideal: 30 } };
 
 const ROLE_OPTIONS = [
   { value: 'wide', label: 'Wide' },
@@ -50,6 +55,10 @@ export default function CamPage() {
   const [role, setRole] = useState(searchParams.get('role'));
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
+  // Only true once the operator has actually touched the dropdown --
+  // otherwise deviceId just holds enumerateDevices()'s arbitrary first
+  // entry, and rear-by-default (via facingMode) should win instead.
+  const [deviceChosen, setDeviceChosen] = useState(false);
   const [deviceError, setDeviceError] = useState('');
   const [conn, setConn] = useState(null);
   const [connectError, setConnectError] = useState('');
@@ -161,7 +170,10 @@ export default function CamPage() {
         ) : devices.length > 1 ? (
           <select
             value={deviceId || ''}
-            onChange={(e) => setDeviceId(e.target.value)}
+            onChange={(e) => {
+              setDeviceId(e.target.value);
+              setDeviceChosen(true);
+            }}
             style={{ width: '100%', maxWidth: 320, padding: 10, borderRadius: 8, background: 'rgba(253, 255, 252, 0.06)', color: PORCELAIN, border: '1px solid rgba(253, 255, 252, 0.2)' }}
           >
             {devices.map((d, i) => (
@@ -194,7 +206,7 @@ export default function CamPage() {
       data-lk-theme="default"
       style={{ height: '100vh', width: '100%' }}
     >
-      <CamPublisher deviceId={deviceId} role={role} />
+      <CamPublisher deviceId={deviceId} deviceChosen={deviceChosen} onDeviceIdChange={setDeviceId} role={role} />
     </LiveKitRoom>
   );
 }
@@ -203,30 +215,50 @@ export default function CamPage() {
 // amendment -- neither is possible via <LiveKitRoom>'s blunt `video`
 // prop, which is why this connects with video={false} above and
 // publishes manually here instead.
-function CamPublisher({ deviceId, role }) {
+function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
+  const [facingMode, setFacingMode] = useState('environment');
 
   useEffect(() => {
-    room.localParticipant.setCameraEnabled(true, {
-      deviceId,
-      // Verified against the installed livekit-client source
-      // (constraintsForOptions in dist/livekit-client.esm.mjs): plain
-      // numbers in `resolution` are flattened unwrapped into the
-      // getUserMedia constraint set, and a bare number there is already
-      // "ideal" per the Web platform's constraint algorithm -- only
-      // {exact: ...} hard-fails. frameRate isn't part of VideoResolution
-      // though, so it needs its own explicit {ideal: 30} here, on the
-      // separate top-level frameRate field VideoCaptureOptions exposes
-      // for exactly this (typed as a full ConstrainDouble, not a plain
-      // number like width/height) -- explicit rather than relying on
-      // implicit bare-number semantics, so the "never hard-fail" intent
-      // is visible in the code itself.
-      resolution: { width: 1920, height: 1080 },
-      frameRate: { ideal: 30 },
-    });
-  }, [room, deviceId]);
+    // Verified against the installed livekit-client source
+    // (constraintsForOptions in dist/livekit-client.esm.mjs): plain
+    // numbers in `resolution` are flattened unwrapped into the
+    // getUserMedia constraint set, and a bare number there is already
+    // "ideal" per the Web platform's constraint algorithm -- only
+    // {exact: ...} hard-fails. frameRate isn't part of VideoResolution
+    // though, so it needs its own explicit {ideal: 30} here, on the
+    // separate top-level frameRate field VideoCaptureOptions exposes
+    // for exactly this (typed as a full ConstrainDouble, not a plain
+    // number like width/height) -- explicit rather than relying on
+    // implicit bare-number semantics, so the "never hard-fail" intent
+    // is visible in the code itself.
+    //
+    // If the operator explicitly picked a device from the L5 dropdown,
+    // honor that deviceId. Otherwise default to the rear camera via
+    // facingMode instead of enumerateDevices()'s arbitrary first entry.
+    room.localParticipant.setCameraEnabled(
+      true,
+      deviceChosen
+        ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
+        : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }
+    );
+  }, [room, deviceChosen, deviceId]);
+
+  // Clean live swap: LocalVideoTrack.restartTrack replaces the sender's
+  // MediaStreamTrack in place (RTCRtpSender.replaceTrack under the hood)
+  // -- no unpublish/republish, no renegotiation, no dropped frame for
+  // viewers. Resyncs deviceId afterwards so the (deviceId-based) L5
+  // dropdown never goes stale against a facingMode-driven swap.
+  const toggleFacingMode = useCallback(async () => {
+    const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+    if (!videoTrack) return;
+    const next = facingMode === 'environment' ? 'user' : 'environment';
+    await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
+    setFacingMode(next);
+    onDeviceIdChange(videoTrack.mediaStreamTrack.getSettings().deviceId ?? null);
+  }, [facingMode, room, onDeviceIdChange]);
 
   // Keeps a propped phone from sleeping mid-show. Not all browsers
   // support the Wake Lock API -- silently ignored where they don't,
@@ -271,6 +303,24 @@ function CamPublisher({ deviceId, role }) {
       >
         {role.toUpperCase()}
       </div>
+      <button
+        type="button"
+        onClick={toggleFacingMode}
+        style={{
+          position: 'absolute',
+          bottom: 24,
+          right: 24,
+          padding: '10px 16px',
+          borderRadius: 8,
+          background: 'rgba(1, 22, 39, 0.7)',
+          color: PORCELAIN,
+          border: '1px solid rgba(253, 255, 252, 0.3)',
+          fontWeight: 700,
+          fontSize: 13,
+        }}
+      >
+        Flip to {facingMode === 'environment' ? 'front' : 'rear'}
+      </button>
     </div>
   );
 }
