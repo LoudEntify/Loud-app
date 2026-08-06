@@ -31,15 +31,24 @@ import {
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
+import { useSourceDimensions } from '../lib/useSourceDimensions';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
 
-// Ideal (not exact) so a device that can't hit 1080p/30fps or lacks the
-// requested facing camera still gets a working track -- getUserMedia only
-// hard-fails on {exact: ...}/min/max constraints, never on bare values.
-const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1920, height: 1080 }, frameRate: { ideal: 30 } };
+// Portrait is the output target always (Stage 1 of the portrait capture
+// work) -- requested uniformly, for every source picked from the device
+// list below, not just phones. Ideal (not exact): a phone delivers
+// portrait already based on how it's held, regardless of this request;
+// a fixed landscape-only source (webcam, capture card, picked via the
+// deviceId list below) simply can't satisfy a portrait ideal and falls
+// back to its own best available landscape mode with no error --
+// getUserMedia only hard-fails on {exact: ...}/min/max constraints,
+// never on bare/ideal values. What actually gets delivered is read back
+// afterwards via useSourceDimensions (lib/useSourceDimensions.js),
+// never assumed from this request or from which device was picked.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1080, height: 1920 }, frameRate: { ideal: 30 } };
 
 const ROLE_OPTIONS = [
   { value: 'wide', label: 'Wide' },
@@ -220,6 +229,12 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   const tracks = useTracks([Track.Source.Camera]);
   const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
   const [facingMode, setFacingMode] = useState('environment');
+  // Stage 1 of the portrait capture work -- what's actually being
+  // delivered right now, read live off the real track. Debug-only;
+  // doesn't drive rendering here (object-fit: cover on the portrait-
+  // shaped preview below already does the right thing either way).
+  const myCameraPublication = room.localParticipant.getTrackPublication(Track.Source.Camera);
+  const sourceDims = useSourceDimensions(myCameraPublication);
 
   useEffect(() => {
     // Verified against the installed livekit-client source
@@ -305,6 +320,26 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
         }}
       >
         {role.toUpperCase()}
+      </div>
+      {/* DEBUG -- surfaces what useSourceDimensions actually detected,
+          for verifying Stage 1 of the portrait capture work on real
+          hardware. Safe to delete once capture is verified. */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          left: 8,
+          padding: '4px 8px',
+          borderRadius: 6,
+          background: 'rgba(1, 22, 39, 0.7)',
+          color: PORCELAIN,
+          fontFamily: 'monospace',
+          fontSize: 10,
+        }}
+      >
+        {sourceDims
+          ? `DEBUG ${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}`
+          : 'DEBUG detecting source...'}
       </div>
       <button
         type="button"

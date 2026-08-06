@@ -732,10 +732,28 @@ button {
     min-height: 100vh;
   }
 
+  /* Portrait is the output target always (Stage 1 of the portrait
+     capture work) -- the old fixed 45vh was landscape-shaped (near
+     square on a typical phone, ~390x380), which would crop off roughly
+     half of a portrait feed via object-fit: cover. aspect-ratio here
+     replaces that with a genuinely tall/narrow box; max-height keeps a
+     very tall phone from letting the video eat the entire viewport and
+     burying the mic/cam controls below it -- max-height wins over the
+     ratio-derived height there, and the box narrows (letterboxed) to
+     keep 9:16 intact rather than breaking the ratio. This rule is the
+     performer's own mobile screen only -- the viewer's mobile view has
+     its own separate, already-full-viewport override further down,
+     unaffected by this change. Desktop (.stage-root--performer
+     .stage-video-area under the 1025px+ query above) is unchanged here
+     -- portrait-vs-flex-fill layout on wide desktop viewports is an
+     open question, deliberately out of Stage 1's mobile-only scope. */
   .stage-video-area {
     position: relative;
     inset: auto;
-    height: 45vh;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    height: auto;
+    max-height: 70vh;
     flex-shrink: 0;
   }
 

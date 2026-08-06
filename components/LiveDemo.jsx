@@ -19,6 +19,7 @@ import ViewerStage from './ViewerStage';
 import DirectorShotPanel from './DirectorShotPanel';
 import CameraQRPanel from './CameraQRPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
+import { useSourceDimensions } from '../lib/useSourceDimensions';
 import { SHOT_TYPES, CAMERA_CHANGE_FADE_MS, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
@@ -27,10 +28,45 @@ import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
 
-// Ideal (not exact) so a device that can't hit 1080p/30fps or lacks the
-// requested facing camera still gets a working track -- getUserMedia only
-// hard-fails on {exact: ...}/min/max constraints, never on bare values.
-const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1920, height: 1080 }, frameRate: { ideal: 30 } };
+// Portrait is the output target always (Stage 1 of the portrait capture
+// work) -- requested uniformly, for every source, not just phones.
+// Ideal (not exact), so this is a hint, never a requirement: a phone
+// held upright genuinely delivers portrait already (device orientation,
+// not this request, is what actually determines that); a fixed
+// landscape-only source (webcam, capture card) simply can't satisfy a
+// portrait ideal and falls back to its own best available landscape
+// mode with no error -- getUserMedia only hard-fails on {exact: ...}/
+// min/max constraints, never on bare/ideal values. What actually gets
+// delivered is read back afterwards via useSourceDimensions
+// (lib/useSourceDimensions.js), never assumed from this request.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1080, height: 1920 }, frameRate: { ideal: 30 } };
+
+// DEBUG -- surfaces what useSourceDimensions actually detected, for
+// verifying Stage 1 of the portrait capture work on real hardware. Safe
+// to delete once capture is verified; not meant for artist-facing use.
+function SourceDimsDebugLabel({ dims, style }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 8,
+        left: 8,
+        padding: '4px 8px',
+        borderRadius: 6,
+        background: 'rgba(1, 22, 39, 0.7)',
+        color: '#fdfffc',
+        fontFamily: 'monospace',
+        fontSize: 10,
+        pointerEvents: 'none',
+        ...style,
+      }}
+    >
+      {dims
+        ? `DEBUG ${dims.width}x${dims.height} -- ${dims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}`
+        : 'DEBUG detecting source...'}
+    </div>
+  );
+}
 
 const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
 
@@ -796,6 +832,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const isMainPerformer = role === 'a' || role === 'b';
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
+  // Stage 1 of the portrait capture work -- what the local camera is
+  // ACTUALLY delivering right now, read live off the real track, never
+  // assumed from role/device. Debug-only surface for verifying capture
+  // on real hardware; doesn't drive any rendering decision yet (Stage
+  // 2/3 territory) -- .stage-video-area is unconditionally portrait-
+  // shaped now, so object-fit: cover already does the right thing for
+  // either a native-portrait or a landscape-delivered source with no
+  // branching needed here.
+  const myCameraPublication = room.localParticipant.getTrackPublication(Track.Source.Camera);
+  const sourceDims = useSourceDimensions(myCameraPublication);
+
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
   useEffect(() => {
@@ -1108,6 +1155,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           ) : (
             <span>starting camera...</span>
           )}
+          <SourceDimsDebugLabel dims={sourceDims} />
         </div>
         <div className="mic-cam-controls">
           <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
@@ -1389,6 +1437,12 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           {showWriteError === 'ended' && (
             <span className="lifecycle-warning">⚠ Show may not have ended for viewers — check connection</span>
           )}
+        </div>
+      )}
+
+      {isMainPerformer && (
+        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 50 }}>
+          <SourceDimsDebugLabel dims={sourceDims} style={{ position: 'static' }} />
         </div>
       )}
 
