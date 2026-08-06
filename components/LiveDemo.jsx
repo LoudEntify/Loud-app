@@ -105,6 +105,18 @@ function SourceDimsDebugLabel({ state, style }) {
 // threaded through them -- keeps shot-director internals untouched
 // beyond the log call itself. ?debug=1 gated, same convention as /cam's
 // panel; safe to delete once the real ordering is confirmed and fixed.
+//
+// Second round (reveal-gating fix shipped, flash reportedly persisted):
+// ShotFadeLayer now also logs every attemptReveal call, including BLOCKED
+// ones (proves the gate is genuinely being consulted, not bypassed), and
+// on the REVEALED line reads live DOM state -- the transform actually
+// sitting on the node and the <video> element's own decoded
+// videoWidth/videoHeight -- instead of only React's believed state. That
+// distinguishes a timing bug (gate opened before ShotTransformFrame's
+// correction committed -- domTransform lags what shot+isPortrait implies)
+// from a correctness bug (detected dimensions disagree with the video
+// element's actual ones -- useTrackAspect settled on the wrong answer,
+// not just a late one).
 const CUT_DEBUG_ENABLED = typeof window !== 'undefined' && window.location.search.includes('debug=1');
 let cutDebugLog = [];
 const cutDebugListeners = new Set();
@@ -314,7 +326,7 @@ function resolveTransform(transform, isPortrait) {
 // opacity-fade parts of that file don't apply here: VideoTrack handles
 // attach/detach itself, and fades are handled a layer up, by
 // ShotFadeLayer's opacity, not by this wrapper.
-function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect }) {
+function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect, transformElRef }) {
   const [style, setStyle] = useState({});
   const rafRef = useRef(null);
   // `aspect` is now a prop, owned by ShotFadeLayer (see its own comment)
@@ -404,7 +416,7 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect }
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: '#011627' }}>
-      <div style={{ width: '100%', height: '100%', willChange: 'transform', ...style }}>
+      <div ref={transformElRef} style={{ width: '100%', height: '100%', willChange: 'transform', ...style }}>
         {trackRef ? (
           <VideoTrack ref={videoRef} trackRef={trackRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : placeholder}
@@ -445,6 +457,7 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect }
 function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
   const [visible, setVisible] = useState(false);
   const videoRef = useRef(null);
+  const transformElRef = useRef(null);
   const readyFiredRef = useRef(false);
   const frameReadyRef = useRef(false);
   const aspect = useTrackAspect(trackRef);
@@ -480,9 +493,30 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
 
     function attemptReveal() {
       if (readyFiredRef.current) return;
-      if (!frameReadyRef.current || !aspectSettledRef.current) return;
+      if (!frameReadyRef.current || !aspectSettledRef.current) {
+        // DEBUG -- proves the gate is actually being consulted (not
+        // bypassed) on every call, and shows exactly which of the two
+        // conditions was still unmet. If REVEALED ever appears in the log
+        // without a preceding BLOCKED line showing both flip to true
+        // first, the gate isn't wired the way this function assumes.
+        logCutDebug(`[${shortLayerTag(trackRef)}] attemptReveal BLOCKED: frameReady=${frameReadyRef.current} aspectSettled=${aspectSettledRef.current} (status=${aspectRef.current.status})`);
+        return;
+      }
       readyFiredRef.current = true;
-      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (frame painted + aspect settled: isPortrait=${aspectRef.current.isPortraitSource})`);
+      // DEBUG -- the direct-proof line: reads the transform that's
+      // ACTUALLY sitting on the DOM node right now, and the video
+      // element's own decoded dimensions, at the exact instant opacity
+      // is about to flip to 1. detectedIsPortrait is what useTrackAspect
+      // resolved to (what the gate waited for); actualVideoWxH is ground
+      // truth from the <video> element itself, independent of
+      // getSettings() -- if these disagree, detection resolved to the
+      // WRONG value (a correctness bug), not just a late one. If
+      // domTransform doesn't match the scale that shot/isPortrait implies,
+      // ShotTransformFrame's correction hadn't landed yet when the gate
+      // opened (the batching this fix relies on didn't hold).
+      const videoEl = videoRef.current;
+      const domTransform = transformElRef.current?.style?.transform || '(none)';
+      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED: detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
       setVisible(true);
       onReady?.();
     }
@@ -530,7 +564,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
         transition: instant ? 'none' : `opacity ${CAMERA_CHANGE_FADE_MS}ms ease`,
       }}
     >
-      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} videoRef={videoRef} aspect={aspect} />
+      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} videoRef={videoRef} aspect={aspect} transformElRef={transformElRef} />
     </div>
   );
 }
