@@ -19,7 +19,7 @@ import ViewerStage from './ViewerStage';
 import DirectorShotPanel from './DirectorShotPanel';
 import CameraQRPanel from './CameraQRPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
-import { SHOT_TYPES, FADE_MS, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
+import { SHOT_TYPES, CAMERA_CHANGE_FADE_MS, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
@@ -109,13 +109,61 @@ const PAN_VECTORS = {
   down: { from: [0, -8], to: [0, 8] },
 };
 
+// How long to wait for an incoming video to genuinely paint a decoded
+// frame before revealing it regardless. A real stall (bad network, a
+// track stuck subscribed-but-not-flowing) should never leave a slot
+// permanently blank -- this bounds the wait and falls back to the old
+// reveal-anyway behavior after it, rather than waiting forever.
+const FRAME_READY_TIMEOUT_MS = 600;
+
+// Resolves once `videoEl` has genuinely painted a frame -- not just
+// mounted or attached. requestVideoFrameCallback fires exactly on frame
+// presentation (supported on iOS Safari 15.4+ and Android Chrome, both
+// in scope for this app); loadeddata is the fallback for anything
+// without it, checking readyState first in case the frame already
+// arrived before this listener attached. Always resolves -- the timeout
+// guarantees a caller never waits indefinitely. Returns a cleanup fn.
+function waitForFirstFrame(videoEl, timeoutMs, onReady) {
+  let done = false;
+  let rvfcHandle = null;
+  const hasRVFC = typeof videoEl.requestVideoFrameCallback === 'function';
+
+  function finish() {
+    if (done) return;
+    done = true;
+    cleanup();
+    onReady();
+  }
+
+  function cleanup() {
+    clearTimeout(timer);
+    videoEl.removeEventListener('loadeddata', finish);
+    if (hasRVFC && rvfcHandle != null && typeof videoEl.cancelVideoFrameCallback === 'function') {
+      videoEl.cancelVideoFrameCallback(rvfcHandle);
+    }
+  }
+
+  const timer = setTimeout(finish, timeoutMs);
+
+  if (hasRVFC) {
+    rvfcHandle = videoEl.requestVideoFrameCallback(finish);
+  } else if (videoEl.readyState >= 2) {
+    // HAVE_CURRENT_DATA or better -- a frame is already there.
+    finish();
+  } else {
+    videoEl.addEventListener('loadeddata', finish);
+  }
+
+  return cleanup;
+}
+
 // Computes the crop/animatedZoom/animatedPan CSS transform for the active
 // shot and applies it to a wrapper div around the video. Ported from
 // ShotRenderer.jsx's transform effect -- the track attach/detach and
 // opacity-fade parts of that file don't apply here: VideoTrack handles
 // attach/detach itself, and fades are handled a layer up, by
 // ShotFadeLayer's opacity, not by this wrapper.
-function ShotTransformFrame({ trackRef, command, placeholder }) {
+function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
   const [style, setStyle] = useState({});
   const rafRef = useRef(null);
 
@@ -195,71 +243,121 @@ function ShotTransformFrame({ trackRef, command, placeholder }) {
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: '#011627' }}>
       <div style={{ width: '100%', height: '100%', willChange: 'transform', ...style }}>
         {trackRef ? (
-          <VideoTrack trackRef={trackRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <VideoTrack ref={videoRef} trackRef={trackRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : placeholder}
       </div>
     </div>
   );
 }
 
-// A single video layer that fades itself in on mount -- used for the
-// 'fade' transition path only; 'cut' layers render at opacity 1
-// immediately (see ShotVideo). Stacking one of these per recent track is
-// what produces the dissolve -- the old layer stays fully visible
-// underneath while the new one fades in on top, so there's never a
-// dark/empty frame between them.
-function ShotFadeLayer({ trackRef, command, placeholder, instant }) {
-  const [visible, setVisible] = useState(instant);
+// A single video layer, held at opacity 0 until its video has genuinely
+// painted a frame (waitForFirstFrame, above) -- then reveals, either
+// instantly ('cut') or via an opacity transition ('fade'). Used for
+// BOTH transition types now: the old layer stays fully visible
+// underneath the whole time, so there's never a dark/empty frame
+// between them, on cut or fade -- only how fast the reveal itself
+// happens differs. Calls onReady once revealed so the parent (ShotVideo)
+// knows when it's safe to remove the layer(s) underneath.
+function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
+  const [visible, setVisible] = useState(false);
+  const videoRef = useRef(null);
+  const readyFiredRef = useRef(false);
+
   useEffect(() => {
-    if (instant) return undefined;
-    const raf = requestAnimationFrame(() => setVisible(true));
-    return () => cancelAnimationFrame(raf);
-  }, [instant]);
+    readyFiredRef.current = false;
+
+    if (!trackRef) {
+      // Nothing to wait for -- e.g. an interstitial/placeholder layer.
+      readyFiredRef.current = true;
+      setVisible(true);
+      onReady?.();
+      return undefined;
+    }
+
+    function reveal() {
+      if (readyFiredRef.current) return;
+      readyFiredRef.current = true;
+      setVisible(true);
+      onReady?.();
+    }
+
+    // videoRef.current may not exist yet on the very first pass of this
+    // effect (the underlying <video> needs to mount and VideoTrack's own
+    // ref-forwarding needs to run first) -- wait a frame and retry
+    // rather than assuming it's already there.
+    let cleanupFrameWait;
+    let raf = null;
+    function start() {
+      if (videoRef.current) {
+        cleanupFrameWait = waitForFirstFrame(videoRef.current, FRAME_READY_TIMEOUT_MS, reveal);
+      } else {
+        raf = requestAnimationFrame(start);
+      }
+    }
+    start();
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      cleanupFrameWait?.();
+    };
+  }, [trackRef]);
+
   return (
     <div
       style={{
         position: 'absolute',
         inset: 0,
         opacity: visible ? 1 : 0,
-        transition: instant ? 'none' : `opacity ${FADE_MS}ms ease`,
+        transition: instant ? 'none' : `opacity ${CAMERA_CHANGE_FADE_MS}ms ease`,
       }}
     >
-      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} />
+      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} videoRef={videoRef} />
     </div>
   );
 }
 
-// Renders whichever track is "current" for a slot. A 'cut' transition
-// (staccato, zoom, any shot whose grammar demands it) replaces the layer
-// instantly -- no stacking, no overlap, no opacity transition. A 'fade'
-// keeps the previous track mounted just long enough to crossfade into the
-// new one (the same dissolve this always did, now timed to FADE_MS from
-// the shot grammar instead of a hardcoded value). Only the top (newest)
-// layer ever receives the live `command` -- an older layer mid-exit is
-// frozen at whatever transform it last had; it's about to disappear.
+// Renders whichever track is "current" for a slot. Both 'cut' and 'fade'
+// now go through the same layering: the incoming track is appended
+// (never a synchronous replace), and the outgoing layer(s) underneath
+// are only removed once the incoming layer has actually revealed --
+// i.e. its video has painted a real frame (see ShotFadeLayer/
+// waitForFirstFrame) -- not on a fixed timer set at append-time, since
+// reveal timing is now variable (bounded by FRAME_READY_TIMEOUT_MS).
+// 'cut' vs 'fade' only changes how fast the reveal transition itself is
+// once it happens. Only the top (newest) layer ever receives the live
+// `command` -- an older layer mid-exit is frozen at whatever transform
+// it last had; it's about to disappear.
 function ShotVideo({ trackRef, command, placeholder }) {
   const [layers, setLayers] = useState(() => (trackRef ? [{ key: 'init', trackRef }] : []));
   const currentKeyRef = useRef(trackKey(trackRef));
+  const removalTimerRef = useRef(null);
+  const instant = command?.transition === 'cut';
 
   useEffect(() => {
     const newKey = trackKey(trackRef);
     if (newKey === currentKeyRef.current) return undefined;
     currentKeyRef.current = newKey;
     const layerKey = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-    if (command?.transition === 'cut') {
-      // One atomic state set: no fade layer, no overlap, no opacity
-      // transition -- an instant swap.
-      setLayers([{ key: layerKey, trackRef }]);
-      return undefined;
-    }
-
     setLayers((prev) => [...prev, { key: layerKey, trackRef }]);
-    const timer = setTimeout(() => {
-      setLayers((prev) => prev.slice(-1));
-    }, FADE_MS + 100); // slightly longer than the fade so it never clips
-    return () => clearTimeout(timer);
+    return undefined;
   }, [trackRef, command]);
+
+  useEffect(() => () => {
+    if (removalTimerRef.current) clearTimeout(removalTimerRef.current);
+  }, []);
+
+  // Called by the newest layer once it has actually revealed. Removing
+  // older layers is timed off that real event, not a fixed clock --
+  // instant reveals remove immediately after, fades wait out their own
+  // transition first so nothing clips mid-dissolve.
+  const handleTopLayerReady = useCallback(() => {
+    if (removalTimerRef.current) clearTimeout(removalTimerRef.current);
+    const delay = instant ? 0 : CAMERA_CHANGE_FADE_MS;
+    removalTimerRef.current = setTimeout(() => {
+      removalTimerRef.current = null;
+      setLayers((prev) => (prev.length > 1 ? prev.slice(-1) : prev));
+    }, delay);
+  }, [instant]);
 
   if (layers.length === 0) return placeholder;
 
@@ -271,7 +369,8 @@ function ShotVideo({ trackRef, command, placeholder }) {
           trackRef={l.trackRef}
           command={i === layers.length - 1 ? command : null}
           placeholder={placeholder}
-          instant={command?.transition === 'cut'}
+          instant={instant}
+          onReady={i === layers.length - 1 ? handleTopLayerReady : undefined}
         />
       ))}
     </div>
