@@ -413,6 +413,67 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     return () => clearInterval(interval);
   }, [room]);
 
+  // DEBUG -- WHY does the track go from 'live' to 'ended'? The native
+  // 'ended' event alone confirms WHEN but gives no stack, since the
+  // browser dispatches it asynchronously regardless of what triggered
+  // it. To catch WHERE, this monkey-patches .stop() on both the raw
+  // MediaStreamTrack and the LiveKit LocalVideoTrack wrapper the moment
+  // either becomes available -- reassigning an own-instance method
+  // shadows the prototype's for this one track only, and is restored on
+  // cleanup. Patching BOTH layers matters: if OUR code (or LiveKit's own
+  // internals, e.g. a restart swapping tracks) calls either one, the
+  // patched version runs first and records a real call stack before
+  // deferring to the original. If the track still ends with NEITHER
+  // patched stop() ever firing, that's strong evidence it's being ended
+  // externally -- the browser, the OS, another tab, or the hardware
+  // itself -- not by any JS running on this page.
+  const [endedInfo, setEndedInfo] = useState(null);
+  const trackSidForLifecycle = myCameraPublication?.trackSid;
+
+  useEffect(() => {
+    const videoTrack = myCameraPublication?.videoTrack;
+    const mst = videoTrack?.mediaStreamTrack;
+    if (!videoTrack || !mst) return undefined;
+
+    const acquiredAt = Date.now();
+    setEndedInfo({ acquiredAt, status: 'live' });
+
+    function shortStack(stack) {
+      return (stack || '').split('\n').slice(1, 6).join(' | ');
+    }
+
+    const originalWrapperStop = typeof videoTrack.stop === 'function' ? videoTrack.stop.bind(videoTrack) : null;
+    const originalRawStop = mst.stop.bind(mst);
+
+    if (originalWrapperStop) {
+      videoTrack.stop = function (...args) {
+        const stack = new Error().stack;
+        console.error('[cam][lifecycle] LocalVideoTrack.stop() called', stack);
+        setEndedInfo((prev) => ({ ...(prev || {}), wrapperStopAt: Date.now(), wrapperStopStack: shortStack(stack) }));
+        return originalWrapperStop(...args);
+      };
+    }
+
+    mst.stop = function (...args) {
+      const stack = new Error().stack;
+      console.error('[cam][lifecycle] MediaStreamTrack.stop() called', stack);
+      setEndedInfo((prev) => ({ ...(prev || {}), rawStopAt: Date.now(), rawStopStack: shortStack(stack) }));
+      return originalRawStop(...args);
+    };
+
+    function handleEnded() {
+      console.error('[cam][lifecycle] MediaStreamTrack "ended" event fired');
+      setEndedInfo((prev) => ({ ...(prev || {}), endedEventAt: Date.now(), status: 'ended' }));
+    }
+    mst.addEventListener('ended', handleEnded);
+
+    return () => {
+      if (originalWrapperStop) videoTrack.stop = originalWrapperStop;
+      mst.stop = originalRawStop;
+      mst.removeEventListener('ended', handleEnded);
+    };
+  }, [trackSidForLifecycle]);
+
   // Keeps a propped phone from sleeping mid-show. Not all browsers
   // support the Wake Lock API -- silently ignored where they don't,
   // exactly as the spec calls for.
@@ -518,6 +579,25 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
               ? `FAILED after ${sourceDims.attempts} tries`
               : `detecting...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
         </div>
+        {endedInfo && (
+          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
+            <div>
+              11. TRACK LIFECYCLE: acquired
+              {endedInfo.status === 'ended'
+                ? ` -- ENDED ${endedInfo.endedEventAt - endedInfo.acquiredAt}ms later`
+                : ' -- still live'}
+            </div>
+            {endedInfo.wrapperStopAt && (
+              <div>-- LocalVideoTrack.stop() called at +{endedInfo.wrapperStopAt - endedInfo.acquiredAt}ms: {endedInfo.wrapperStopStack}</div>
+            )}
+            {endedInfo.rawStopAt && (
+              <div>-- MediaStreamTrack.stop() called at +{endedInfo.rawStopAt - endedInfo.acquiredAt}ms: {endedInfo.rawStopStack}</div>
+            )}
+            {endedInfo.status === 'ended' && !endedInfo.wrapperStopAt && !endedInfo.rawStopAt && (
+              <div>-- No .stop() intercepted on this page -- likely ended externally (browser/OS/hardware/another tab)</div>
+            )}
+          </div>
+        )}
       </div>
       {/* A visible failure beats an infinite silent "detecting" wait --
           this is the actionable, operator-facing version of the same
