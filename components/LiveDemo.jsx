@@ -956,7 +956,24 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
     const effectiveCommand = !isInterstitial && wasInterstitial && cmd ? { ...cmd, transition: 'cut' } : cmd;
 
-    return <ShotVideo trackRef={chosen} command={effectiveCommand} placeholder={placeholder} />;
+    // Selfie mirror -- display-only, local to this device, never touches
+    // the published track. Gated on this being MY OWN track (not e.g. a
+    // camfeed device the director has picked for this slot) and my own
+    // camera currently facing 'user'. Wrapping ShotVideo's whole output
+    // in an outer transform, rather than threading a prop through
+    // ShotVideo/ShotFadeLayer/ShotTransformFrame, keeps shot-director
+    // internals (crop/zoom/pan) completely untouched -- the mirror just
+    // composes as an ancestor transform in the DOM. One side effect:
+    // a pan shot appears to move in the opposite direction on the
+    // artist's own mirrored self-view -- correct mirror behavior (same
+    // as any selfie camera app), never visible to viewers.
+    const mirror = chosen?.participant.identity === room.localParticipant.identity && facingMode === 'user';
+
+    return (
+      <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
+        <ShotVideo trackRef={chosen} command={effectiveCommand} placeholder={placeholder} />
+      </div>
+    );
   };
 
   // Tapping the video collapses an expanded (mobile) comments drawer --
@@ -985,7 +1002,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>Keep this open and propped in place. The performer picks when this shot goes live.</p>
         <div style={{ position: 'relative', height: 220, background: '#011627', clipPath: 'polygon(16px 0,100% 0,100% 100%,0 100%,0 16px)', overflow: 'hidden' }}>
           {myTrack ? (
-            <VideoTrack trackRef={myTrack} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <VideoTrack
+              trackRef={myTrack}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+            />
           ) : (
             <span>starting camera...</span>
           )}

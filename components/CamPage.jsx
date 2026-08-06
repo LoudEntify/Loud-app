@@ -280,7 +280,10 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: INK }}>
       {myTrack ? (
-        <VideoTrack trackRef={myTrack} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <VideoTrack
+          trackRef={myTrack}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+        />
       ) : (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: PORCELAIN }}>
           Starting camera...
