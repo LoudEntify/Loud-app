@@ -314,27 +314,15 @@ function resolveTransform(transform, isPortrait) {
 // opacity-fade parts of that file don't apply here: VideoTrack handles
 // attach/detach itself, and fades are handled a layer up, by
 // ShotFadeLayer's opacity, not by this wrapper.
-function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
+function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect }) {
   const [style, setStyle] = useState({});
   const rafRef = useRef(null);
-  // Whichever track is actually active for this slot right now -- the
-  // local participant's own camera, or a remote camfeed device's.
-  // Defaults to landscape (today's only values, pre-Stage-1) while
-  // detection is still pending, so nothing regresses before a real
-  // frame's dimensions are known.
-  const aspect = useTrackAspect(trackRef);
+  // `aspect` is now a prop, owned by ShotFadeLayer (see its own comment)
+  // -- ShotFadeLayer needs the same aspect state to gate the reveal on,
+  // so it's the single source of truth rather than each component
+  // running its own separate useTrackAspect subscription. Still reacts
+  // live to isPortrait changing (a source rotating mid-show).
   const isPortrait = aspect?.isPortraitSource ?? false;
-
-  // DEBUG -- see the module-level comment above CUT_DEBUG_ENABLED. Logs
-  // the MOMENT aspect detection resolves/changes -- a separate effect
-  // from the transform-setting one below, which is exactly the gap
-  // under investigation: does the transform effect (using this render's
-  // isPortrait snapshot) apply BEFORE or AFTER this has already settled?
-  const layerTrackSid = trackRef?.publication?.trackSid;
-  useEffect(() => {
-    logCutDebug(`[${shortLayerTag(trackRef)}] aspect effect: isPortrait=${isPortrait} (${aspect ? `${aspect.width}x${aspect.height}` : 'still detecting'})`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layerTrackSid, isPortrait, aspect?.width, aspect?.height]);
 
   useEffect(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -433,35 +421,76 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
 // between them, on cut or fade -- only how fast the reveal itself
 // happens differs. Calls onReady once revealed so the parent (ShotVideo)
 // knows when it's safe to remove the layer(s) underneath.
+// Reveal is gated on BOTH the video painting a real frame AND the
+// portrait/landscape aspect variant having settled (ready OR failed --
+// never blocks forever, bounded by useTrackAspect's own ~1s retry
+// window) -- not frame-paint alone. Confirmed cause of the punch-in
+// flash: ShotTransformFrame's crop-transform effect and aspect
+// detection used to be two independent, uncoordinated async processes
+// (see CUT_DEBUG_ENABLED's comment above) -- a fresh layer could reveal
+// showing the landscape-default scale before a later render corrected
+// it to the real portrait scale. Gating here means the FIRST frame the
+// viewer ever sees is already at the correct scale, because
+// ShotTransformFrame has had the real, settled aspect value the entire
+// time it was rendering invisibly -- there's no correction to catch
+// mid-flight. This is why gating beats defaulting to a "last known"
+// aspect from the PREVIOUS track as a guess: a last-known value can
+// still be wrong (cutting between a portrait phone and a landscape
+// capture card is exactly when it would be), and being wrong reproduces
+// the identical flash, just less often. Gating never shows a wrong
+// value at all, at the cost of a wait that's normally sub-frame anyway
+// (an already-flowing track's first getSettings() read is typically
+// synchronous) and never unbounded (same unmet-condition eventually
+// resolves as 'failed', not stuck).
 function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
   const [visible, setVisible] = useState(false);
   const videoRef = useRef(null);
   const readyFiredRef = useRef(false);
+  const frameReadyRef = useRef(false);
+  const aspect = useTrackAspect(trackRef);
+  const aspectSettled = aspect.status !== 'detecting';
+  const aspectSettledRef = useRef(aspectSettled);
+  aspectSettledRef.current = aspectSettled;
+  const aspectRef = useRef(aspect);
+  aspectRef.current = aspect;
+  const tryRevealRef = useRef(null);
 
+  // DEBUG -- see the module-level comment above CUT_DEBUG_ENABLED.
+  const layerTrackSid = trackRef?.publication?.trackSid;
+  useEffect(() => {
+    logCutDebug(`[${shortLayerTag(trackRef)}] aspect effect: status=${aspect.status} isPortrait=${aspect.isPortraitSource} (${aspect.width ? `${aspect.width}x${aspect.height}` : 'no dims yet'})`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerTrackSid, aspect.status, aspect.isPortraitSource, aspect.width, aspect.height]);
+
+  // Frame-paint watcher -- unchanged trigger (trackRef only), doesn't
+  // restart when aspect settles, just marks its own condition and asks
+  // tryReveal to check whether BOTH are satisfied now.
   useEffect(() => {
     readyFiredRef.current = false;
+    frameReadyRef.current = false;
 
     if (!trackRef) {
       // Nothing to wait for -- e.g. an interstitial/placeholder layer.
+      // No video, no aspect to speak of either -- reveal immediately.
       readyFiredRef.current = true;
       setVisible(true);
       onReady?.();
       return undefined;
     }
 
-    function reveal() {
+    function attemptReveal() {
       if (readyFiredRef.current) return;
+      if (!frameReadyRef.current || !aspectSettledRef.current) return;
       readyFiredRef.current = true;
-      // DEBUG -- see the module-level comment above CUT_DEBUG_ENABLED.
-      // This is the "feed becomes visible" moment -- compare its
-      // timestamp against ShotTransformFrame's "aspect effect"/
-      // "transform effect APPLIED" lines for the SAME layer tag to see
-      // whether the crop transform had already settled by the time this
-      // fires, or whether the wrong (landscape-default) scale was still
-      // showing when the viewer could actually see it.
-      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (opacity -> 1)`);
+      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (frame painted + aspect settled: isPortrait=${aspectRef.current.isPortraitSource})`);
       setVisible(true);
       onReady?.();
+    }
+    tryRevealRef.current = attemptReveal;
+
+    function onFramePainted() {
+      frameReadyRef.current = true;
+      attemptReveal();
     }
 
     // videoRef.current may not exist yet on the very first pass of this
@@ -472,7 +501,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
     let raf = null;
     function start() {
       if (videoRef.current) {
-        cleanupFrameWait = waitForFirstFrame(videoRef.current, FRAME_READY_TIMEOUT_MS, reveal);
+        cleanupFrameWait = waitForFirstFrame(videoRef.current, FRAME_READY_TIMEOUT_MS, onFramePainted);
       } else {
         raf = requestAnimationFrame(start);
       }
@@ -485,6 +514,13 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
     };
   }, [trackRef]);
 
+  // Whenever aspect SETTLES (detecting -> ready/failed), re-check
+  // whether reveal can happen now -- doesn't restart the frame-wait
+  // above, just re-runs the SAME pending check with the new answer.
+  useEffect(() => {
+    if (aspectSettled) tryRevealRef.current?.();
+  }, [aspectSettled]);
+
   return (
     <div
       style={{
@@ -494,7 +530,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
         transition: instant ? 'none' : `opacity ${CAMERA_CHANGE_FADE_MS}ms ease`,
       }}
     >
-      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} videoRef={videoRef} />
+      <ShotTransformFrame trackRef={trackRef} command={command} placeholder={placeholder} videoRef={videoRef} aspect={aspect} />
     </div>
   );
 }
