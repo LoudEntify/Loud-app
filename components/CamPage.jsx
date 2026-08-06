@@ -382,8 +382,12 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
         {role.toUpperCase()}
       </div>
       {/* DEBUG -- surfaces what useSourceDimensions actually detected,
-          for verifying Stage 1 of the portrait capture work on real
-          hardware. Safe to delete once capture is verified. */}
+          for verifying the portrait capture work on real hardware. Safe
+          to delete once capture is verified. Shows whether dimensions
+          were found on the first read or needed retries -- a capture
+          card can lose the race to have getSettings() populated that a
+          phone usually wins instantly (see useSourceDimensions' bounded
+          initial-read retry). */}
       <div
         style={{
           position: 'absolute',
@@ -391,16 +395,42 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
           left: 8,
           padding: '4px 8px',
           borderRadius: 6,
-          background: 'rgba(1, 22, 39, 0.7)',
+          background: sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.7)',
           color: PORCELAIN,
           fontFamily: 'monospace',
           fontSize: 10,
+          maxWidth: 260,
         }}
       >
-        {sourceDims
-          ? `DEBUG ${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}`
-          : 'DEBUG detecting source...'}
+        {sourceDims?.status === 'ready'
+          ? `DEBUG ${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}${sourceDims.attempts > 1 ? ` (found after ${sourceDims.attempts} tries)` : sourceDims.attempts === 1 ? ' (first read)' : ''}`
+          : sourceDims?.status === 'failed'
+            ? `DEBUG couldn't detect camera resolution after ${sourceDims.attempts} tries`
+            : `DEBUG detecting source...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
       </div>
+      {/* A visible failure beats an infinite silent "detecting" wait --
+          this is the actionable, operator-facing version of the same
+          state the DEBUG label above reports more tersely. */}
+      {sourceDims?.status === 'failed' && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            padding: '14px 18px',
+            borderRadius: 8,
+            background: 'rgba(1, 22, 39, 0.9)',
+            border: '1px solid #e71d36',
+            color: PORCELAIN,
+            fontSize: 13,
+            textAlign: 'center',
+            maxWidth: 280,
+          }}
+        >
+          Couldn&apos;t detect camera resolution -- try reselecting the device or reloading.
+        </div>
+      )}
       <button
         type="button"
         onClick={toggleFacingMode}

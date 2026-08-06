@@ -42,9 +42,30 @@ const ROOM_NAME = 'pilot-room';
 const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1080, height: 1920 }, frameRate: { ideal: 30 } };
 
 // DEBUG -- surfaces what useSourceDimensions actually detected, for
-// verifying Stage 1 of the portrait capture work on real hardware. Safe
-// to delete once capture is verified; not meant for artist-facing use.
-function SourceDimsDebugLabel({ dims, style }) {
+// verifying the portrait capture work on real hardware. Safe to delete
+// once capture is verified; not meant for artist-facing use. Shows
+// whether dimensions were found on the first read or needed retries
+// (see useSourceDimensions' bounded initial-read retry -- a capture
+// card can lose the race to have getSettings() populated that a phone
+// usually wins instantly), and a clearly-flagged failure state rather
+// than sitting silently on "detecting" forever if the retry window
+// exhausts.
+function SourceDimsDebugLabel({ state, style }) {
+  const status = state?.status ?? 'detecting';
+  const attempts = state?.attempts ?? 0;
+
+  let text;
+  let failed = false;
+  if (status === 'ready') {
+    const tries = attempts > 1 ? ` (found after ${attempts} tries)` : attempts === 1 ? ' (first read)' : '';
+    text = `DEBUG ${state.width}x${state.height} -- ${state.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}${tries}`;
+  } else if (status === 'failed') {
+    failed = true;
+    text = `DEBUG couldn't detect camera resolution after ${attempts} tries -- try reselecting the device or reloading`;
+  } else {
+    text = attempts > 0 ? `DEBUG detecting source... (retry ${attempts})` : 'DEBUG detecting source...';
+  }
+
   return (
     <div
       style={{
@@ -53,17 +74,16 @@ function SourceDimsDebugLabel({ dims, style }) {
         left: 8,
         padding: '4px 8px',
         borderRadius: 6,
-        background: 'rgba(1, 22, 39, 0.7)',
+        background: failed ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.7)',
         color: '#fdfffc',
         fontFamily: 'monospace',
         fontSize: 10,
         pointerEvents: 'none',
+        maxWidth: 260,
         ...style,
       }}
     >
-      {dims
-        ? `DEBUG ${dims.width}x${dims.height} -- ${dims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}`
-        : 'DEBUG detecting source...'}
+      {text}
     </div>
   );
 }
@@ -1180,7 +1200,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           ) : (
             <span>starting camera...</span>
           )}
-          <SourceDimsDebugLabel dims={sourceDims} />
+          <SourceDimsDebugLabel state={sourceDims} />
         </div>
         <div className="mic-cam-controls">
           <button className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
@@ -1467,7 +1487,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
       {isMainPerformer && (
         <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 50 }}>
-          <SourceDimsDebugLabel dims={sourceDims} style={{ position: 'static' }} />
+          <SourceDimsDebugLabel state={sourceDims} style={{ position: 'static' }} />
         </div>
       )}
 
