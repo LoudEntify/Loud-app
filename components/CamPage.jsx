@@ -89,7 +89,7 @@ export default function CamPage() {
         setDevices(cams);
         setDeviceId((prev) => prev || cams[0]?.deviceId || null);
       } catch (e) {
-        if (!cancelled) setDeviceError('Camera permission is required to pair this device.');
+        if (!cancelled) setDeviceError(`Camera permission is required to pair this device. (${e?.name}: ${e?.message})`);
       }
     })();
     return () => {
@@ -230,6 +230,12 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   const tracks = useTracks([Track.Source.Camera]);
   const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
   const [facingMode, setFacingMode] = useState('environment');
+  // Real DOM <video> element VideoTrack renders -- VideoTrack forwards
+  // its ref to the underlying element (confirmed against
+  // @livekit/components-react's source), needed to inspect
+  // srcObject/paused/readyState/videoWidth directly, none of which are
+  // reachable through the LiveKit track objects alone.
+  const videoElRef = useRef(null);
   // Stage 1 of the portrait capture work -- what's actually being
   // delivered right now, read live off the real track. Debug-only;
   // doesn't drive rendering here (object-fit: cover on the portrait-
@@ -299,7 +305,16 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     }
   }, [room]);
 
+  // DEBUG -- the real outcome of setCameraEnabled, on screen. This call
+  // previously had no error handling at all: if it rejected for any
+  // reason, the failure was completely silent -- myTrack would just
+  // never resolve, with nothing to say why. This doesn't fix anything,
+  // it makes the actual error (if there is one) visible instead of
+  // guessed at.
+  const [acquireResult, setAcquireResult] = useState({ status: 'pending' });
+
   useEffect(() => {
+    let cancelled = false;
     // Verified against the installed livekit-client source
     // (constraintsForOptions in dist/livekit-client.esm.mjs): plain
     // numbers in `resolution` are flattened unwrapped into the
@@ -316,12 +331,24 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     // If the operator explicitly picked a device from the L5 dropdown,
     // honor that deviceId. Otherwise default to the rear camera via
     // facingMode instead of enumerateDevices()'s arbitrary first entry.
-    room.localParticipant.setCameraEnabled(
-      true,
-      deviceChosen
-        ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
-        : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }
-    );
+    (async () => {
+      setAcquireResult({ status: 'pending' });
+      try {
+        await room.localParticipant.setCameraEnabled(
+          true,
+          deviceChosen
+            ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
+            : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }
+        );
+        if (!cancelled) setAcquireResult({ status: 'success' });
+      } catch (e) {
+        console.error('[cam] setCameraEnabled failed', e);
+        if (!cancelled) setAcquireResult({ status: 'error', name: e?.name, message: e?.message });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [room, deviceChosen, deviceId]);
 
   // Clean live swap: LocalVideoTrack.restartTrack replaces the sender's
@@ -333,10 +360,58 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
     if (!videoTrack) return;
     const next = facingMode === 'environment' ? 'user' : 'environment';
-    await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
-    setFacingMode(next);
-    onDeviceIdChange(videoTrack.mediaStreamTrack.getSettings().deviceId ?? null);
+    try {
+      await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
+      setFacingMode(next);
+      onDeviceIdChange(videoTrack.mediaStreamTrack.getSettings().deviceId ?? null);
+      setAcquireResult({ status: 'success' });
+    } catch (e) {
+      console.error('[cam] facingMode restartTrack failed', e);
+      setAcquireResult({ status: 'error', name: e?.name, message: e?.message, context: 'facingMode toggle' });
+    }
   }, [facingMode, room, onDeviceIdChange]);
+
+  // DEBUG -- full acquisition -> attachment -> play -> dimensions chain,
+  // on screen. The camera shows in Chrome's own device chooser but not
+  // on this page, which means the stream IS being acquired -- something
+  // downstream isn't rendering it. Rather than guess which link broke,
+  // poll every 400ms and show every link at once: LiveKit's publication/
+  // track wrapper, the raw MediaStreamTrack (readyState + getSettings),
+  // and the actual DOM <video> element (srcObject/paused/readyState/
+  // videoWidth) -- that last group is the part nothing else in this file
+  // inspects directly, and is exactly where "acquired but not attached"
+  // vs "attached but not playing" vs "playing but no dimensions" would
+  // show up.
+  const [chainSnapshot, setChainSnapshot] = useState(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+      const videoTrack = pub?.videoTrack;
+      const mst = videoTrack?.mediaStreamTrack;
+      const settings = mst?.getSettings?.();
+      const videoEl = videoElRef.current;
+      const srcObject = videoEl?.srcObject;
+      setChainSnapshot({
+        publicationFound: !!pub,
+        videoTrackFound: !!videoTrack,
+        mstFound: !!mst,
+        mstReadyState: mst?.readyState ?? null,
+        mstId: mst?.id ?? null,
+        settingsWidth: settings?.width ?? null,
+        settingsHeight: settings?.height ?? null,
+        videoElFound: !!videoEl,
+        srcObjectSet: !!srcObject,
+        srcObjectTrackCount: srcObject?.getVideoTracks?.().length ?? 0,
+        paused: videoEl ? videoEl.paused : null,
+        readyState: videoEl ? videoEl.readyState : null,
+        videoWidth: videoEl ? videoEl.videoWidth : null,
+        videoHeight: videoEl ? videoEl.videoHeight : null,
+        currentTime: videoEl ? videoEl.currentTime : null,
+      });
+    }, 400);
+    return () => clearInterval(interval);
+  }, [room]);
 
   // Keeps a propped phone from sleeping mid-show. Not all browsers
   // support the Wake Lock API -- silently ignored where they don't,
@@ -369,6 +444,7 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     <div style={{ position: 'fixed', inset: 0, background: INK }}>
       {myTrack ? (
         <VideoTrack
+          ref={videoElRef}
           trackRef={myTrack}
           style={{ width: '100%', height: '100%', objectFit: 'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
         />
@@ -394,32 +470,54 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
       >
         {role.toUpperCase()}
       </div>
-      {/* DEBUG -- surfaces what useSourceDimensions actually detected,
-          for verifying the portrait capture work on real hardware. Safe
-          to delete once capture is verified. Shows whether dimensions
-          were found on the first read or needed retries -- a capture
-          card can lose the race to have getSettings() populated that a
-          phone usually wins instantly (see useSourceDimensions' bounded
-          initial-read retry). */}
+      {/* DEBUG -- the full acquisition -> attachment -> play -> dimensions
+          chain, on screen, in order, so the exact broken link is
+          visible instead of guessed at. Safe to delete once the real
+          cause is found and fixed. */}
       <div
         style={{
           position: 'absolute',
           bottom: 8,
           left: 8,
-          padding: '4px 8px',
+          right: 8,
+          padding: '8px 10px',
           borderRadius: 6,
-          background: sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.7)',
+          background: acquireResult.status === 'error' || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
           color: PORCELAIN,
           fontFamily: 'monospace',
           fontSize: 10,
-          maxWidth: 260,
+          lineHeight: 1.5,
         }}
       >
-        {sourceDims?.status === 'ready'
-          ? `DEBUG ${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped to portrait)'}${sourceDims.attempts > 1 ? ` (found after ${sourceDims.attempts} tries)` : sourceDims.attempts === 1 ? ' (first read)' : ''}`
-          : sourceDims?.status === 'failed'
-            ? `DEBUG couldn't detect camera resolution after ${sourceDims.attempts} tries`
-            : `DEBUG detecting source...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
+        <div>
+          1. ACQUIRE (setCameraEnabled): {acquireResult.status}
+          {acquireResult.status === 'error' && ` -- ${acquireResult.name}: ${acquireResult.message}${acquireResult.context ? ` (${acquireResult.context})` : ''}`}
+        </div>
+        <div>2. publication: {chainSnapshot?.publicationFound ? 'found' : 'MISSING'}</div>
+        <div>3. videoTrack (LiveKit wrapper): {chainSnapshot?.videoTrackFound ? 'found' : 'MISSING'}</div>
+        <div>
+          4. MediaStreamTrack: {chainSnapshot?.mstFound ? `found (readyState=${chainSnapshot.mstReadyState}, id=${chainSnapshot.mstId?.slice(0, 8)})` : 'MISSING'}
+        </div>
+        <div>
+          5. getSettings(): {chainSnapshot?.settingsWidth ? `${chainSnapshot.settingsWidth}x${chainSnapshot.settingsHeight}` : 'no width/height'}
+        </div>
+        <div>6. &lt;video&gt; element (ref): {chainSnapshot?.videoElFound ? 'found' : 'MISSING -- ref never attached'}</div>
+        <div>
+          7. srcObject: {chainSnapshot?.srcObjectSet ? `set (${chainSnapshot.srcObjectTrackCount} video track${chainSnapshot.srcObjectTrackCount === 1 ? '' : 's'})` : 'NOT SET'}
+        </div>
+        <div>
+          8. playback: paused={String(chainSnapshot?.paused)}, readyState={chainSnapshot?.readyState} (0=NOTHING..4=ENOUGH_DATA), currentTime={typeof chainSnapshot?.currentTime === 'number' ? chainSnapshot.currentTime.toFixed(2) : '--'}
+        </div>
+        <div>
+          9. video element size: {chainSnapshot?.videoWidth}x{chainSnapshot?.videoHeight}
+        </div>
+        <div>
+          10. detection ({'>'}Stage 1{'<'}): {sourceDims?.status === 'ready'
+            ? `${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped)'}${sourceDims.attempts > 1 ? ` (${sourceDims.attempts} tries)` : sourceDims.attempts === 1 ? ' (1st try)' : ''}`
+            : sourceDims?.status === 'failed'
+              ? `FAILED after ${sourceDims.attempts} tries`
+              : `detecting...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
+        </div>
       </div>
       {/* A visible failure beats an infinite silent "detecting" wait --
           this is the actionable, operator-facing version of the same
