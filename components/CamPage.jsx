@@ -74,6 +74,13 @@ export default function CamPage() {
   const searchParams = useSearchParams();
   const room = searchParams.get('room') || 'pilot-room';
   const slot = searchParams.get('slot');
+  // Stage 1 (portrait capture + rotation) is verified on real hardware --
+  // the verbose on-screen diagnostic panel that found the LiveKitRoom
+  // video={false} race is off by default now, reachable again via
+  // ?debug=1 if a future stage needs it. The bounded-retry detection and
+  // its operator-facing failure banners are NOT gated -- those are a
+  // permanent safety net, not debug tooling.
+  const debugMode = searchParams.get('debug') === '1';
 
   const [role, setRole] = useState(searchParams.get('role'));
   const [devices, setDevices] = useState([]);
@@ -245,16 +252,12 @@ export default function CamPage() {
       data-lk-theme="default"
       style={{ height: '100vh', width: '100%' }}
     >
-      <CamPublisher onDeviceIdChange={setDeviceId} role={role} liveKitRoomError={liveKitRoomError} />
+      <CamPublisher onDeviceIdChange={setDeviceId} role={role} liveKitRoomError={liveKitRoomError} debugMode={debugMode} />
     </LiveKitRoom>
   );
 }
 
-// 1080p target resolution + explicit device selection, per the L5
-// amendment -- neither is possible via <LiveKitRoom>'s blunt `video`
-// prop, which is why this connects with video={false} above and
-// publishes manually here instead.
-function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
+function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
@@ -291,10 +294,11 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
   const mountedAtRef = useRef(Date.now());
 
   const logEvent = useCallback((label) => {
+    if (!debugMode) return;
     const t = `+${Date.now() - mountedAtRef.current}ms`;
     console.error(`[cam][lifecycle] ${t} ${label}`);
     setEventLog((prev) => [...prev.slice(-39), `${t} ${label}`]);
-  }, []);
+  }, [debugMode]);
 
   // Manual, opt-in rotation correction for a landscape/capture-card
   // source whose delivered frame lies about its own orientation (see
@@ -404,6 +408,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
   const [chainSnapshot, setChainSnapshot] = useState(null);
 
   useEffect(() => {
+    if (!debugMode) return undefined;
     const interval = setInterval(() => {
       const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
       const videoTrack = pub?.videoTrack;
@@ -430,7 +435,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
       });
     }, 400);
     return () => clearInterval(interval);
-  }, [room]);
+  }, [room, debugMode]);
 
   // DEBUG -- WHY does the track go from 'live' to 'ended'? The prior
   // version of this instrumentation captured the raw MediaStreamTrack
@@ -460,6 +465,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
   const trackSidForLifecycle = myCameraPublication?.trackSid;
 
   useEffect(() => {
+    if (!debugMode) return undefined;
     const videoTrack = myCameraPublication?.videoTrack;
     if (!videoTrack) return undefined;
 
@@ -532,21 +538,20 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
       videoTrack.off(TrackEvent.Muted, handleMuted);
       videoTrack.off(TrackEvent.Unmuted, handleUnmuted);
     };
-  }, [trackSidForLifecycle, logEvent]);
+  }, [trackSidForLifecycle, logEvent, debugMode]);
 
-  // Confirms/denies the specific suspected race: <LiveKitRoom
-  // video={false}> calls setCameraEnabled(false, ...) on every
-  // SignalConnected, which can fire again on a reconnect -- if that's
-  // landing after CamPublisher's own setCameraEnabled(true, ...), this
-  // is where we'd see it, correlated against the Muted/Restarted log
-  // above.
+  // Historical: this is what confirmed the LiveKitRoom video={false} vs
+  // manual setCameraEnabled race (now fixed -- acquisition is declarative
+  // via the video prop, so there's no second caller left to race).
+  // Harmless to keep logging reconnects for future debugging.
   useEffect(() => {
+    if (!debugMode) return undefined;
     function handleSignalConnected() {
-      logEvent('RoomEvent.SignalConnected fired (LiveKitRoom video={false} will call setCameraEnabled(false, ...) now)');
+      logEvent('RoomEvent.SignalConnected fired');
     }
     room.on(RoomEvent.SignalConnected, handleSignalConnected);
     return () => room.off(RoomEvent.SignalConnected, handleSignalConnected);
-  }, [room, logEvent]);
+  }, [room, logEvent, debugMode]);
 
   // Keeps a propped phone from sleeping mid-show. Not all browsers
   // support the Wake Lock API -- silently ignored where they don't,
@@ -606,101 +611,124 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
         {role.toUpperCase()}
       </div>
       {/* DEBUG -- the full acquisition -> attachment -> play -> dimensions
-          chain, on screen, in order, so the exact broken link is
-          visible instead of guessed at. Safe to delete once the real
-          cause is found and fixed. */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 8,
-          right: 8,
-          // Bounded + scrollable, not just bottom-anchored -- with no
-          // height cap this panel just grows upward as more numbered
-          // lines get added, past the top of the viewport with nothing
-          // to indicate more content exists above. maxHeight + bottom
-          // keeps it anchored to the same spot while guaranteeing
-          // everything (including line 12's full event log) stays
-          // reachable by scrolling THIS one box.
-          maxHeight: '55vh',
-          overflowY: 'auto',
-          padding: '8px 10px',
-          borderRadius: 6,
-          background: liveKitRoomError || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
-          color: PORCELAIN,
-          fontFamily: 'monospace',
-          fontSize: 10,
-          lineHeight: 1.5,
-        }}
-      >
-        <div>
-          1. ACQUIRE (declarative, via LiveKitRoom video prop): {liveKitRoomError
-            ? `ERROR -- ${liveKitRoomError.name}: ${liveKitRoomError.message}`
-            : chainSnapshot?.mstFound && chainSnapshot?.mstReadyState === 'live'
-              ? 'success (live track present)'
-              : 'pending...'}
-        </div>
-        <div>2. publication: {chainSnapshot?.publicationFound ? 'found' : 'MISSING'}</div>
-        <div>3. videoTrack (LiveKit wrapper): {chainSnapshot?.videoTrackFound ? 'found' : 'MISSING'}</div>
-        <div>
-          4. MediaStreamTrack: {chainSnapshot?.mstFound ? `found (readyState=${chainSnapshot.mstReadyState}, id=${chainSnapshot.mstId?.slice(0, 8)})` : 'MISSING'}
-        </div>
-        <div>
-          5. getSettings(): {chainSnapshot?.settingsWidth ? `${chainSnapshot.settingsWidth}x${chainSnapshot.settingsHeight}` : 'no width/height'}
-        </div>
-        <div>6. &lt;video&gt; element (ref): {chainSnapshot?.videoElFound ? 'found' : 'MISSING -- ref never attached'}</div>
-        <div>
-          7. srcObject: {chainSnapshot?.srcObjectSet ? `set (${chainSnapshot.srcObjectTrackCount} video track${chainSnapshot.srcObjectTrackCount === 1 ? '' : 's'})` : 'NOT SET'}
-        </div>
-        <div>
-          8. playback: paused={String(chainSnapshot?.paused)}, readyState={chainSnapshot?.readyState} (0=NOTHING..4=ENOUGH_DATA), currentTime={typeof chainSnapshot?.currentTime === 'number' ? chainSnapshot.currentTime.toFixed(2) : '--'}
-        </div>
-        <div>
-          9. video element size: {chainSnapshot?.videoWidth}x{chainSnapshot?.videoHeight}
-        </div>
-        <div>
-          10. detection ({'>'}Stage 1{'<'}): {sourceDims?.status === 'ready'
-            ? `${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped)'}${sourceDims.attempts > 1 ? ` (${sourceDims.attempts} tries)` : sourceDims.attempts === 1 ? ' (1st try)' : ''}`
-            : sourceDims?.status === 'failed'
-              ? `FAILED after ${sourceDims.attempts} tries`
-              : `detecting...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
-        </div>
-        {endedInfo && (
-          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
-            <div>
-              11. TRACK LIFECYCLE: watching id={endedInfo.trackId}
-              {endedInfo.status === 'ended'
-                ? ` -- ENDED ${endedInfo.endedEventAt - endedInfo.acquiredAt}ms after this bind`
-                : ' -- live'}
+          chain, on screen, in order. This is what found the LiveKitRoom
+          video={false} race -- Stage 1 is verified working now, so this
+          is off by default, reachable again via ?debug=1 for whatever
+          comes up in Stage 2+. */}
+      {debugMode && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 8,
+            right: 8,
+            // Bounded + scrollable, not just bottom-anchored -- with no
+            // height cap this panel just grows upward as more numbered
+            // lines get added, past the top of the viewport with nothing
+            // to indicate more content exists above. maxHeight + bottom
+            // keeps it anchored to the same spot while guaranteeing
+            // everything (including line 12's full event log) stays
+            // reachable by scrolling THIS one box.
+            maxHeight: '55vh',
+            overflowY: 'auto',
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: liveKitRoomError || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
+            color: PORCELAIN,
+            fontFamily: 'monospace',
+            fontSize: 10,
+            lineHeight: 1.5,
+          }}
+        >
+          <div>
+            1. ACQUIRE (declarative, via LiveKitRoom video prop): {liveKitRoomError
+              ? `ERROR -- ${liveKitRoomError.name}: ${liveKitRoomError.message}`
+              : chainSnapshot?.mstFound && chainSnapshot?.mstReadyState === 'live'
+                ? 'success (live track present)'
+                : 'pending...'}
+          </div>
+          <div>2. publication: {chainSnapshot?.publicationFound ? 'found' : 'MISSING'}</div>
+          <div>3. videoTrack (LiveKit wrapper): {chainSnapshot?.videoTrackFound ? 'found' : 'MISSING'}</div>
+          <div>
+            4. MediaStreamTrack: {chainSnapshot?.mstFound ? `found (readyState=${chainSnapshot.mstReadyState}, id=${chainSnapshot.mstId?.slice(0, 8)})` : 'MISSING'}
+          </div>
+          <div>
+            5. getSettings(): {chainSnapshot?.settingsWidth ? `${chainSnapshot.settingsWidth}x${chainSnapshot.settingsHeight}` : 'no width/height'}
+          </div>
+          <div>6. &lt;video&gt; element (ref): {chainSnapshot?.videoElFound ? 'found' : 'MISSING -- ref never attached'}</div>
+          <div>
+            7. srcObject: {chainSnapshot?.srcObjectSet ? `set (${chainSnapshot.srcObjectTrackCount} video track${chainSnapshot.srcObjectTrackCount === 1 ? '' : 's'})` : 'NOT SET'}
+          </div>
+          <div>
+            8. playback: paused={String(chainSnapshot?.paused)}, readyState={chainSnapshot?.readyState} (0=NOTHING..4=ENOUGH_DATA), currentTime={typeof chainSnapshot?.currentTime === 'number' ? chainSnapshot.currentTime.toFixed(2) : '--'}
+          </div>
+          <div>
+            9. video element size: {chainSnapshot?.videoWidth}x{chainSnapshot?.videoHeight}
+          </div>
+          <div>
+            10. detection: {sourceDims?.status === 'ready'
+              ? `${sourceDims.width}x${sourceDims.height} -- ${sourceDims.isPortraitSource ? 'native portrait' : 'landscape (cropped)'}${sourceDims.attempts > 1 ? ` (${sourceDims.attempts} tries)` : sourceDims.attempts === 1 ? ' (1st try)' : ''}`
+              : sourceDims?.status === 'failed'
+                ? `FAILED after ${sourceDims.attempts} tries`
+                : `detecting...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
+          </div>
+          {endedInfo && (
+            <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
+              <div>
+                11. TRACK LIFECYCLE: watching id={endedInfo.trackId}
+                {endedInfo.status === 'ended'
+                  ? ` -- ENDED ${endedInfo.endedEventAt - endedInfo.acquiredAt}ms after this bind`
+                  : ' -- live'}
+              </div>
+              {endedInfo.wrapperStopAt && (
+                <div>-- LocalVideoTrack.stop() called at +{endedInfo.wrapperStopAt - endedInfo.acquiredAt}ms: {endedInfo.wrapperStopStack}</div>
+              )}
+              {endedInfo.rawStopAt && (
+                <div>-- MediaStreamTrack.stop() called at +{endedInfo.rawStopAt - endedInfo.acquiredAt}ms: {endedInfo.rawStopStack}</div>
+              )}
+              {endedInfo.status === 'ended' && !endedInfo.wrapperStopAt && !endedInfo.rawStopAt && (
+                <div>-- No .stop() intercepted on this page -- likely ended externally (browser/OS/hardware/another tab)</div>
+              )}
             </div>
-            {endedInfo.wrapperStopAt && (
-              <div>-- LocalVideoTrack.stop() called at +{endedInfo.wrapperStopAt - endedInfo.acquiredAt}ms: {endedInfo.wrapperStopStack}</div>
-            )}
-            {endedInfo.rawStopAt && (
-              <div>-- MediaStreamTrack.stop() called at +{endedInfo.rawStopAt - endedInfo.acquiredAt}ms: {endedInfo.rawStopStack}</div>
-            )}
-            {endedInfo.status === 'ended' && !endedInfo.wrapperStopAt && !endedInfo.rawStopAt && (
-              <div>-- No .stop() intercepted on this page -- likely ended externally (browser/OS/hardware/another tab)</div>
-            )}
-          </div>
-        )}
-        {eventLog.length > 0 && (
-          // No separate scroll region here on purpose -- one nested
-          // scrollbox fighting the outer one for wheel/touch events is
-          // worse than just letting the whole panel (bounded above)
-          // scroll as a single unit.
-          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
-            <div>12. EVENT LOG ({eventLog.length} entries, oldest first -- setCameraEnabled/restart/mute/unmute/reconnect):</div>
-            {eventLog.map((line, i) => (
-              <div key={i}>{line}</div>
-            ))}
-          </div>
-        )}
-      </div>
-      {/* A visible failure beats an infinite silent "detecting" wait --
-          this is the actionable, operator-facing version of the same
-          state the DEBUG label above reports more tersely. */}
-      {sourceDims?.status === 'failed' && (
+          )}
+          {eventLog.length > 0 && (
+            // No separate scroll region here on purpose -- one nested
+            // scrollbox fighting the outer one for wheel/touch events is
+            // worse than just letting the whole panel (bounded above)
+            // scroll as a single unit.
+            <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
+              <div>12. EVENT LOG ({eventLog.length} entries, oldest first -- setCameraEnabled/restart/mute/unmute/reconnect):</div>
+              {eventLog.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Permanent safety net, NOT gated behind debugMode -- a visible
+          failure beats an infinite silent wait or a mysterious frozen
+          feed, for any operator, not just someone debugging. */}
+      {liveKitRoomError && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            padding: '14px 18px',
+            borderRadius: 8,
+            background: 'rgba(1, 22, 39, 0.9)',
+            border: '1px solid #e71d36',
+            color: PORCELAIN,
+            fontSize: 13,
+            textAlign: 'center',
+            maxWidth: 280,
+          }}
+        >
+          Camera access failed ({liveKitRoomError.name}) -- try reselecting the device or reloading.
+        </div>
+      )}
+      {!liveKitRoomError && sourceDims?.status === 'failed' && (
         <div
           style={{
             position: 'absolute',
