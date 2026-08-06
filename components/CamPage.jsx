@@ -21,7 +21,7 @@
 // already used for camfeed devices in LiveDemo.jsx.
 // ─────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   LiveKitRoom,
@@ -32,6 +32,7 @@ import {
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
 import { useSourceDimensions } from '../lib/useSourceDimensions';
+import { createRotationProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -234,7 +235,56 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   // doesn't drive rendering here (object-fit: cover on the portrait-
   // shaped preview below already does the right thing either way).
   const myCameraPublication = room.localParticipant.getTrackPublication(Track.Source.Camera);
-  const sourceDims = useSourceDimensions(myCameraPublication);
+  // rotationVersion is bumped on every successful rotation change so
+  // useSourceDimensions re-checks against the processor's (rotated)
+  // output instead of the raw pre-rotation track -- see its own comment
+  // for why this can't be discovered automatically.
+  const [rotationVersion, setRotationVersion] = useState(0);
+  const sourceDims = useSourceDimensions(myCameraPublication, rotationVersion);
+
+  // Manual, opt-in rotation correction for a landscape/capture-card
+  // source whose delivered frame lies about its own orientation (see
+  // lib/rotationProcessor.js) -- default 0deg/off, never applied unless
+  // the operator picks a non-zero option below by eye. rotationRef holds
+  // the currently-attached processor instance (or null) so a later call
+  // can stop/replace it; not component state, since the processor
+  // object itself isn't meant to trigger re-renders.
+  const [rotation, setRotation] = useState(0);
+  const [rotationError, setRotationError] = useState('');
+  const rotationProcessorRef = useRef(null);
+
+  const applyRotation = useCallback(async (degrees) => {
+    const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+    if (!videoTrack) return;
+    setRotationError('');
+    try {
+      if (degrees === 0) {
+        if (rotationProcessorRef.current) {
+          await videoTrack.stopProcessor();
+          rotationProcessorRef.current = null;
+        }
+      } else {
+        const processor = createRotationProcessor(degrees);
+        // showProcessedStreamLocally: true -- the operator's own preview
+        // shows the corrected result too, so they can pick the right
+        // rotation by eye rather than guessing blind.
+        await videoTrack.setProcessor(processor, true);
+        rotationProcessorRef.current = processor;
+      }
+      setRotation(degrees);
+      setRotationVersion((v) => v + 1);
+    } catch (e) {
+      // Confirmed against the compiled SDK source: setProcessor only
+      // calls sender.replaceTrack() AFTER processor.init() resolves, so
+      // a failure here never touches what's currently published --
+      // whatever rotation (including 0/off) was working before stays
+      // working. Deliberately NOT resetting `rotation` state to 0 here:
+      // it should keep reflecting whatever's actually still live, not
+      // silently imply the failed pick took effect.
+      console.error('[cam] rotation failed', e);
+      setRotationError('Rotation failed -- feed is still publishing normally.');
+    }
+  }, [room]);
 
   useEffect(() => {
     // Verified against the installed livekit-client source
@@ -289,6 +339,16 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     })();
     return () => {
       wakeLock?.release?.().catch(() => {});
+    };
+  }, []);
+
+  // Release the canvas/video-element resources behind an active
+  // rotation processor if this component ever unmounts without the
+  // operator switching back to 0deg first (e.g. a disconnect, not just
+  // a tab close, which would tear everything down on its own anyway).
+  useEffect(() => {
+    return () => {
+      rotationProcessorRef.current?.destroy?.();
     };
   }, []);
 
@@ -359,6 +419,40 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
       >
         Flip to {facingMode === 'environment' ? 'front' : 'rear'}
       </button>
+
+      {/* Manual rotation for a landscape/capture-card source whose
+          delivered frame lies about its own orientation -- there's no
+          reliable way to auto-detect this, so it's opt-in and by-eye:
+          pick whichever option makes the preview above look upright.
+          Not phone-relevant (phones already deliver correct portrait),
+          but left always-visible here rather than gated behind a
+          device-type guess -- small and clearly optional, doesn't
+          block or complicate the common case where nobody touches it. */}
+      <div style={{ position: 'absolute', top: 70, left: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {ROTATION_OPTIONS_DEG.map((deg) => (
+            <button
+              key={deg}
+              type="button"
+              onClick={() => applyRotation(deg)}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: rotation === deg ? TEAL : 'rgba(1, 22, 39, 0.7)',
+                color: rotation === deg ? INK : PORCELAIN,
+                border: '1px solid rgba(253, 255, 252, 0.3)',
+                fontWeight: 700,
+                fontSize: 12,
+              }}
+            >
+              {deg}°
+            </button>
+          ))}
+        </div>
+        {rotationError && (
+          <span style={{ fontSize: 11, color: '#e71d36', maxWidth: 200 }}>{rotationError}</span>
+        )}
+      </div>
     </div>
   );
 }
