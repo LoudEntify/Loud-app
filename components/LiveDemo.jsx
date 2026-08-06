@@ -19,7 +19,7 @@ import ViewerStage from './ViewerStage';
 import DirectorShotPanel from './DirectorShotPanel';
 import CameraQRPanel from './CameraQRPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
-import { useSourceDimensions } from '../lib/useSourceDimensions';
+import { useSourceDimensions, useTrackAspect } from '../lib/useSourceDimensions';
 import { SHOT_TYPES, CAMERA_CHANGE_FADE_MS, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
@@ -193,6 +193,20 @@ function waitForFirstFrame(videoEl, timeoutMs, onReady) {
   return cleanup;
 }
 
+// Portrait work, Stage 2 -- SHOT_TYPES.transform for mediumCU/closeUp/
+// bRoll/zoomIn/zoomOut/dolly is now aspect-ratio-keyed ({ landscape,
+// portrait }); wide/follow stay `null` (no crop at all, correct as-is
+// regardless of aspect ratio); pan/staccato stay flat objects (Stage 3
+// territory, unchanged here). This picks the right shape out of
+// whichever of those three a shot actually has.
+function resolveTransform(transform, isPortrait) {
+  if (!transform) return null;
+  if (transform.landscape || transform.portrait) {
+    return isPortrait ? transform.portrait : transform.landscape;
+  }
+  return transform;
+}
+
 // Computes the crop/animatedZoom/animatedPan CSS transform for the active
 // shot and applies it to a wrapper div around the video. Ported from
 // ShotRenderer.jsx's transform effect -- the track attach/detach and
@@ -202,6 +216,13 @@ function waitForFirstFrame(videoEl, timeoutMs, onReady) {
 function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
   const [style, setStyle] = useState({});
   const rafRef = useRef(null);
+  // Whichever track is actually active for this slot right now -- the
+  // local participant's own camera, or a remote camfeed device's.
+  // Defaults to landscape (today's only values, pre-Stage-1) while
+  // detection is still pending, so nothing regresses before a real
+  // frame's dimensions are known.
+  const aspect = useTrackAspect(trackRef);
+  const isPortrait = aspect?.isPortraitSource ?? false;
 
   useEffect(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -216,7 +237,7 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
       return undefined;
     }
 
-    const t = shot.transform;
+    const t = resolveTransform(shot.transform, isPortrait);
 
     if (!t || (t.optional && !command.params?.vertigo)) {
       setStyle({ transform: 'scale(1)', transition: 'none' });
@@ -271,7 +292,11 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
     // hardCutSequence never reaches here -- the sequencer emits concrete
     // static-shot commands, so viewers only ever see wide/closeUp/bRoll cuts.
     return undefined;
-  }, [command]);
+    // isPortrait in deps: a source rotating mid-show (Stage 1 detection
+    // flipping live) re-resolves and re-applies the transform for
+    // whatever command is currently active, without needing a new
+    // SHOT_COMMAND to fire.
+  }, [command, isPortrait]);
 
   useEffect(() => () => rafRef.current && cancelAnimationFrame(rafRef.current), []);
 
