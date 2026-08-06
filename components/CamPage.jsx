@@ -29,7 +29,7 @@ import {
   useTracks,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, TrackEvent, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
 import { useSourceDimensions } from '../lib/useSourceDimensions';
 import { createRotationProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
@@ -413,66 +413,129 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     return () => clearInterval(interval);
   }, [room]);
 
-  // DEBUG -- WHY does the track go from 'live' to 'ended'? The native
-  // 'ended' event alone confirms WHEN but gives no stack, since the
-  // browser dispatches it asynchronously regardless of what triggered
-  // it. To catch WHERE, this monkey-patches .stop() on both the raw
-  // MediaStreamTrack and the LiveKit LocalVideoTrack wrapper the moment
-  // either becomes available -- reassigning an own-instance method
-  // shadows the prototype's for this one track only, and is restored on
-  // cleanup. Patching BOTH layers matters: if OUR code (or LiveKit's own
-  // internals, e.g. a restart swapping tracks) calls either one, the
-  // patched version runs first and records a real call stack before
-  // deferring to the original. If the track still ends with NEITHER
-  // patched stop() ever firing, that's strong evidence it's being ended
-  // externally -- the browser, the OS, another tab, or the hardware
-  // itself -- not by any JS running on this page.
+  // DEBUG -- WHY does the track go from 'live' to 'ended'? The prior
+  // version of this instrumentation captured the raw MediaStreamTrack
+  // ONCE via closure (keyed only on trackSid, which stays stable across
+  // a restart/track-swap) and never rebound -- so it silently watched
+  // an ABANDONED track while the wrapper moved on to a new one, which is
+  // exactly the "two different track ids" mismatch that showed up: line
+  // 4 (polls fresh every 400ms) tracked the CURRENT track; line 11
+  // (closure-captured once) was stuck on the ORIGINAL one. This version
+  // rebinds on TrackEvent.Restarted -- the same event
+  // lib/useSourceDimensions.js already correctly handles -- so it always
+  // reflects whichever track is actually current, and logs every
+  // restart (old id -> new id) instead of silently going stale again.
+  //
+  // Also logs TrackEvent.Muted/Unmuted and RoomEvent.SignalConnected
+  // (below): LocalVideoTrack.unmute() unconditionally reacquires the
+  // camera via restart() when source is Camera (confirmed against the
+  // compiled SDK) -- so if this track gets muted and later unmuted, a
+  // NEW MediaStreamTrack gets created. And <LiveKitRoom video={false}>
+  // (used deliberately here to avoid its declarative publish path) still
+  // calls setCameraEnabled(false, ...) on every SignalConnected --
+  // confirmed to fire on reconnects, not just the initial connect -- a
+  // real candidate for muting an already-published track out from under
+  // CamPublisher's own setCameraEnabled(true, ...). Logging both
+  // together shows whether that's actually what's happening.
   const [endedInfo, setEndedInfo] = useState(null);
+  const [eventLog, setEventLog] = useState([]);
+  const mountedAtRef = useRef(Date.now());
   const trackSidForLifecycle = myCameraPublication?.trackSid;
+
+  const logEvent = useCallback((label) => {
+    const t = `+${Date.now() - mountedAtRef.current}ms`;
+    console.error(`[cam][lifecycle] ${t} ${label}`);
+    setEventLog((prev) => [...prev.slice(-14), `${t} ${label}`]);
+  }, []);
 
   useEffect(() => {
     const videoTrack = myCameraPublication?.videoTrack;
-    const mst = videoTrack?.mediaStreamTrack;
-    if (!videoTrack || !mst) return undefined;
+    if (!videoTrack) return undefined;
 
-    const acquiredAt = Date.now();
-    setEndedInfo({ acquiredAt, status: 'live' });
+    let detachCurrent = null;
 
+    function shortId(mst) {
+      return mst?.id ? mst.id.slice(0, 8) : 'none';
+    }
     function shortStack(stack) {
       return (stack || '').split('\n').slice(1, 6).join(' | ');
     }
 
-    const originalWrapperStop = typeof videoTrack.stop === 'function' ? videoTrack.stop.bind(videoTrack) : null;
-    const originalRawStop = mst.stop.bind(mst);
+    function attachTo(mst) {
+      if (!mst) return null;
+      const originalRawStop = mst.stop.bind(mst);
+      mst.stop = function (...args) {
+        const stack = new Error().stack;
+        logEvent(`MediaStreamTrack.stop() called on id=${shortId(mst)}`);
+        setEndedInfo((prev) => ({ ...(prev || {}), rawStopAt: Date.now(), rawStopStack: shortStack(stack) }));
+        return originalRawStop(...args);
+      };
+      function handleEnded() {
+        logEvent(`'ended' event fired on id=${shortId(mst)}`);
+        setEndedInfo((prev) => ({ ...(prev || {}), endedEventAt: Date.now(), status: 'ended' }));
+      }
+      mst.addEventListener('ended', handleEnded);
+      return () => {
+        mst.stop = originalRawStop;
+        mst.removeEventListener('ended', handleEnded);
+      };
+    }
 
+    function bindCurrent(reason) {
+      detachCurrent?.();
+      const mst = videoTrack.mediaStreamTrack;
+      logEvent(`${reason}: now watching id=${shortId(mst)} (readyState=${mst?.readyState})`);
+      setEndedInfo({ acquiredAt: Date.now(), status: mst?.readyState === 'ended' ? 'ended' : 'live', trackId: shortId(mst) });
+      detachCurrent = attachTo(mst);
+    }
+
+    const originalWrapperStop = typeof videoTrack.stop === 'function' ? videoTrack.stop.bind(videoTrack) : null;
     if (originalWrapperStop) {
       videoTrack.stop = function (...args) {
         const stack = new Error().stack;
-        console.error('[cam][lifecycle] LocalVideoTrack.stop() called', stack);
+        logEvent('LocalVideoTrack.stop() (wrapper) called');
         setEndedInfo((prev) => ({ ...(prev || {}), wrapperStopAt: Date.now(), wrapperStopStack: shortStack(stack) }));
         return originalWrapperStop(...args);
       };
     }
 
-    mst.stop = function (...args) {
-      const stack = new Error().stack;
-      console.error('[cam][lifecycle] MediaStreamTrack.stop() called', stack);
-      setEndedInfo((prev) => ({ ...(prev || {}), rawStopAt: Date.now(), rawStopStack: shortStack(stack) }));
-      return originalRawStop(...args);
-    };
-
-    function handleEnded() {
-      console.error('[cam][lifecycle] MediaStreamTrack "ended" event fired');
-      setEndedInfo((prev) => ({ ...(prev || {}), endedEventAt: Date.now(), status: 'ended' }));
+    function handleRestarted() {
+      bindCurrent('TrackEvent.Restarted fired');
     }
-    mst.addEventListener('ended', handleEnded);
+    function handleMuted() {
+      logEvent('TrackEvent.Muted fired');
+    }
+    function handleUnmuted() {
+      logEvent('TrackEvent.Unmuted fired (unmute() reacquires via restart() for Camera source)');
+    }
+
+    bindCurrent('initial bind');
+    videoTrack.on(TrackEvent.Restarted, handleRestarted);
+    videoTrack.on(TrackEvent.Muted, handleMuted);
+    videoTrack.on(TrackEvent.Unmuted, handleUnmuted);
 
     return () => {
+      detachCurrent?.();
       if (originalWrapperStop) videoTrack.stop = originalWrapperStop;
-      mst.stop = originalRawStop;
-      mst.removeEventListener('ended', handleEnded);
+      videoTrack.off(TrackEvent.Restarted, handleRestarted);
+      videoTrack.off(TrackEvent.Muted, handleMuted);
+      videoTrack.off(TrackEvent.Unmuted, handleUnmuted);
     };
-  }, [trackSidForLifecycle]);
+  }, [trackSidForLifecycle, logEvent]);
+
+  // Confirms/denies the specific suspected race: <LiveKitRoom
+  // video={false}> calls setCameraEnabled(false, ...) on every
+  // SignalConnected, which can fire again on a reconnect -- if that's
+  // landing after CamPublisher's own setCameraEnabled(true, ...), this
+  // is where we'd see it, correlated against the Muted/Restarted log
+  // above.
+  useEffect(() => {
+    function handleSignalConnected() {
+      logEvent('RoomEvent.SignalConnected fired (LiveKitRoom video={false} will call setCameraEnabled(false, ...) now)');
+    }
+    room.on(RoomEvent.SignalConnected, handleSignalConnected);
+    return () => room.off(RoomEvent.SignalConnected, handleSignalConnected);
+  }, [room, logEvent]);
 
   // Keeps a propped phone from sleeping mid-show. Not all browsers
   // support the Wake Lock API -- silently ignored where they don't,
@@ -582,10 +645,10 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
         {endedInfo && (
           <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
             <div>
-              11. TRACK LIFECYCLE: acquired
+              11. TRACK LIFECYCLE: watching id={endedInfo.trackId}
               {endedInfo.status === 'ended'
-                ? ` -- ENDED ${endedInfo.endedEventAt - endedInfo.acquiredAt}ms later`
-                : ' -- still live'}
+                ? ` -- ENDED ${endedInfo.endedEventAt - endedInfo.acquiredAt}ms after this bind`
+                : ' -- live'}
             </div>
             {endedInfo.wrapperStopAt && (
               <div>-- LocalVideoTrack.stop() called at +{endedInfo.wrapperStopAt - endedInfo.acquiredAt}ms: {endedInfo.wrapperStopStack}</div>
@@ -596,6 +659,14 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
             {endedInfo.status === 'ended' && !endedInfo.wrapperStopAt && !endedInfo.rawStopAt && (
               <div>-- No .stop() intercepted on this page -- likely ended externally (browser/OS/hardware/another tab)</div>
             )}
+          </div>
+        )}
+        {eventLog.length > 0 && (
+          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4, maxHeight: 120, overflowY: 'auto' }}>
+            <div>12. EVENT LOG (rebind/mute/reconnect, oldest first):</div>
+            {eventLog.map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
           </div>
         )}
       </div>
