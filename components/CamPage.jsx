@@ -11,14 +11,27 @@
 // shared code, since that one is inline JSX in LiveDemo.jsx, not an
 // extracted component).
 //
-// Deliberately does NOT use the declarative <LiveKitRoom video> prop --
-// that publishes the browser's default camera with default constraints,
-// with no way to pick a device or resolution. Instead connects with
-// video={false} and manually calls localParticipant.setCameraEnabled()
-// with an explicit deviceId + 1080p resolution once the operator has
-// chosen a camera, inside a small child component (CamPublisher) that
-// has room context via the same useRoomContext()/useTracks() pattern
-// already used for camfeed devices in LiveDemo.jsx.
+// USES the declarative <LiveKitRoom video={...}> prop, passing it the
+// full VideoCaptureOptions object (deviceId + 1080p resolution) rather
+// than a boolean -- @livekit/components-react's LiveKitRoom forwards a
+// non-boolean `video` prop straight through as setCameraEnabled's
+// options argument (verified against its compiled source), so this
+// gets the exact constrained acquisition previously done via a manual
+// setCameraEnabled(true, {...}) call, without a second caller.
+//
+// That manual call used to run from video={false} plus an effect in a
+// child component (CamPublisher) -- deliberately, to allow picking a
+// device/resolution the boolean prop can't express. It regressed hard:
+// LiveKitRoom's OWN internal effect calls setCameraEnabled(false, ...)
+// on every RoomEvent.SignalConnected specifically because video={false}
+// told it camera-should-be-off -- including on a mid-session reconnect,
+// which raced against the manual enable that was still mid-acquisition
+// and killed the track, confirmed via the on-screen event log below
+// (real timestamps: enable starts, SignalConnected+disable fires while
+// still pending, enable "succeeds" with what's now a dead track).
+// video={<options>} removes the second caller entirely -- there's only
+// ever one thing telling LiveKit what the camera should be, so nothing
+// is left to fight it, on the initial connect OR a later reconnect.
 // ─────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -72,6 +85,11 @@ export default function CamPage() {
   const [deviceError, setDeviceError] = useState('');
   const [conn, setConn] = useState(null);
   const [connectError, setConnectError] = useState('');
+  // Surfaced via <LiveKitRoom onError>, which fires if the declarative
+  // video-prop acquisition below rejects -- passed down to CamPublisher
+  // purely for the DEBUG panel's "ACQUIRE" line, same as the manual
+  // try/catch this replaces used to show on screen.
+  const [liveKitRoomError, setLiveKitRoomError] = useState(null);
 
   // Device labels only populate after permission is granted, so a
   // throwaway getUserMedia call comes first -- the track from it is
@@ -206,17 +224,28 @@ export default function CamPage() {
     );
   }
 
+  // If the operator explicitly picked a device from the L5 dropdown,
+  // honor that deviceId. Otherwise default to the rear camera via
+  // facingMode instead of enumerateDevices()'s arbitrary first entry.
+  // This is now the ONLY place camera constraints get decided -- passed
+  // straight into LiveKitRoom's video prop below, not called again
+  // manually anywhere.
+  const videoCaptureOptions = deviceChosen
+    ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
+    : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE };
+
   return (
     <LiveKitRoom
       token={conn.token}
       serverUrl={conn.url}
       connect
       audio={false}
-      video={false}
+      video={videoCaptureOptions}
+      onError={(e) => setLiveKitRoomError({ name: e?.name, message: e?.message })}
       data-lk-theme="default"
       style={{ height: '100vh', width: '100%' }}
     >
-      <CamPublisher deviceId={deviceId} deviceChosen={deviceChosen} onDeviceIdChange={setDeviceId} role={role} />
+      <CamPublisher onDeviceIdChange={setDeviceId} role={role} liveKitRoomError={liveKitRoomError} />
     </LiveKitRoom>
   );
 }
@@ -225,7 +254,7 @@ export default function CamPage() {
 // amendment -- neither is possible via <LiveKitRoom>'s blunt `video`
 // prop, which is why this connects with video={false} above and
 // publishes manually here instead.
-function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
+function CamPublisher({ onDeviceIdChange, role, liveKitRoomError }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const myTrack = tracks.find((t) => t.participant.identity === room.localParticipant.identity);
@@ -326,64 +355,19 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     }
   }, [room, logEvent]);
 
-  // DEBUG -- the real outcome of setCameraEnabled, on screen. This call
-  // previously had no error handling at all: if it rejected for any
-  // reason, the failure was completely silent -- myTrack would just
-  // never resolve, with nothing to say why. This doesn't fix anything,
-  // it makes the actual error (if there is one) visible instead of
-  // guessed at.
-  const [acquireResult, setAcquireResult] = useState({ status: 'pending' });
-
+  // Acquisition itself now happens declaratively via LiveKitRoom's video
+  // prop (see CamPage, above) -- there's no manual setCameraEnabled call
+  // here anymore, which is the actual fix: only one caller ever tells
+  // LiveKit what the camera should be, so nothing can race it. The
+  // "ACQUIRE" line in the DEBUG panel below is derived from chainSnapshot
+  // (is there currently a live track) plus liveKitRoomError (surfaced via
+  // LiveKitRoom's onError, which fires if that declarative acquisition
+  // itself rejects) -- not from a separate try/catch anymore, since there's
+  // no call left here to wrap.
   useEffect(() => {
-    let cancelled = false;
-    // Verified against the installed livekit-client source
-    // (constraintsForOptions in dist/livekit-client.esm.mjs): plain
-    // numbers in `resolution` are flattened unwrapped into the
-    // getUserMedia constraint set, and a bare number there is already
-    // "ideal" per the Web platform's constraint algorithm -- only
-    // {exact: ...} hard-fails. frameRate isn't part of VideoResolution
-    // though, so it needs its own explicit {ideal: 30} here, on the
-    // separate top-level frameRate field VideoCaptureOptions exposes
-    // for exactly this (typed as a full ConstrainDouble, not a plain
-    // number like width/height) -- explicit rather than relying on
-    // implicit bare-number semantics, so the "never hard-fail" intent
-    // is visible in the code itself.
-    //
-    // If the operator explicitly picked a device from the L5 dropdown,
-    // honor that deviceId. Otherwise default to the rear camera via
-    // facingMode instead of enumerateDevices()'s arbitrary first entry.
-    // Logs every time THIS EFFECT fires, not just success/failure -- if
-    // deviceChosen/deviceId/room ever genuinely changes and re-runs it,
-    // that's the single most direct way to see OUR OWN code calling
-    // setCameraEnabled(true, ...) more than once, as opposed to
-    // something internal to LiveKit (mute/unmute/restart, a reconnect)
-    // doing an equivalent reacquisition on its own.
-    logEvent(`setCameraEnabled(true, ...) effect fired (deviceChosen=${deviceChosen}, deviceId=${deviceId?.slice?.(0, 8)})`);
-    (async () => {
-      setAcquireResult({ status: 'pending' });
-      try {
-        await room.localParticipant.setCameraEnabled(
-          true,
-          deviceChosen
-            ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
-            : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }
-        );
-        if (!cancelled) {
-          setAcquireResult({ status: 'success' });
-          logEvent('setCameraEnabled(true, ...) resolved: success');
-        }
-      } catch (e) {
-        console.error('[cam] setCameraEnabled failed', e);
-        if (!cancelled) {
-          setAcquireResult({ status: 'error', name: e?.name, message: e?.message });
-          logEvent(`setCameraEnabled(true, ...) REJECTED: ${e?.name}: ${e?.message}`);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [room, deviceChosen, deviceId, logEvent]);
+    if (!liveKitRoomError) return;
+    logEvent(`LiveKitRoom onError: ${liveKitRoomError.name}: ${liveKitRoomError.message}`);
+  }, [liveKitRoomError, logEvent]);
 
   // Clean live swap: LocalVideoTrack.restartTrack replaces the sender's
   // MediaStreamTrack in place (RTCRtpSender.replaceTrack under the hood)
@@ -399,10 +383,9 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
       await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
       setFacingMode(next);
       onDeviceIdChange(videoTrack.mediaStreamTrack.getSettings().deviceId ?? null);
-      setAcquireResult({ status: 'success' });
+      logEvent('toggleFacingMode() succeeded');
     } catch (e) {
       console.error('[cam] facingMode restartTrack failed', e);
-      setAcquireResult({ status: 'error', name: e?.name, message: e?.message, context: 'facingMode toggle' });
       logEvent(`toggleFacingMode() FAILED: ${e?.name}: ${e?.message}`);
     }
   }, [facingMode, room, onDeviceIdChange, logEvent]);
@@ -643,7 +626,7 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
           overflowY: 'auto',
           padding: '8px 10px',
           borderRadius: 6,
-          background: acquireResult.status === 'error' || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
+          background: liveKitRoomError || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
           color: PORCELAIN,
           fontFamily: 'monospace',
           fontSize: 10,
@@ -651,8 +634,11 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
         }}
       >
         <div>
-          1. ACQUIRE (setCameraEnabled): {acquireResult.status}
-          {acquireResult.status === 'error' && ` -- ${acquireResult.name}: ${acquireResult.message}${acquireResult.context ? ` (${acquireResult.context})` : ''}`}
+          1. ACQUIRE (declarative, via LiveKitRoom video prop): {liveKitRoomError
+            ? `ERROR -- ${liveKitRoomError.name}: ${liveKitRoomError.message}`
+            : chainSnapshot?.mstFound && chainSnapshot?.mstReadyState === 'live'
+              ? 'success (live track present)'
+              : 'pending...'}
         </div>
         <div>2. publication: {chainSnapshot?.publicationFound ? 'found' : 'MISSING'}</div>
         <div>3. videoTrack (LiveKit wrapper): {chainSnapshot?.videoTrackFound ? 'found' : 'MISSING'}</div>
