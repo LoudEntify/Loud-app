@@ -253,16 +253,29 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   const [rotationError, setRotationError] = useState('');
   const rotationProcessorRef = useRef(null);
 
+  // No processor is ever attached unless the operator explicitly picks a
+  // non-zero rotation below (the 0deg branch only ever calls
+  // stopProcessor, never setProcessor) -- the default/untouched path is
+  // the original, proven, processor-free pipeline: setCameraEnabled's
+  // raw published track straight through, same as before this feature
+  // existed. Nothing else in the codebase calls setProcessor (verified
+  // by grep) or auto-invokes this function -- it only ever runs from
+  // the buttons' onClick below.
   const applyRotation = useCallback(async (degrees) => {
     const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
     if (!videoTrack) return;
     setRotationError('');
     try {
       if (degrees === 0) {
-        if (rotationProcessorRef.current) {
+        // Ask the track itself, not just our own ref -- a ref can only
+        // ever be as trustworthy as the render cycle that set it; the
+        // track's own getProcessor() is the actual source of truth for
+        // whether one is really attached, so cleanup can't silently
+        // skip (or double-run) if the two ever drift.
+        if (videoTrack.getProcessor?.()) {
           await videoTrack.stopProcessor();
-          rotationProcessorRef.current = null;
         }
+        rotationProcessorRef.current = null;
       } else {
         const processor = createRotationProcessor(degrees);
         // showProcessedStreamLocally: true -- the operator's own preview
