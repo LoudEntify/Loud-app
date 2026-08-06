@@ -88,6 +88,87 @@ function SourceDimsDebugLabel({ state, style }) {
   );
 }
 
+// DEBUG -- investigating a reported "punch-in flash" on camera-to-camera
+// cuts: the shot briefly zooms/magnifies before settling into the
+// correct framing. Suspected cause: ShotTransformFrame's isPortrait
+// (from useTrackAspect) starts false on every fresh mount (a new layer
+// per camera change) and only resolves to its real value a render cycle
+// later, via a SEPARATE effect than the one that applies the crop
+// transform -- so a freshly-mounted layer can apply the LANDSCAPE
+// variant's (larger, per Stage 2's design) scale first, then correct to
+// the smaller portrait scale once detection catches up. Whether that's
+// actually visible depends on whether ShotFadeLayer's frame-ready reveal
+// (an independent, async, browser-driven event) happens to land before
+// or after that correction -- this logs both timelines so the real
+// ordering is visible instead of inferred. Module-level (not React
+// state) so ShotFadeLayer/ShotTransformFrame don't need a logger prop
+// threaded through them -- keeps shot-director internals untouched
+// beyond the log call itself. ?debug=1 gated, same convention as /cam's
+// panel; safe to delete once the real ordering is confirmed and fixed.
+const CUT_DEBUG_ENABLED = typeof window !== 'undefined' && window.location.search.includes('debug=1');
+let cutDebugLog = [];
+const cutDebugListeners = new Set();
+function logCutDebug(label) {
+  if (!CUT_DEBUG_ENABLED) return;
+  const entry = `+${performance.now().toFixed(1)}ms ${label}`;
+  cutDebugLog = [...cutDebugLog.slice(-79), entry];
+  cutDebugListeners.forEach((fn) => fn(cutDebugLog));
+}
+function useCutDebugLog() {
+  const [log, setLog] = useState(cutDebugLog);
+  useEffect(() => {
+    if (!CUT_DEBUG_ENABLED) return undefined;
+    cutDebugListeners.add(setLog);
+    return () => cutDebugListeners.delete(setLog);
+  }, []);
+  return log;
+}
+// Short per-layer tag so entries from different slots/cuts happening
+// close together in the shared log stay distinguishable.
+function shortLayerTag(trackRef) {
+  const id = trackRef?.participant?.identity || 'none';
+  return id.length > 16 ? `${id.slice(0, 16)}…` : id;
+}
+
+// DEBUG -- on-screen readout for the cut-timing investigation above.
+// Mounted once from RoomInner, always subscribed (cheap) but only
+// rendered non-empty when CUT_DEBUG_ENABLED. Read top-to-bottom per
+// layer tag: "aspect effect" and "transform effect APPLIED" lines show
+// what ShotTransformFrame did and when; "REVEALED" (from ShotFadeLayer)
+// shows when the viewer could actually see it -- if REVEALED lands
+// between two differing "transform effect APPLIED" lines for the same
+// tag, that's the flash, confirmed with real timestamps.
+function CutTimingDebugOverlay() {
+  const log = useCutDebugLog();
+  if (!CUT_DEBUG_ENABLED) return null;
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 8,
+        left: 8,
+        right: 8,
+        maxHeight: '40vh',
+        overflowY: 'auto',
+        padding: '8px 10px',
+        borderRadius: 6,
+        background: 'rgba(1, 22, 39, 0.85)',
+        color: '#fdfffc',
+        fontFamily: 'monospace',
+        fontSize: 10,
+        lineHeight: 1.5,
+        zIndex: 9999,
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ fontWeight: 700 }}>CUT TIMING DEBUG ({log.length} entries)</div>
+      {log.map((line, i) => (
+        <div key={i}>{line}</div>
+      ))}
+    </div>
+  );
+}
+
 const trackKey = (t) => t ? `${t.participant.identity}:${t.publication?.trackSid || ''}` : null;
 
 function formatCountdown(ms) {
@@ -244,6 +325,17 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
   const aspect = useTrackAspect(trackRef);
   const isPortrait = aspect?.isPortraitSource ?? false;
 
+  // DEBUG -- see the module-level comment above CUT_DEBUG_ENABLED. Logs
+  // the MOMENT aspect detection resolves/changes -- a separate effect
+  // from the transform-setting one below, which is exactly the gap
+  // under investigation: does the transform effect (using this render's
+  // isPortrait snapshot) apply BEFORE or AFTER this has already settled?
+  const layerTrackSid = trackRef?.publication?.trackSid;
+  useEffect(() => {
+    logCutDebug(`[${shortLayerTag(trackRef)}] aspect effect: isPortrait=${isPortrait} (${aspect ? `${aspect.width}x${aspect.height}` : 'still detecting'})`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layerTrackSid, isPortrait, aspect?.width, aspect?.height]);
+
   useEffect(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
@@ -260,11 +352,13 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef }) {
     const t = resolveTransform(shot.transform, isPortrait);
 
     if (!t || (t.optional && !command.params?.vertigo)) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] transform effect: no-op scale(1) (isPortrait=${isPortrait})`);
       setStyle({ transform: 'scale(1)', transition: 'none' });
       return undefined;
     }
 
     if (t.kind === 'crop') {
+      logCutDebug(`[${shortLayerTag(trackRef)}] transform effect APPLIED: scale=${t.scale} shot=${command.shot} isPortrait=${isPortrait} variant=${isPortrait ? 'portrait' : 'landscape'}`);
       setStyle({
         transform: `scale(${t.scale})`,
         transformOrigin: `${t.originX}% ${t.originY}%`,
@@ -358,6 +452,14 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
     function reveal() {
       if (readyFiredRef.current) return;
       readyFiredRef.current = true;
+      // DEBUG -- see the module-level comment above CUT_DEBUG_ENABLED.
+      // This is the "feed becomes visible" moment -- compare its
+      // timestamp against ShotTransformFrame's "aspect effect"/
+      // "transform effect APPLIED" lines for the SAME layer tag to see
+      // whether the crop transform had already settled by the time this
+      // fires, or whether the wrong (landscape-default) scale was still
+      // showing when the viewer could actually see it.
+      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (opacity -> 1)`);
       setVisible(true);
       onReady?.();
     }
@@ -1452,6 +1554,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+      <CutTimingDebugOverlay />
       {notice && <div className="stage-notice">{notice}</div>}
 
       {/* Soundcheck/live banner (SHOW_LIFECYCLE_SPEC.md 3b/3e) -- artist
