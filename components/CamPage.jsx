@@ -248,6 +248,25 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   const [rotationVersion, setRotationVersion] = useState(0);
   const sourceDims = useSourceDimensions(myCameraPublication, rotationVersion);
 
+  // DEBUG -- single unified timeline. Defined up here (not down by the
+  // lifecycle effect that also uses it) so every acquisition/mute/
+  // restart/reconnect call site below can log into the SAME sequence in
+  // the order they actually happen -- the whole point is seeing whether
+  // OUR OWN setCameraEnabled call fires more than once, versus something
+  // internal to LiveKit (mute/unmute/restart, a reconnect) doing it
+  // independently. Capped at the last 40 entries (generous -- these are
+  // rare lifecycle events, not per-frame/per-poll noise) and rendered in
+  // a scrollable box (see the panel below) so a long sequence never gets
+  // silently cut off.
+  const [eventLog, setEventLog] = useState([]);
+  const mountedAtRef = useRef(Date.now());
+
+  const logEvent = useCallback((label) => {
+    const t = `+${Date.now() - mountedAtRef.current}ms`;
+    console.error(`[cam][lifecycle] ${t} ${label}`);
+    setEventLog((prev) => [...prev.slice(-39), `${t} ${label}`]);
+  }, []);
+
   // Manual, opt-in rotation correction for a landscape/capture-card
   // source whose delivered frame lies about its own orientation (see
   // lib/rotationProcessor.js) -- default 0deg/off, never applied unless
@@ -271,6 +290,7 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
     if (!videoTrack) return;
     setRotationError('');
+    logEvent(`applyRotation(${degrees}) called`);
     try {
       if (degrees === 0) {
         // Ask the track itself, not just our own ref -- a ref can only
@@ -302,8 +322,9 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
       // silently imply the failed pick took effect.
       console.error('[cam] rotation failed', e);
       setRotationError('Rotation failed -- feed is still publishing normally.');
+      logEvent(`applyRotation(${degrees}) FAILED: ${e?.name}: ${e?.message}`);
     }
-  }, [room]);
+  }, [room, logEvent]);
 
   // DEBUG -- the real outcome of setCameraEnabled, on screen. This call
   // previously had no error handling at all: if it rejected for any
@@ -331,6 +352,13 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     // If the operator explicitly picked a device from the L5 dropdown,
     // honor that deviceId. Otherwise default to the rear camera via
     // facingMode instead of enumerateDevices()'s arbitrary first entry.
+    // Logs every time THIS EFFECT fires, not just success/failure -- if
+    // deviceChosen/deviceId/room ever genuinely changes and re-runs it,
+    // that's the single most direct way to see OUR OWN code calling
+    // setCameraEnabled(true, ...) more than once, as opposed to
+    // something internal to LiveKit (mute/unmute/restart, a reconnect)
+    // doing an equivalent reacquisition on its own.
+    logEvent(`setCameraEnabled(true, ...) effect fired (deviceChosen=${deviceChosen}, deviceId=${deviceId?.slice?.(0, 8)})`);
     (async () => {
       setAcquireResult({ status: 'pending' });
       try {
@@ -340,16 +368,22 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
             ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
             : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }
         );
-        if (!cancelled) setAcquireResult({ status: 'success' });
+        if (!cancelled) {
+          setAcquireResult({ status: 'success' });
+          logEvent('setCameraEnabled(true, ...) resolved: success');
+        }
       } catch (e) {
         console.error('[cam] setCameraEnabled failed', e);
-        if (!cancelled) setAcquireResult({ status: 'error', name: e?.name, message: e?.message });
+        if (!cancelled) {
+          setAcquireResult({ status: 'error', name: e?.name, message: e?.message });
+          logEvent(`setCameraEnabled(true, ...) REJECTED: ${e?.name}: ${e?.message}`);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [room, deviceChosen, deviceId]);
+  }, [room, deviceChosen, deviceId, logEvent]);
 
   // Clean live swap: LocalVideoTrack.restartTrack replaces the sender's
   // MediaStreamTrack in place (RTCRtpSender.replaceTrack under the hood)
@@ -360,6 +394,7 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
     if (!videoTrack) return;
     const next = facingMode === 'environment' ? 'user' : 'environment';
+    logEvent(`toggleFacingMode() called, next=${next}`);
     try {
       await videoTrack.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
       setFacingMode(next);
@@ -368,8 +403,9 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
     } catch (e) {
       console.error('[cam] facingMode restartTrack failed', e);
       setAcquireResult({ status: 'error', name: e?.name, message: e?.message, context: 'facingMode toggle' });
+      logEvent(`toggleFacingMode() FAILED: ${e?.name}: ${e?.message}`);
     }
-  }, [facingMode, room, onDeviceIdChange]);
+  }, [facingMode, room, onDeviceIdChange, logEvent]);
 
   // DEBUG -- full acquisition -> attachment -> play -> dimensions chain,
   // on screen. The camera shows in Chrome's own device chooser but not
@@ -438,15 +474,7 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
   // CamPublisher's own setCameraEnabled(true, ...). Logging both
   // together shows whether that's actually what's happening.
   const [endedInfo, setEndedInfo] = useState(null);
-  const [eventLog, setEventLog] = useState([]);
-  const mountedAtRef = useRef(Date.now());
   const trackSidForLifecycle = myCameraPublication?.trackSid;
-
-  const logEvent = useCallback((label) => {
-    const t = `+${Date.now() - mountedAtRef.current}ms`;
-    console.error(`[cam][lifecycle] ${t} ${label}`);
-    setEventLog((prev) => [...prev.slice(-14), `${t} ${label}`]);
-  }, []);
 
   useEffect(() => {
     const videoTrack = myCameraPublication?.videoTrack;
@@ -604,6 +632,15 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
           bottom: 8,
           left: 8,
           right: 8,
+          // Bounded + scrollable, not just bottom-anchored -- with no
+          // height cap this panel just grows upward as more numbered
+          // lines get added, past the top of the viewport with nothing
+          // to indicate more content exists above. maxHeight + bottom
+          // keeps it anchored to the same spot while guaranteeing
+          // everything (including line 12's full event log) stays
+          // reachable by scrolling THIS one box.
+          maxHeight: '55vh',
+          overflowY: 'auto',
           padding: '8px 10px',
           borderRadius: 6,
           background: acquireResult.status === 'error' || sourceDims?.status === 'failed' ? 'rgba(231, 29, 54, 0.85)' : 'rgba(1, 22, 39, 0.8)',
@@ -662,8 +699,12 @@ function CamPublisher({ deviceId, deviceChosen, onDeviceIdChange, role }) {
           </div>
         )}
         {eventLog.length > 0 && (
-          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4, maxHeight: 120, overflowY: 'auto' }}>
-            <div>12. EVENT LOG (rebind/mute/reconnect, oldest first):</div>
+          // No separate scroll region here on purpose -- one nested
+          // scrollbox fighting the outer one for wheel/touch events is
+          // worse than just letting the whole panel (bounded above)
+          // scroll as a single unit.
+          <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
+            <div>12. EVENT LOG ({eventLog.length} entries, oldest first -- setCameraEnabled/restart/mute/unmute/reconnect):</div>
             {eventLog.map((line, i) => (
               <div key={i}>{line}</div>
             ))}
