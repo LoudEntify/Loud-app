@@ -44,8 +44,8 @@ import {
 } from '@livekit/components-react';
 import { Track, TrackEvent, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
-import { useSourceDimensions } from '../lib/useSourceDimensions';
-import { createRotationProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
+import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
+import { createPortraitProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -279,6 +279,12 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
   // for why this can't be discovered automatically.
   const [rotationVersion, setRotationVersion] = useState(0);
   const sourceDims = useSourceDimensions(myCameraPublication, rotationVersion);
+  // Portrait-everything work -- RAW native orientation (never the
+  // processor's own output; see useNativeIsLandscape's own comment for
+  // why that distinction matters), used below to auto-attach the crop
+  // processor for a landscape source and to gate the 0deg rotation
+  // button's meaning (see applyRotation).
+  const isLandscape = useNativeIsLandscape(myCameraPublication);
 
   // DEBUG -- single unified timeline. Defined up here (not down by the
   // lifecycle effect that also uses it) so every acquisition/mute/
@@ -300,32 +306,41 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
     setEventLog((prev) => [...prev.slice(-39), `${t} ${label}`]);
   }, [debugMode]);
 
-  // Manual, opt-in rotation correction for a landscape/capture-card
-  // source whose delivered frame lies about its own orientation (see
-  // lib/rotationProcessor.js) -- default 0deg/off, never applied unless
-  // the operator picks a non-zero option below by eye. rotationRef holds
-  // the currently-attached processor instance (or null) so a later call
-  // can stop/replace it; not component state, since the processor
-  // object itself isn't meant to trigger re-renders.
+  // `rotation` is the operator's own by-eye pick (0/90/180/270, see the
+  // picker below) for a source whose pixel content is sideways relative
+  // to what it claims -- still manual/opt-in, there's no reliable way to
+  // auto-detect that specific problem (see lib/rotationProcessor.js's
+  // own comment). Separately, and NOT manual: any source whose RAW
+  // native dimensions are landscape (isLandscape, above) gets
+  // createPortraitProcessor auto-attached regardless of `rotation` --
+  // that's the portrait-everything crop, not a rotation, and doesn't
+  // need by-eye judgment, just "is it wider than it is tall". The two
+  // compose in ONE processor (see rotationProcessor.js): `rotation`
+  // supplies the degrees, `isLandscape` decides whether a processor is
+  // attached at all. rotationProcessorRef holds the currently-attached
+  // processor instance (or null) so a later call can stop/replace it;
+  // not component state, since the processor object itself isn't meant
+  // to trigger re-renders.
   const [rotation, setRotation] = useState(0);
   const [rotationError, setRotationError] = useState('');
   const rotationProcessorRef = useRef(null);
 
-  // No processor is ever attached unless the operator explicitly picks a
-  // non-zero rotation below (the 0deg branch only ever calls
-  // stopProcessor, never setProcessor) -- the default/untouched path is
-  // the original, proven, processor-free pipeline: setCameraEnabled's
-  // raw published track straight through, same as before this feature
-  // existed. Nothing else in the codebase calls setProcessor (verified
-  // by grep) or auto-invokes this function -- it only ever runs from
-  // the buttons' onClick below.
+  // A native-portrait source (isLandscape === false) at 0deg gets NO
+  // processor at all -- the original, proven, processor-free pipeline,
+  // unchanged from before this feature existed. Every other combination
+  // (any landscape source, even at 0deg/no manual rotation pick; or any
+  // non-zero manual rotation pick regardless of isLandscape, since
+  // isLandscape might still be resolving) goes through
+  // createPortraitProcessor. Runs both from the buttons' onClick below
+  // (manual `degrees` change) and automatically once isLandscape first
+  // resolves true (see the effect below) -- same function either way.
   const applyRotation = useCallback(async (degrees) => {
     const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
     if (!videoTrack) return;
     setRotationError('');
-    logEvent(`applyRotation(${degrees}) called`);
+    logEvent(`applyRotation(${degrees}) called (isLandscape=${isLandscape})`);
     try {
-      if (degrees === 0) {
+      if (degrees === 0 && isLandscape === false) {
         // Ask the track itself, not just our own ref -- a ref can only
         // ever be as trustworthy as the render cycle that set it; the
         // track's own getProcessor() is the actual source of truth for
@@ -336,10 +351,12 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
         }
         rotationProcessorRef.current = null;
       } else {
-        const processor = createRotationProcessor(degrees);
+        const processor = createPortraitProcessor(degrees);
         // showProcessedStreamLocally: true -- the operator's own preview
         // shows the corrected result too, so they can pick the right
-        // rotation by eye rather than guessing blind.
+        // rotation by eye rather than guessing blind (and so a
+        // landscape source's auto-applied crop is visible in their own
+        // preview too, not just to viewers).
         await videoTrack.setProcessor(processor, true);
         rotationProcessorRef.current = processor;
       }
@@ -349,15 +366,41 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
       // Confirmed against the compiled SDK source: setProcessor only
       // calls sender.replaceTrack() AFTER processor.init() resolves, so
       // a failure here never touches what's currently published --
-      // whatever rotation (including 0/off) was working before stays
-      // working. Deliberately NOT resetting `rotation` state to 0 here:
-      // it should keep reflecting whatever's actually still live, not
-      // silently imply the failed pick took effect.
-      console.error('[cam] rotation failed', e);
-      setRotationError('Rotation failed -- feed is still publishing normally.');
+      // whatever was working before stays working. Deliberately NOT
+      // resetting `rotation` state to 0 here: it should keep reflecting
+      // whatever's actually still live, not silently imply the failed
+      // pick took effect.
+      console.error('[cam] rotation/crop failed', e);
+      setRotationError('Rotation/crop failed -- feed is still publishing normally.');
       logEvent(`applyRotation(${degrees}) FAILED: ${e?.name}: ${e?.message}`);
     }
-  }, [room, logEvent]);
+  }, [room, logEvent, isLandscape]);
+
+  // Auto-attach: the first time a given track's RAW orientation resolves
+  // to landscape, apply the crop processor automatically at whatever
+  // rotation is currently selected (0 unless the operator's already
+  // touched the picker) -- this is what actually fixes a landscape
+  // camfeed publishing raw/uncropped. Keyed on trackSid (not just a
+  // single boolean latch) so a device swap to a NEW landscape source
+  // re-triggers this for the new track too. A native-portrait source
+  // never enters this branch at all -- isLandscape resolves false, this
+  // effect is a no-op, exactly requirement 1 (zero processor, zero cost).
+  const autoAppliedTrackSidRef = useRef(null);
+  const myCameraTrackSid = myCameraPublication?.trackSid;
+  useEffect(() => {
+    if (isLandscape !== true) return;
+    if (!myCameraTrackSid || autoAppliedTrackSidRef.current === myCameraTrackSid) return;
+    autoAppliedTrackSidRef.current = myCameraTrackSid;
+    applyRotation(rotation);
+    // myCameraPublication/applyRotation/rotation deliberately omitted --
+    // myCameraTrackSid is the stable identity that should actually
+    // re-trigger this (getTrackPublication() isn't memoized, so the
+    // object itself is a fresh reference every render); applyRotation
+    // reads the live videoTrack itself when it runs, and re-including it
+    // here would re-run this effect on every rotation state change too,
+    // which is exactly the manual-picker path, not this auto one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLandscape, myCameraTrackSid]);
 
   // Acquisition itself now happens declaratively via LiveKitRoom's video
   // prop (see CamPage, above) -- there's no manual setCameraEnabled call
@@ -767,14 +810,18 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
         Flip to {facingMode === 'environment' ? 'front' : 'rear'}
       </button>
 
-      {/* Manual rotation for a landscape/capture-card source whose
-          delivered frame lies about its own orientation -- there's no
-          reliable way to auto-detect this, so it's opt-in and by-eye:
-          pick whichever option makes the preview above look upright.
-          Not phone-relevant (phones already deliver correct portrait),
-          but left always-visible here rather than gated behind a
-          device-type guess -- small and clearly optional, doesn't
-          block or complicate the common case where nobody touches it. */}
+      {/* Manual rotation for a source whose pixel content is sideways
+          relative to what it claims -- there's no reliable way to
+          auto-detect THAT, so it's opt-in and by-eye: pick whichever
+          option makes the preview above look upright. The portrait CROP
+          itself (landscape -> portrait) is separate and automatic --
+          applied as soon as isLandscape resolves true, with no picker
+          needed; this row only ever adjusts rotation on top of that.
+          Not phone-relevant (phones already deliver correct portrait,
+          isLandscape stays false, no processor ever attaches), but left
+          always-visible here rather than gated behind a device-type
+          guess -- small and clearly optional, doesn't block or
+          complicate the common case where nobody touches it. */}
       <div style={{ position: 'absolute', top: 70, left: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6 }}>
           {ROTATION_OPTIONS_DEG.map((deg) => (

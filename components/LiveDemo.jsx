@@ -19,7 +19,8 @@ import ViewerStage from './ViewerStage';
 import DirectorShotPanel from './DirectorShotPanel';
 import CameraQRPanel from './CameraQRPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
-import { useSourceDimensions, useTrackAspect } from '../lib/useSourceDimensions';
+import { useSourceDimensions, useTrackAspect, useNativeIsLandscape } from '../lib/useSourceDimensions';
+import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, CAMERA_CHANGE_FADE_MS, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
@@ -1123,13 +1124,55 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // Stage 1 of the portrait capture work -- what the local camera is
   // ACTUALLY delivering right now, read live off the real track, never
   // assumed from role/device. Debug-only surface for verifying capture
-  // on real hardware; doesn't drive any rendering decision yet (Stage
-  // 2/3 territory) -- .stage-video-area is unconditionally portrait-
-  // shaped now, so object-fit: cover already does the right thing for
-  // either a native-portrait or a landscape-delivered source with no
-  // branching needed here.
+  // on real hardware.
   const myCameraPublication = room.localParticipant.getTrackPublication(Track.Source.Camera);
   const sourceDims = useSourceDimensions(myCameraPublication);
+
+  // Portrait-everything work -- auto-attaches createPortraitProcessor
+  // (lib/rotationProcessor.js) whenever this device's OWN camera is
+  // landscape (a laptop webcam or capture card standing in for a
+  // contestant), so its published track becomes genuinely portrait, not
+  // just displayed that way. No manual UI here unlike CamPage.jsx's
+  // rotation picker -- LiveDemo's own camera has no by-eye rotation
+  // problem to correct, this is purely the auto crop (degrees=0). A
+  // native-portrait phone (the common case) never resolves isLandscape
+  // true, so this effect is a no-op for it -- zero processor, zero cost.
+  // Keyed on trackSid (not a single latch) so a facingMode toggle or
+  // device change that lands on a different-shaped source re-decides.
+  const isLandscape = useNativeIsLandscape(myCameraPublication);
+  const myCameraTrackSid = myCameraPublication?.trackSid;
+  const autoPortraitTrackSidRef = useRef(null);
+  useEffect(() => {
+    if (isLandscape !== true) return undefined;
+    const trackSid = myCameraTrackSid;
+    if (!trackSid || autoPortraitTrackSidRef.current === trackSid) return undefined;
+    autoPortraitTrackSidRef.current = trackSid;
+    let cancelled = false;
+    (async () => {
+      const videoTrack = myCameraPublication?.videoTrack;
+      if (!videoTrack) return;
+      try {
+        const processor = createPortraitProcessor(0);
+        await videoTrack.setProcessor(processor, true);
+      } catch (e) {
+        // Confirmed against the compiled SDK source (same as CamPage's
+        // rotation failure handling): setProcessor only replaces the
+        // published track after init() resolves, so a failure here
+        // never touches what's already publishing -- the raw landscape
+        // track keeps flowing uncropped rather than dropping.
+        if (!cancelled) console.error('[portrait] crop processor failed to attach', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // myCameraPublication deliberately omitted -- it's a fresh object
+    // reference every render (getTrackPublication() isn't memoized), so
+    // depending on it would re-run this effect constantly; myCameraTrackSid
+    // is the stable identity that actually matters, same pattern
+    // useTrackAspect/useNativeIsLandscape key their own effects on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLandscape, myCameraTrackSid]);
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
