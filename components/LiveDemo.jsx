@@ -136,6 +136,28 @@ function SourceDimsDebugLabel({ state, style }) {
 // outgoing layer stays fully opaque and frozen the whole time (as
 // designed) or whether something briefly exposes both layers, or drops
 // the outgoing layer's opacity, around the cut boundary.
+//
+// Fourth round (hard-cut default shipped, aspect mismatch confirmed
+// fixed -- yet the overlay still showed "attemptReveal BLOCKED:
+// frameReady=false" ~45ms before every REVEALED, even on a SAME-camera
+// shot change): root cause was ShotVideo mounting a fresh keyed
+// ShotFadeLayer -- and therefore a fresh <video> element -- on every
+// cut, which must paint its own first frame from scratch regardless of
+// how long the underlying track had already been decoding elsewhere.
+// Fixed by making layers PERSISTENT: one ShotFadeLayer per candidate
+// track (not per cut), kept mounted for the track's whole candidacy, its
+// frame-paint+aspect gate resolving once, early, off-screen -- a cut now
+// only flips which already-painting layer is displayed. ShotFadeLayer's
+// `ready` (was `visible`) is a one-time latch fed by the SAME gate as
+// before; `displayed` is new, owned by ShotVideo, and is what opacity
+// now keys on -- kept deliberately separate from `isActive`
+// (command !== null) because collapsing them (outgoing layer fading its
+// OWN opacity down while incoming fades up) reintroduces a dark-midpoint
+// artifact on any `fade` transition, the exact class of bug the
+// old-stays-fully-opaque design was built to avoid. Look for
+// `[ShotVideo] DISPLAYED -> <key>` -- on a cut to an already-live
+// candidate this should land within a frame or two of the cut, not the
+// ~45ms this round measured.
 const CUT_DEBUG_ENABLED = typeof window !== 'undefined' && window.location.search.includes('debug=1');
 let cutDebugLog = [];
 const cutDebugListeners = new Set();
@@ -444,37 +466,40 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect, 
   );
 }
 
-// A single video layer, held at opacity 0 until its video has genuinely
-// painted a frame (waitForFirstFrame, above) -- then reveals, either
-// instantly ('cut') or via an opacity transition ('fade'). Used for
-// BOTH transition types now: the old layer stays fully visible
-// underneath the whole time, so there's never a dark/empty frame
-// between them, on cut or fade -- only how fast the reveal itself
-// happens differs. Calls onReady once revealed so the parent (ShotVideo)
-// knows when it's safe to remove the layer(s) underneath.
-// Reveal is gated on BOTH the video painting a real frame AND the
-// portrait/landscape aspect variant having settled (ready OR failed --
-// never blocks forever, bounded by useTrackAspect's own ~1s retry
-// window) -- not frame-paint alone. Confirmed cause of the punch-in
-// flash: ShotTransformFrame's crop-transform effect and aspect
-// detection used to be two independent, uncoordinated async processes
-// (see CUT_DEBUG_ENABLED's comment above) -- a fresh layer could reveal
-// showing the landscape-default scale before a later render corrected
-// it to the real portrait scale. Gating here means the FIRST frame the
-// viewer ever sees is already at the correct scale, because
-// ShotTransformFrame has had the real, settled aspect value the entire
-// time it was rendering invisibly -- there's no correction to catch
-// mid-flight. This is why gating beats defaulting to a "last known"
-// aspect from the PREVIOUS track as a guess: a last-known value can
-// still be wrong (cutting between a portrait phone and a landscape
-// capture card is exactly when it would be), and being wrong reproduces
-// the identical flash, just less often. Gating never shows a wrong
-// value at all, at the cost of a wait that's normally sub-frame anyway
-// (an already-flowing track's first getSettings() read is typically
-// synchronous) and never unbounded (same unmet-condition eventually
-// resolves as 'failed', not stuck).
-function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
-  const [visible, setVisible] = useState(false);
+// Persistent per-candidate video layer -- one instance per track that's
+// EVER been a candidate for this slot, mounted once and kept mounted for
+// that track's whole candidacy (see ShotVideo's own comment). Three
+// separate pieces of state, deliberately not collapsed into one:
+//   - isActive (command !== null): is this the director's CURRENTLY
+//     CHOSEN track. Drives the crop transform via ShotTransformFrame,
+//     unchanged from before.
+//   - ready: a ONE-TIME latch -- has this track's video ever painted a
+//     real frame with a settled aspect. Fed by the exact same
+//     frame-paint + aspect-settled gate that fixed the punch-in flash;
+//     the only change is WHEN it runs -- once per this layer's whole
+//     lifetime (trackRef is now stable, never remounted per cut), not
+//     once per cut. For an already-established candidate this has
+//     almost always already resolved, off-screen, before any cut ever
+//     targets it.
+//   - displayed (prop, owned by ShotVideo): is this layer CURRENTLY at
+//     opacity 1. NOT derived from isActive directly -- see ShotVideo's
+//     handleActiveReady for why collapsing "chosen" and "opacity" into
+//     one signal would let BOTH the outgoing and incoming layers animate
+//     opacity simultaneously on a `fade`, producing a dark-midpoint dip
+//     against the black background underneath. Keeping them separate
+//     means the outgoing layer holds fully opaque, showing its own
+//     last-correct frame, until ShotVideo confirms the incoming one is
+//     ready and flips `displayed` -- same math the old
+//     append-then-remove-after-delay design relied on, just applied to a
+//     toggle instead of a mount/unmount.
+// isActive && ready is reported up via onActiveReady(layerKey) --
+// ShotVideo starts its swap timer from there. For an already-painting
+// candidate both are already true when a cut lands, so this fires (and
+// the timer starts) essentially the same tick as the cut -- no waiting
+// on a fresh element's first paint, which is the whole fix this round.
+function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIndex, onActiveReady, layerKey }) {
+  const isActive = command !== null;
+  const [ready, setReady] = useState(false);
   const videoRef = useRef(null);
   const transformElRef = useRef(null);
   const readyFiredRef = useRef(false);
@@ -494,86 +519,50 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layerTrackSid, aspect.status, aspect.isPortraitSource, aspect.width, aspect.height]);
 
-  // DEBUG (third round, see module comment) -- fires exactly when
-  // ShotVideo demotes this layer from top (live command) to outgoing
-  // (command -> null), i.e. the instant a new layer is appended above
-  // it. Logs its own visible/opacity state and current DOM transform
-  // right then, so it's directly checkable whether the outgoing layer
-  // is still fully opaque and holding its own (correct) framing at the
-  // cut boundary, rather than inferred from the code.
-  const wasTopRef = useRef(command !== null);
+  // DEBUG (fourth round, see module comment) -- fires whenever isActive
+  // toggles: this layer becomes/stops being the director's chosen track,
+  // independent of whether it's actually displayed (opacity) yet.
+  const wasActiveRef = useRef(isActive);
   useEffect(() => {
-    const isTop = command !== null;
-    if (wasTopRef.current && !isTop) {
-      logCutDebug(`[${shortLayerTag(trackRef)}] DEMOTED to outgoing: visible=${visible} domTransform=${transformElRef.current?.style?.transform || '(none)'}`);
+    if (wasActiveRef.current !== isActive) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] isActive: ${wasActiveRef.current} -> ${isActive} (ready=${ready})`);
+      wasActiveRef.current = isActive;
     }
-    wasTopRef.current = isTop;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [command]);
+  }, [isActive, ready, trackRef]);
 
-  // DEBUG (third round) -- catches ANY change to `visible` after the
-  // fact, including one that would be a real bug: the outgoing layer's
-  // opacity is never supposed to drop back to 0 once revealed. If this
-  // ever logs a true -> false transition, that's a direct, no-inference
-  // confirmation that something is un-revealing a layer mid-cut.
-  const prevVisibleRef = useRef(visible);
-  useEffect(() => {
-    if (prevVisibleRef.current !== visible) {
-      logCutDebug(`[${shortLayerTag(trackRef)}] visible state changed: ${prevVisibleRef.current} -> ${visible}`);
-      prevVisibleRef.current = visible;
-    }
-  }, [visible, trackRef]);
-
-  // Frame-paint watcher -- unchanged trigger (trackRef only), doesn't
-  // restart when aspect settles, just marks its own condition and asks
-  // tryReveal to check whether BOTH are satisfied now.
+  // Frame-paint + aspect-settle gate -- unchanged logic from the
+  // punch-in-flash fix, now running once per this layer's whole
+  // candidacy (trackRef is stable for that entire lifetime) instead of
+  // once per cut.
   useEffect(() => {
     readyFiredRef.current = false;
     frameReadyRef.current = false;
 
-    if (!trackRef) {
-      // Nothing to wait for -- e.g. an interstitial/placeholder layer.
-      // No video, no aspect to speak of either -- reveal immediately.
-      readyFiredRef.current = true;
-      setVisible(true);
-      onReady?.();
-      return undefined;
-    }
-
-    function attemptReveal() {
+    function attemptReady() {
       if (readyFiredRef.current) return;
       if (!frameReadyRef.current || !aspectSettledRef.current) {
         // DEBUG -- proves the gate is actually being consulted (not
-        // bypassed) on every call, and shows exactly which of the two
-        // conditions was still unmet. If REVEALED ever appears in the log
-        // without a preceding BLOCKED line showing both flip to true
-        // first, the gate isn't wired the way this function assumes.
+        // bypassed). Now that this only runs once per candidacy, seeing
+        // this line near a CUT (rather than near when the track first
+        // became a candidate) is itself the signature of the ~45ms
+        // freeze this round fixed -- it should no longer appear there.
         logCutDebug(`[${shortLayerTag(trackRef)}] attemptReveal BLOCKED: frameReady=${frameReadyRef.current} aspectSettled=${aspectSettledRef.current} (status=${aspectRef.current.status})`);
         return;
       }
       readyFiredRef.current = true;
-      // DEBUG -- the direct-proof line: reads the transform that's
-      // ACTUALLY sitting on the DOM node right now, and the video
-      // element's own decoded dimensions, at the exact instant opacity
-      // is about to flip to 1. detectedIsPortrait is what useTrackAspect
-      // resolved to (what the gate waited for); actualVideoWxH is ground
-      // truth from the <video> element itself, independent of
-      // getSettings() -- if these disagree, detection resolved to the
-      // WRONG value (a correctness bug), not just a late one. If
-      // domTransform doesn't match the scale that shot/isPortrait implies,
-      // ShotTransformFrame's correction hadn't landed yet when the gate
-      // opened (the batching this fix relies on didn't hold).
+      // DEBUG -- same direct-proof line as before: DOM transform + the
+      // <video> element's own decoded dimensions at the instant this
+      // layer first becomes capable of being shown.
       const videoEl = videoRef.current;
       const domTransform = transformElRef.current?.style?.transform || '(none)';
-      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (${instant ? 'cut' : 'fade'}): detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
-      setVisible(true);
-      onReady?.();
+      logCutDebug(`[${shortLayerTag(trackRef)}] READY: detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
+      setReady(true);
     }
-    tryRevealRef.current = attemptReveal;
+    tryRevealRef.current = attemptReady;
 
     function onFramePainted() {
       frameReadyRef.current = true;
-      attemptReveal();
+      attemptReady();
     }
 
     // videoRef.current may not exist yet on the very first pass of this
@@ -598,18 +587,47 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
   }, [trackRef]);
 
   // Whenever aspect SETTLES (detecting -> ready/failed), re-check
-  // whether reveal can happen now -- doesn't restart the frame-wait
+  // whether the gate can resolve now -- doesn't restart the frame-wait
   // above, just re-runs the SAME pending check with the new answer.
   useEffect(() => {
     if (aspectSettled) tryRevealRef.current?.();
   }, [aspectSettled]);
+
+  // The actual handoff signal to ShotVideo. For an already-live
+  // candidate cut to now, both isActive and ready are already true, so
+  // this fires (and ShotVideo's swap timer starts) in essentially the
+  // same tick as the cut. For a genuinely new candidate cut to before it
+  // has ever painted, this only fires once the gate above resolves --
+  // same dark-flash protection as before, just retargeted from "on
+  // mount" to "on isActive".
+  useEffect(() => {
+    if (isActive && ready) {
+      onActiveReady?.(layerKey);
+    }
+  }, [isActive, ready, onActiveReady, layerKey]);
+
+  // DEBUG (fourth round) -- catches every change to `displayed`, the
+  // actual opacity toggle ShotVideo owns. This is the one to diff
+  // against a cut's own timestamp for the latency verification -- for an
+  // already-ready layer it should land within a frame or two of isActive
+  // flipping true, not ~45ms later. A true -> false transition happening
+  // for reasons OTHER than a newer layer becoming displayed would be a
+  // real bug (the outgoing layer un-revealing itself).
+  const prevDisplayedRef = useRef(displayed);
+  useEffect(() => {
+    if (prevDisplayedRef.current !== displayed) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] displayed: ${prevDisplayedRef.current} -> ${displayed}`);
+      prevDisplayedRef.current = displayed;
+    }
+  }, [displayed, trackRef]);
 
   return (
     <div
       style={{
         position: 'absolute',
         inset: 0,
-        opacity: visible ? 1 : 0,
+        zIndex,
+        opacity: displayed ? 1 : 0,
         transition: instant ? 'none' : `opacity ${CAMERA_CHANGE_FADE_MS}ms ease`,
       }}
     >
@@ -618,84 +636,104 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
   );
 }
 
-// Renders whichever track is "current" for a slot. Both 'cut' and 'fade'
-// now go through the same layering: the incoming track is appended
-// (never a synchronous replace), and the outgoing layer(s) underneath
-// are only removed once the incoming layer has actually revealed --
-// i.e. its video has painted a real frame (see ShotFadeLayer/
-// waitForFirstFrame) -- not on a fixed timer set at append-time, since
-// reveal timing is now variable (bounded by FRAME_READY_TIMEOUT_MS).
-// 'cut' vs 'fade' only changes how fast the reveal transition itself is
-// once it happens. Only the top (newest) layer ever receives the live
-// `command` -- an older layer mid-exit is frozen at whatever transform
-// it last had; it's about to disappear.
-function ShotVideo({ trackRef, command, placeholder }) {
-  const [layers, setLayers] = useState(() => (trackRef ? [{ key: 'init', trackRef }] : []));
-  const currentKeyRef = useRef(trackKey(trackRef));
-  const removalTimerRef = useRef(null);
-  const instant = command?.transition === 'cut';
+// Renders whichever track is "active" for a slot, from a POOL of
+// persistent layers -- one per candidate track (fourth round, see module
+// comment), not one per cut. `candidates` is the full set of tracks
+// currently eligible for this slot (contestant's own camera + whichever
+// camfeed devices are publishing); `activeTrackRef` is which one the
+// director has chosen right now. A layer is created when a track becomes
+// a candidate and removed only when it stops being one (participant
+// disconnects/unpublishes) -- a cut never touches this pool, it only
+// changes which existing, already-painting layer is active/displayed.
+// `displayedKey` is deliberately separate state from `activeKey`: the
+// swap is timed off the newly-active layer's own onActiveReady signal
+// (see ShotFadeLayer), not immediate, so the outgoing layer keeps
+// showing its last-correct frame at full opacity until the incoming one
+// has confirmed it's ready to take over -- same reasoning the old
+// append-then-remove-after-delay design relied on, just applied to a
+// toggle instead of a mount/unmount. Only the active layer ever receives
+// the live `command` -- an inactive layer is frozen at whatever
+// transform it last had (or untransformed, if it's never been active).
+function ShotVideo({ candidates, activeTrackRef, command, placeholder }) {
+  const candidateKeysSignature = candidates.map(trackKey).join('|');
+
+  const [layerTracks, setLayerTracks] = useState(() => {
+    const m = new Map();
+    candidates.forEach((t) => m.set(trackKey(t), t));
+    return m;
+  });
 
   useEffect(() => {
-    const newKey = trackKey(trackRef);
-    if (newKey === currentKeyRef.current) return undefined;
-    // DEBUG (third round, see module comment) -- the moment a new layer
-    // is appended is also the moment the previous top layer gets demoted
-    // (its own DEMOTED log fires from that layer's effect, keyed off the
-    // same command/index change). Logging both sides of that boundary
-    // here shows whether they land in the log at essentially the same
-    // instant (expected) or whether there's an unexpected gap.
-    logCutDebug(`[ShotVideo] APPEND new layer (was=${currentKeyRef.current || 'none'} now=${newKey}) transition=${instant ? 'cut' : 'fade'}`);
-    currentKeyRef.current = newKey;
-    const layerKey = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setLayers((prev) => [...prev, { key: layerKey, trackRef }]);
-    return undefined;
+    setLayerTracks((prev) => {
+      let changed = prev.size !== candidates.length;
+      const next = new Map();
+      candidates.forEach((t) => {
+        const k = trackKey(t);
+        next.set(k, t);
+        if (!prev.has(k)) changed = true;
+      });
+      if (changed) {
+        logCutDebug(`[ShotVideo] candidate pool -> ${next.size} track(s): ${Array.from(next.keys()).join(', ') || '(none)'}`);
+      }
+      return changed ? next : prev;
+    });
+    // candidateKeysSignature (not `candidates` itself) is the real
+    // dependency -- tracksForSlot() returns a fresh array every render,
+    // so depending on the array reference would re-run this every
+    // render; the joined-keys string only changes when the candidate SET
+    // actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackRef, command]);
+  }, [candidateKeysSignature]);
+
+  const activeKey = trackKey(activeTrackRef);
+  const instant = command?.transition === 'cut';
+  const instantRef = useRef(instant);
+  instantRef.current = instant;
+
+  // Which layer is CURRENTLY at opacity 1 -- starts at null (not
+  // activeKey) so even the very first-ever reveal for this slot goes
+  // through the same gated handoff below, rather than an ungated initial
+  // value that could show opacity 1 before anything has actually
+  // painted.
+  const [displayedKey, setDisplayedKey] = useState(null);
+  const pendingSwapTimerRef = useRef(null);
 
   useEffect(() => () => {
-    if (removalTimerRef.current) clearTimeout(removalTimerRef.current);
+    if (pendingSwapTimerRef.current) clearTimeout(pendingSwapTimerRef.current);
   }, []);
 
-  // Called by the newest layer once it has actually revealed. Removing
-  // older layers is timed off that real event, not a fixed clock --
-  // instant reveals remove immediately after, fades wait out their own
-  // transition first so nothing clips mid-dissolve.
-  const handleTopLayerReady = useCallback(() => {
-    if (removalTimerRef.current) clearTimeout(removalTimerRef.current);
-    const delay = instant ? 0 : CAMERA_CHANGE_FADE_MS;
-    // DEBUG (third round) -- top layer just self-reported REVEALED (see
-    // its own log line); this schedules the outgoing layer's actual
-    // unmount `delay`ms from now. Logging both ends -- scheduled here,
-    // fired below -- shows the real gap between "incoming is visible"
-    // and "outgoing is actually removed from the DOM", i.e. exactly how
-    // long both layers are simultaneously mounted (outgoing fully
-    // opaque underneath, incoming fully opaque on top of it for 'cut';
-    // incoming mid-fade-in for 'fade').
-    logCutDebug(`[ShotVideo] top layer ready, removing outgoing in ${delay}ms`);
-    removalTimerRef.current = setTimeout(() => {
-      removalTimerRef.current = null;
-      setLayers((prev) => {
-        if (prev.length > 1) {
-          logCutDebug(`[ShotVideo] REMOVE ${prev.length - 1} outgoing layer(s) -> down to 1`);
-          return prev.slice(-1);
-        }
-        return prev;
-      });
+  // Stable across renders (uses instantRef, not `instant`, directly) so
+  // it's safe to pass the SAME function reference to every layer --
+  // ShotFadeLayer's own effect depends on this prop, and a fresh
+  // reference every render would re-fire that effect (and re-schedule
+  // this timer) on every unrelated parent re-render, not just real
+  // isActive/ready transitions.
+  const handleActiveReady = useCallback((key) => {
+    if (pendingSwapTimerRef.current) clearTimeout(pendingSwapTimerRef.current);
+    const delay = instantRef.current ? 0 : CAMERA_CHANGE_FADE_MS;
+    logCutDebug(`[ShotVideo] ${key} ready, displaying in ${delay}ms`);
+    pendingSwapTimerRef.current = setTimeout(() => {
+      pendingSwapTimerRef.current = null;
+      logCutDebug(`[ShotVideo] DISPLAYED -> ${key}`);
+      setDisplayedKey(key);
     }, delay);
-  }, [instant]);
+  }, []);
 
-  if (layers.length === 0) return placeholder;
+  if (layerTracks.size === 0) return placeholder;
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
-      {layers.map((l, i) => (
+      {Array.from(layerTracks.entries()).map(([key, tRef]) => (
         <ShotFadeLayer
-          key={l.key}
-          trackRef={l.trackRef}
-          command={i === layers.length - 1 ? command : null}
+          key={key}
+          layerKey={key}
+          trackRef={tRef}
+          command={key === activeKey ? command : null}
           placeholder={placeholder}
           instant={instant}
-          onReady={i === layers.length - 1 ? handleTopLayerReady : undefined}
+          displayed={key === displayedKey}
+          zIndex={key === activeKey ? 1 : 0}
+          onActiveReady={handleActiveReady}
         />
       ))}
     </div>
@@ -1448,7 +1486,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo trackRef={chosen} command={effectiveCommand} placeholder={placeholder} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} />
       </div>
     );
   };
