@@ -117,6 +117,24 @@ function SourceDimsDebugLabel({ state, style }) {
 // from a correctness bug (detected dimensions disagree with the video
 // element's actual ones -- useTrackAspect settled on the wrong answer,
 // not just a late one).
+//
+// Third round (synchronous-init fix shipped, confirmed correct via the
+// overlay -- detected values now match reality, no wrong-then-corrected
+// scale happens at all -- yet the flash STILL persists): new working
+// theory is this was never an aspect-detection bug. Two feeds can
+// legitimately have very different aspect ratios and therefore very
+// different crop scales (a 1080x1920 portrait contestant vs a 1728x1080
+// landscape camfeed) -- cutting between them is a real, correct jump in
+// framing, not a bug to gate away. This round adds outgoing-layer
+// visibility: ShotVideo now logs exactly when a new layer is APPENDED
+// (which demotes the previous top layer) and exactly when the old
+// layer(s) are actually REMOVED from the DOM, and ShotFadeLayer logs the
+// moment it's DEMOTED (command -> null) with its own visible/opacity
+// state and current transform at that instant, plus any time `visible`
+// itself changes after the fact. Together these show whether the
+// outgoing layer stays fully opaque and frozen the whole time (as
+// designed) or whether something briefly exposes both layers, or drops
+// the outgoing layer's opacity, around the cut boundary.
 const CUT_DEBUG_ENABLED = typeof window !== 'undefined' && window.location.search.includes('debug=1');
 let cutDebugLog = [];
 const cutDebugListeners = new Set();
@@ -475,6 +493,36 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layerTrackSid, aspect.status, aspect.isPortraitSource, aspect.width, aspect.height]);
 
+  // DEBUG (third round, see module comment) -- fires exactly when
+  // ShotVideo demotes this layer from top (live command) to outgoing
+  // (command -> null), i.e. the instant a new layer is appended above
+  // it. Logs its own visible/opacity state and current DOM transform
+  // right then, so it's directly checkable whether the outgoing layer
+  // is still fully opaque and holding its own (correct) framing at the
+  // cut boundary, rather than inferred from the code.
+  const wasTopRef = useRef(command !== null);
+  useEffect(() => {
+    const isTop = command !== null;
+    if (wasTopRef.current && !isTop) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] DEMOTED to outgoing: visible=${visible} domTransform=${transformElRef.current?.style?.transform || '(none)'}`);
+    }
+    wasTopRef.current = isTop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [command]);
+
+  // DEBUG (third round) -- catches ANY change to `visible` after the
+  // fact, including one that would be a real bug: the outgoing layer's
+  // opacity is never supposed to drop back to 0 once revealed. If this
+  // ever logs a true -> false transition, that's a direct, no-inference
+  // confirmation that something is un-revealing a layer mid-cut.
+  const prevVisibleRef = useRef(visible);
+  useEffect(() => {
+    if (prevVisibleRef.current !== visible) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] visible state changed: ${prevVisibleRef.current} -> ${visible}`);
+      prevVisibleRef.current = visible;
+    }
+  }, [visible, trackRef]);
+
   // Frame-paint watcher -- unchanged trigger (trackRef only), doesn't
   // restart when aspect settles, just marks its own condition and asks
   // tryReveal to check whether BOTH are satisfied now.
@@ -516,7 +564,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, onReady }) {
       // opened (the batching this fix relies on didn't hold).
       const videoEl = videoRef.current;
       const domTransform = transformElRef.current?.style?.transform || '(none)';
-      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED: detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
+      logCutDebug(`[${shortLayerTag(trackRef)}] REVEALED (${instant ? 'cut' : 'fade'}): detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
       setVisible(true);
       onReady?.();
     }
@@ -589,10 +637,18 @@ function ShotVideo({ trackRef, command, placeholder }) {
   useEffect(() => {
     const newKey = trackKey(trackRef);
     if (newKey === currentKeyRef.current) return undefined;
+    // DEBUG (third round, see module comment) -- the moment a new layer
+    // is appended is also the moment the previous top layer gets demoted
+    // (its own DEMOTED log fires from that layer's effect, keyed off the
+    // same command/index change). Logging both sides of that boundary
+    // here shows whether they land in the log at essentially the same
+    // instant (expected) or whether there's an unexpected gap.
+    logCutDebug(`[ShotVideo] APPEND new layer (was=${currentKeyRef.current || 'none'} now=${newKey}) transition=${instant ? 'cut' : 'fade'}`);
     currentKeyRef.current = newKey;
     const layerKey = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     setLayers((prev) => [...prev, { key: layerKey, trackRef }]);
     return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackRef, command]);
 
   useEffect(() => () => {
@@ -606,9 +662,24 @@ function ShotVideo({ trackRef, command, placeholder }) {
   const handleTopLayerReady = useCallback(() => {
     if (removalTimerRef.current) clearTimeout(removalTimerRef.current);
     const delay = instant ? 0 : CAMERA_CHANGE_FADE_MS;
+    // DEBUG (third round) -- top layer just self-reported REVEALED (see
+    // its own log line); this schedules the outgoing layer's actual
+    // unmount `delay`ms from now. Logging both ends -- scheduled here,
+    // fired below -- shows the real gap between "incoming is visible"
+    // and "outgoing is actually removed from the DOM", i.e. exactly how
+    // long both layers are simultaneously mounted (outgoing fully
+    // opaque underneath, incoming fully opaque on top of it for 'cut';
+    // incoming mid-fade-in for 'fade').
+    logCutDebug(`[ShotVideo] top layer ready, removing outgoing in ${delay}ms`);
     removalTimerRef.current = setTimeout(() => {
       removalTimerRef.current = null;
-      setLayers((prev) => (prev.length > 1 ? prev.slice(-1) : prev));
+      setLayers((prev) => {
+        if (prev.length > 1) {
+          logCutDebug(`[ShotVideo] REMOVE ${prev.length - 1} outgoing layer(s) -> down to 1`);
+          return prev.slice(-1);
+        }
+        return prev;
+      });
     }, delay);
   }, [instant]);
 
