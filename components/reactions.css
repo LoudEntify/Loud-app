@@ -543,9 +543,52 @@ button {
     overflow: hidden;
   }
 
+  /* Versus: the outer box above was sized for ONE portrait feed (solo).
+     Versus needs TWO -- forcing a single 9:16 shape onto the pair
+     combined (rather than each panel individually) is exactly why this
+     used to render "meshed at center", cramped, only readable by
+     dragging the slider to an extreme. Fix: the outer box drops its OWN
+     aspect-ratio (each panel gets its own below instead) and widens to
+     comfortably hold two 9:16 boxes side by side plus the divider --
+     roughly double the solo cap, not unconstrained, so it stays a
+     centered, bounded positioning aid rather than becoming a full-bleed
+     stretch (which is what the VIEWER's Versus already does, and
+     deliberately isn't what the performer's screen -- a viewfinder/
+     positioning aid, per the phone-box rule above -- should copy). */
+  .stage-root--performer .stage-video-area.stage-video-area--versus {
+    width: min(780px, 100%);
+    aspect-ratio: auto;
+  }
+
+  /* Each panel gets its OWN portrait box -- this is the actual fix.
+     Width still comes from VersusSplit's inline flexBasis (the slider,
+     unchanged, still ${split}%/${100-split}%); aspect-ratio derives
+     height from that width, same width-drives-height-capped-by-
+     max-height pattern the solo box above already uses (an accepted,
+     existing tradeoff in this file, not a new one). align-self:center
+     avoids relying on the parent's default cross-axis stretch, which
+     would otherwise fight the aspect-ratio-derived height. */
+  .stage-video-area--versus .contestant-panel {
+    aspect-ratio: 9 / 16;
+    height: auto;
+    max-height: 70vh;
+    align-self: center;
+    flex-grow: 0;
+    flex-shrink: 1;
+  }
+
   /* Maximized: today's fill-the-available-space behavior, unchanged --
      restores exactly what .stage-root--performer .stage-video-area used
-     to be unconditionally, before the phone-box default above. */
+     to be unconditionally, before the phone-box default above. Comes
+     AFTER the versus rule above (equal specificity, both 3 classes) so
+     it correctly wins the outer box's own width/aspect-ratio when BOTH
+     maximized and versus apply -- maximize should always give the most
+     room available, versus's own cap shouldn't fight that. The versus
+     panel rule directly above is UNAFFECTED by this (different target,
+     .contestant-panel not .stage-video-area) -- each panel keeps its own
+     9:16 shape and just has more outer room to scale into, which is
+     exactly "both panels scale up proportionally, staying centered" with
+     no separate versus+maximized rule needed. */
   .stage-root--performer.stage-root--maximized .stage-video-area {
     flex: 1;
     width: auto;
@@ -923,6 +966,47 @@ button {
     height: auto;
     max-height: 70vh;
     flex-shrink: 0;
+  }
+
+  /* Versus, mobile -- same root cause and fix as the desktop rule above,
+     mirrored for whichever direction VersusSplit is actually stacking in
+     on THIS device: column on an upright phone (useOrientation()'s
+     primary/common case -- touch + portrait orientation), row if a
+     touch device happens to be physically rotated to landscape. Unlike
+     desktop, there's no extra viewport width to widen into here -- the
+     outer box's width:100% above IS the phone's own screen width
+     already, sized correctly for one portrait panel -- so this only
+     drops the outer box's own aspect-ratio (which was forcing a single
+     9:16 shape onto the PAIR combined) and gives each panel its own
+     instead. */
+  .stage-video-area.stage-video-area--versus {
+    aspect-ratio: auto;
+  }
+
+  /* Portrait/column (upright phone): main axis is vertical, so
+     VersusSplit's flexBasis (the slider) controls HEIGHT -- stays
+     exactly as-is, untouched. WIDTH is the cross axis here and derives
+     from aspect-ratio instead, capped via max-width (not max-height,
+     axes are swapped from the row/landscape case below). */
+  .stage-video-area--versus .versus-stage.portrait .contestant-panel {
+    aspect-ratio: 9 / 16;
+    width: auto;
+    max-width: 100%;
+    align-self: center;
+    flex-grow: 0;
+    flex-shrink: 1;
+  }
+
+  /* Landscape/row (a touch device rotated sideways) -- same
+     width-drives-height-capped-by-max-height pattern as desktop's fix,
+     since the main axis is horizontal here too. */
+  .stage-video-area--versus .versus-stage.landscape .contestant-panel {
+    aspect-ratio: 9 / 16;
+    height: auto;
+    max-height: 70vh;
+    align-self: center;
+    flex-grow: 0;
+    flex-shrink: 1;
   }
 
   .stage-mic-cam {
