@@ -1133,6 +1133,27 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
+
+  // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
+  // only. Second link in the chain, between "did the SHOT_COMMAND arrive"
+  // (the data-channel log below) and "[renderSlot] matched=...": is a
+  // given camfeed's track actually subscribed/present for THIS viewer at
+  // all right now. Logs the full camera-track list (identity, whether
+  // LiveKit reports it subscribed, whether a real Track object is
+  // attached yet -- isSubscribed can be true with track still briefly
+  // undefined) whenever the SET or any entry's subscription state
+  // changes, not every render.
+  const trackSubDebugRef = useRef('');
+  useEffect(() => {
+    if (!CUT_DEBUG_ENABLED || role !== 'viewer') return;
+    const signature = tracks
+      .map((t) => `${t.participant.identity}:sub=${t.publication?.isSubscribed}:track=${!!t.publication?.track}`)
+      .join('|');
+    if (trackSubDebugRef.current === signature) return;
+    trackSubDebugRef.current = signature;
+    logCutDebug(`[tracks] camera tracks now: ${tracks.length === 0 ? '(none)' : tracks.map((t) => `${t.participant.identity}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`).join(', ')}`);
+  }, [tracks, role]);
+
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
@@ -1287,6 +1308,16 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       setComments((prev) => [...prev, payload.comment]);
     }
     if (payload.type === 'SHOT_COMMAND') {
+      // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
+      // only. First link in the chain: did the SHOT_COMMAND actually
+      // arrive over the data channel at all. If a director cuts to a
+      // camfeed and this line never appears, it's a delivery problem
+      // (data channel / reliability), not a match-logic problem -- no
+      // point looking at renderSlot's matched=false if the command never
+      // showed up here in the first place.
+      if (CUT_DEBUG_ENABLED && role === 'viewer') {
+        logCutDebug(`[dataChannel] SHOT_COMMAND received: slot=${payload.slot} shot=${payload.shot} targetIdentity=${payload.targetIdentity || 'none'} transition=${payload.transition}`);
+      }
       setActiveShot((prev) => ({ ...prev, [payload.slot]: payload }));
     }
     if (payload.type === 'SHOW_LIVE') {
@@ -1493,7 +1524,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       const key = `${cmd?.targetIdentity || 'none'}|${!!matched}|${chosen?.participant.identity || 'none'}`;
       if (chosenDebugRef.current[letter] !== key) {
         chosenDebugRef.current[letter] = key;
-        logCutDebug(`[renderSlot:${letter}] targetIdentity=${cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidates.map((t) => t.participant.identity).join(', ') || 'none'}] chosen=${chosen?.participant.identity || 'none'} via=${chosenVia}`);
+        // candidates here include sub/track state (same shape as the
+        // [tracks] log above) so a candidate that's PRESENT but not yet
+        // actually subscribed is distinguishable from one that's fully
+        // live -- third link in the chain, after [dataChannel] and
+        // [tracks].
+        const candidatesDetailed = candidates
+          .map((t) => `${t.participant.identity}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`)
+          .join(', ') || 'none';
+        logCutDebug(`[renderSlot:${letter}] targetIdentity=${cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidatesDetailed}] chosen=${chosen?.participant.identity || 'none'} via=${chosenVia}`);
       }
     }
 
