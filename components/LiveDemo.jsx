@@ -1452,14 +1452,50 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // cut back", not "hard cut out".
   const wasInterstitialRef = useRef({});
 
+  // DEBUG (bug 2 investigation -- "viewer stuck on main") -- last logged
+  // {targetIdentity, matched, chosen} tuple per slot, so renderSlot only
+  // logs when the RESOLVED result actually changes, not on every render
+  // (renderSlot's inner function runs once per VersusSplit render, which
+  // is often). Declared here, at RoomInner's own level -- renderSlot's
+  // returned function executes during VersusSplit's render, not
+  // RoomInner's own, so it can't call hooks itself; this ref is created
+  // once, outside the closure, and only READ/written inside it, same
+  // pattern as wasInterstitialRef above.
+  const chosenDebugRef = useRef({});
+
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(letter);
     const cmd = activeShot[letter];
+    const matched = cmd?.targetIdentity
+      ? candidates.find((t) => t.participant.identity === cmd.targetIdentity)
+      : undefined;
     const chosen =
-      (cmd?.targetIdentity &&
-        candidates.find((t) => t.participant.identity === cmd.targetIdentity)) ||
+      matched ||
       candidates.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
       candidates[0];
+
+    // DEBUG (bug 2 investigation) -- viewer-side only (role === 'viewer';
+    // the director already has other debug coverage). Shows exactly what
+    // targetIdentity the received SHOT_COMMAND carried, whether it
+    // matched a track this viewer currently has as a candidate, and
+    // which branch `chosen` actually came from. If a director cut to a
+    // camfeed but this logs matched=false while the camfeed's identity
+    // IS present in the candidates list, that's the fallback-to-main bug
+    // confirmed, not a candidates-timing issue.
+    if (CUT_DEBUG_ENABLED && role === 'viewer') {
+      const chosenVia = matched
+        ? 'targetIdentity match'
+        : chosen
+          ? (chosen.participant.identity.startsWith(`contestant-${letter}-`)
+            ? 'FALLBACK: prefer contestant'
+            : 'FALLBACK: candidates[0]')
+          : 'none (no candidates)';
+      const key = `${cmd?.targetIdentity || 'none'}|${!!matched}|${chosen?.participant.identity || 'none'}`;
+      if (chosenDebugRef.current[letter] !== key) {
+        chosenDebugRef.current[letter] = key;
+        logCutDebug(`[renderSlot:${letter}] targetIdentity=${cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidates.map((t) => t.participant.identity).join(', ') || 'none'}] chosen=${chosen?.participant.identity || 'none'} via=${chosenVia}`);
+      }
+    }
 
     const isInterstitial = displayShowState === 'live' && candidates.length === 0;
     const wasInterstitial = wasInterstitialRef.current[letter];
