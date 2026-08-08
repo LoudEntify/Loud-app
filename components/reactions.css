@@ -856,6 +856,31 @@ button {
     display: none;
   }
 
+  /* Root cause of the Discover-button collision: .sidebar-collapse-btn's
+     base rule (position:absolute, top:24px) was positioned to sit
+     alongside .sidebar-header's title text on desktop -- but .sidebar-
+     header is display:none right above, so on mobile there's no header
+     space left to separate it from .sidebar-nav, and the button lands
+     directly on top of/against the first nav item (Discover) instead.
+     Fixed by taking it OUT of absolute positioning here and back into
+     normal flow as its own flex item, ahead of sidebar-nav in DOM order
+     (see Sidebar.jsx) -- the browser then guarantees real separation by
+     construction, rather than this relying on precise pixel offsets
+     matching between the button's absolute top and wherever nav happens
+     to start. align-self:center handles horizontal centering in the
+     column-direction flex parent (.sidebar) -- margin:auto centers
+     along the MAIN axis in a flex container, which is vertical here, not
+     what's wanted. 44px is the standard minimum mobile touch target
+     size; margin-bottom is the actual tap-gap before the first nav
+     item's own touch target begins. */
+  .sidebar-collapse-btn {
+    position: static;
+    align-self: center;
+    width: 44px;
+    height: 44px;
+    margin: 4px 0 12px;
+  }
+
   .sidebar-item {
     justify-content: center;
     padding: 14px 0;
