@@ -792,9 +792,23 @@ button {
   .stage-side-panel .comments-panel {
     height: 20vh;
     min-height: 140px;
-    background: #011627;
     border-top: 0.5px solid rgba(253, 255, 252, 0.15);
     overflow: visible;
+  }
+
+  /* Solid Ink background is performer-only, split out from the shared
+     rule above rather than left for the "Fan mobile redesign (viewer
+     only)" section further down to override back to transparent --
+     that override (.stage-side-panel:not(.stage-side-panel--broadcast)
+     .comments-panel) has higher specificity and should win on paper, but
+     testing on a real mobile viewer showed the solid background still
+     painting there. Scoping background to --broadcast directly here
+     means viewer and performer never share a selector for this property
+     at all, so there's no override to rely on winning -- each role's
+     background is set exactly once, unconditionally, by a selector that
+     only ever matches that role. */
+  .stage-side-panel--broadcast .comments-panel {
+    background: #011627;
   }
 
   .stage-side-panel .comments-panel.expanded {
