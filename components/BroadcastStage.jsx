@@ -97,7 +97,7 @@ export default function BroadcastStage({
   };
 
   return (
-    <div className="stage-root stage-root--performer" ref={stageRef}>
+    <div className={`stage-root stage-root--performer ${maximized ? 'stage-root--maximized' : ''}`} ref={stageRef}>
       <div className="stage-video-area" onClick={onStageClick}>
         <VersusSplit
           mode={performanceMode}

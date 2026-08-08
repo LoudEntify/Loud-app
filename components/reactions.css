@@ -455,14 +455,38 @@ button {
 
 /* Scoped to min-width so it never fights the mobile media query's own
    .stage-video-area{height:45vh} override on specificity -- this only
-   ever applies above that breakpoint. */
+   ever applies above that breakpoint.
+   Default (not maximized): a phone-sized portrait box, not a flex-filled
+   full-bleed area -- lets the artist gauge framing/positioning against
+   roughly what a phone viewer will actually see, rather than a stretched
+   desktop preview. Same 9/16 ratio and 70vh cap already used for mobile
+   performer (below), reused here for consistency rather than a new
+   number. Purely a container-size change -- ShotTransformFrame's crop
+   transform and the portrait-crop TrackProcessor both work relative to
+   whatever size this box actually is, so neither is affected by it. */
 @media (min-width: 1025px) {
   .stage-root--performer .stage-video-area {
     position: relative;
     inset: auto;
-    flex: 1;
-    min-height: 0;
+    flex: none;
+    width: min(380px, 100%);
+    aspect-ratio: 9 / 16;
+    height: auto;
+    max-height: 70vh;
+    margin: 0 auto;
     overflow: hidden;
+  }
+
+  /* Maximized: today's fill-the-available-space behavior, unchanged --
+     restores exactly what .stage-root--performer .stage-video-area used
+     to be unconditionally, before the phone-box default above. */
+  .stage-root--performer.stage-root--maximized .stage-video-area {
+    flex: 1;
+    width: auto;
+    aspect-ratio: auto;
+    max-height: none;
+    margin: 0;
+    min-height: 0;
   }
 }
 
