@@ -1025,6 +1025,7 @@ export default function LiveDemo() {
       autoHideSidebar={isViewerRole}
       sidebarCollapsed={sidebarCollapsed}
       onToggleSidebarCollapse={!isViewerRole && !isCamFeedRole ? toggleSidebarCollapsed : undefined}
+      liveOverlay
     >
       <div className="live-room-shell">
         <LiveKitRoom

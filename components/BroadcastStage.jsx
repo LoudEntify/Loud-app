@@ -7,16 +7,11 @@ import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
 import PerformerDeck from './PerformerDeck';
 
-// Desktop-only sizing constants for the video/deck split -- mirrors
-// VersusSplit's own min/max-bound drag pattern, just vertical instead of
-// horizontal. MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's
-// rendered height (padding + button), not a computed value -- re-check it
-// visually if that row's own styling changes.
+// Sizing constants for the deck drag-resize / bottom-overlay offset math.
+// MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
+// height (padding + button), not a computed value -- re-check it visually
+// if that row's own styling changes.
 const MIN_DECK_HEIGHT = 160;
-// The leave button sits at top:50% of the video area with a 56px circle,
-// and comments starts at top:80px within that same area -- below ~256px
-// the two collide visually. Keeping a margin above that floor.
-const MIN_VIDEO_HEIGHT = 260;
 const MIC_CAM_HEIGHT = 52;
 const DECK_DIVIDER_HEIGHT = 16;
 const DEFAULT_DECK_HEIGHT = 340;
@@ -24,15 +19,17 @@ const DEFAULT_DECK_HEIGHT = 340;
 // Desktop performer view -- matches Artist Broadcast.dc.html. Versus shows
 // the performer's own multi-cam preview left / opponent right (with the
 // drag divider); solo drops the split entirely and shows one full-bleed
-// panel. Stacked top to bottom below the video: mic/camera row (instant,
-// no-menu-diving toggles), a draggable vertical divider, then
-// PerformerDeck (audio/video tuning panels) at a height the artist
-// controls. Comments float over the video the same way the fan mobile
-// view does -- transparent, teal glow, no background -- their bottom
-// offset tracks the same deckHeight state driving the divider, since a
-// hardcoded pixel value can't work once that height is user-adjustable.
-// Every handler here is passed straight through from RoomInner -- no
-// LiveKit calls happen in this file.
+// panel. Build 3c: mic/camera row, the deck's collapse toggle + drag
+// divider, and PerformerDeck itself are wrapped in ONE fixed overlay
+// (.stage-bottom-overlay) floating directly on the video, rather than
+// flex-column siblings that used to shrink the video to make room for
+// them -- every live-screen panel is a floating overlay now, artist and
+// viewer alike. Comments float over the video the same way the fan
+// mobile view does -- transparent, teal glow, no background -- their
+// bottom offset tracks the same deckHeight state driving the divider,
+// since a hardcoded pixel value can't work once that height is
+// user-adjustable. Every handler here is passed straight through from
+// RoomInner -- no LiveKit calls happen in this file.
 export default function BroadcastStage({
   performanceMode,
   role,
@@ -84,13 +81,16 @@ export default function BroadcastStage({
   // with the two collapse states as one combined piece of state.
   const videoFullView = maximized || (sidebarCollapsed && deckCollapsed);
 
+  // The deck is a fixed overlay now (build 3c), not a flex sibling that
+  // needs to leave room for the video underneath it -- so the cap is
+  // just "a reasonable maximum fraction of the stage", not video-space
+  // reservation math against MIC_CAM_HEIGHT/DECK_DIVIDER_HEIGHT (those
+  // two constants are still used below, for the comments panel's own
+  // bottom offset -- unrelated to this cap).
   const clampDeckHeight = useCallback((px) => {
     const stage = stageRef.current;
     const totalHeight = stage ? stage.getBoundingClientRect().height : DEFAULT_DECK_HEIGHT * 3;
-    const maxDeck = Math.max(
-      MIN_DECK_HEIGHT,
-      totalHeight - MIN_VIDEO_HEIGHT - MIC_CAM_HEIGHT - DECK_DIVIDER_HEIGHT
-    );
+    const maxDeck = Math.max(MIN_DECK_HEIGHT, totalHeight * 0.7);
     return Math.max(MIN_DECK_HEIGHT, Math.min(maxDeck, px));
   }, []);
 
@@ -135,77 +135,86 @@ export default function BroadcastStage({
         </button>
       </div>
 
-      <div className="stage-mic-cam">
-        <button type="button" className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
-          {micOn ? <Microphone size={16} weight="bold" /> : <MicrophoneSlash size={16} weight="bold" />}
-          {micOn ? 'MIC ON' : 'MIC MUTED'}
-        </button>
-        <button type="button" className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
-          {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
-          {camOn ? 'CAM ON' : 'CAM OFF'}
-        </button>
-        <button type="button" className="control-btn" onClick={toggleFacingMode}>
-          <CameraRotate size={16} weight="bold" />
-          {facingMode === 'user' ? 'FRONT' : 'REAR'}
-        </button>
-      </div>
-
-      {/* Down/up arrow -- collapses/restores the deck below, independent
-          of the drag-resize divider (which stays desktop-only and is
-          hidden entirely while collapsed, since there's nothing to
-          resize). Rendered as its own always-present row rather than
-          folded into .deck-divider so it works identically on mobile,
-          where the divider itself is hidden. */}
-      <div className="deck-toggle-row">
-        <button
-          type="button"
-          className="deck-collapse-btn"
-          onClick={toggleDeckCollapsed}
-          aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
-        >
-          {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
-        </button>
-      </div>
-
-      {!deckCollapsed && (
-        <div
-          className="deck-divider"
-          onPointerDown={onDividerPointerDown}
-          onPointerMove={onDividerPointerMove}
-          onPointerUp={onDividerPointerUp}
-          onPointerCancel={onDividerPointerUp}
-          role="slider"
-          aria-label="resize control deck"
-          aria-valuemin={MIN_DECK_HEIGHT}
-          aria-valuemax={Math.round(clampDeckHeight(Infinity))}
-          aria-valuenow={Math.round(deckHeight)}
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
-            if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
-          }}
-        >
-          <div className="drag-handle portrait">
-            <span className="drag-dot" />
-            <span className="drag-dot" />
-            <span className="drag-dot" />
-          </div>
+      {/* Build 3c -- mic-cam + the deck's own toggle/divider/wrapper are
+          wrapped in ONE fixed overlay, floating on the video, rather
+          than flex-column siblings that used to shrink it. The four
+          elements inside keep stacking via a normal nested flex column
+          (see .stage-bottom-overlay in reactions.css) -- only the outer
+          wrapper's positioning changed, nothing about their own
+          relative order/spacing. */}
+      <div className="stage-bottom-overlay">
+        <div className="stage-mic-cam">
+          <button type="button" className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
+            {micOn ? <Microphone size={16} weight="bold" /> : <MicrophoneSlash size={16} weight="bold" />}
+            {micOn ? 'MIC ON' : 'MIC MUTED'}
+          </button>
+          <button type="button" className={`control-btn ${!camOn ? 'off' : ''}`} onClick={toggleCam}>
+            {camOn ? <VideoCamera size={16} weight="bold" /> : <VideoCameraSlash size={16} weight="bold" />}
+            {camOn ? 'CAM ON' : 'CAM OFF'}
+          </button>
+          <button type="button" className="control-btn" onClick={toggleFacingMode}>
+            <CameraRotate size={16} weight="bold" />
+            {facingMode === 'user' ? 'FRONT' : 'REAR'}
+          </button>
         </div>
-      )}
 
-      <div
-        className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
-        style={{ '--deck-height': `${deckHeight}px` }}
-      >
-        <PerformerDeck
-          audioNodes={audioNodes}
-          audioContext={audioContext}
-          showEnded={showEnded}
-          showPhase={showPhase}
-          cameraCandidates={candidates}
-          activeCameraIdentity={activeCamera[role]}
-          onPickCamera={(identity) => setActiveForSlot(role, identity)}
-        />
+        {/* Down/up arrow -- collapses/restores the deck below, independent
+            of the drag-resize divider (which stays desktop-only and is
+            hidden entirely while collapsed, since there's nothing to
+            resize). Rendered as its own always-present row rather than
+            folded into .deck-divider so it works identically on mobile,
+            where the divider itself is hidden. */}
+        <div className="deck-toggle-row">
+          <button
+            type="button"
+            className="deck-collapse-btn"
+            onClick={toggleDeckCollapsed}
+            aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
+          >
+            {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+          </button>
+        </div>
+
+        {!deckCollapsed && (
+          <div
+            className="deck-divider"
+            onPointerDown={onDividerPointerDown}
+            onPointerMove={onDividerPointerMove}
+            onPointerUp={onDividerPointerUp}
+            onPointerCancel={onDividerPointerUp}
+            role="slider"
+            aria-label="resize control deck"
+            aria-valuemin={MIN_DECK_HEIGHT}
+            aria-valuemax={Math.round(clampDeckHeight(Infinity))}
+            aria-valuenow={Math.round(deckHeight)}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
+              if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
+            }}
+          >
+            <div className="drag-handle portrait">
+              <span className="drag-dot" />
+              <span className="drag-dot" />
+              <span className="drag-dot" />
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
+          style={{ '--deck-height': `${deckHeight}px` }}
+        >
+          <PerformerDeck
+            audioNodes={audioNodes}
+            audioContext={audioContext}
+            showEnded={showEnded}
+            showPhase={showPhase}
+            cameraCandidates={candidates}
+            activeCameraIdentity={activeCamera[role]}
+            onPickCamera={(identity) => setActiveForSlot(role, identity)}
+          />
+        </div>
       </div>
 
       <div

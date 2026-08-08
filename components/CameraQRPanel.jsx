@@ -50,12 +50,12 @@ export default function CameraQRPanel({ roomName, slot }) {
           ) : (
             <div style={{ width: 140, height: 140, background: 'rgba(253, 255, 252, 0.06)' }} />
           )}
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginTop: 6, color: '#fdfffc' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', marginTop: 6, color: '#fdfffc', textShadow: 'var(--text-halo)' }}>
             {r.toUpperCase()}
           </div>
           <a
             href={links[r]}
-            style={{ fontSize: 9, color: '#2ec4b6', wordBreak: 'break-all', display: 'block', marginTop: 2 }}
+            style={{ fontSize: 9, color: '#2ec4b6', wordBreak: 'break-all', display: 'block', marginTop: 2, textShadow: 'var(--text-halo)' }}
           >
             {links[r]}
           </a>

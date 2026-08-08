@@ -181,10 +181,20 @@ export default function DirectorShotPanel({
     [room, showId, slot, availableRoles, tracks, showPhase, staccatoOn, sequencer, onExclusiveMode, onHumanCommand, onCommand]
   );
 
+  // Build 3c -- fully transparent, floating directly on the video inside
+  // .director-panel-body (reactions.css); legibility comes from the
+  // shared text halo (var(--text-halo)) on every plain label here,
+  // layered UNDER each element's own existing accent-color glow rather
+  // than replacing it -- the halo is what survives against a bright/
+  // white video frame, the colored glow on top is what makes it read as
+  // teal/orange/etc rather than plain white. The shot buttons below
+  // already used exactly this transparent + border/glow pattern before
+  // this build -- reused as-is, untouched, the precedent this whole
+  // build generalizes from.
   return (
     <div
       style={{
-        background: C.ink,
+        background: 'transparent',
         color: C.porcelain,
         borderRadius: 12,
         padding: 12,
@@ -201,7 +211,7 @@ export default function DirectorShotPanel({
           alignItems: 'baseline',
         }}
       >
-        <span style={{ fontSize: 12, letterSpacing: 1.5, opacity: 0.6 }}>
+        <span style={{ fontSize: 12, letterSpacing: 1.5, opacity: 0.6, textShadow: 'var(--text-halo)' }}>
           SHOTS — SLOT {slot}
         </span>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
@@ -210,7 +220,7 @@ export default function DirectorShotPanel({
               style={{
                 fontSize: 11,
                 color: C.orange,
-                textShadow: `0 0 8px ${C.orange}88`, // mild neon per brand rule
+                textShadow: 'var(--text-halo), 0 0 8px rgba(255, 159, 28, 0.55)', // mild neon per brand rule, halo underneath
               }}
             >
               ● STACCATO RUNNING
@@ -229,8 +239,8 @@ export default function DirectorShotPanel({
               color: AUTO_COLORS[autoState] || AUTO_COLORS.off,
               textShadow:
                 autoState === 'running' || autoState === 'cooldown'
-                  ? `0 0 8px ${AUTO_COLORS[autoState]}88`
-                  : 'none',
+                  ? `var(--text-halo), 0 0 8px ${AUTO_COLORS[autoState]}88`
+                  : 'var(--text-halo)',
               cursor: onToggleAuto ? 'pointer' : 'default',
             }}
           >
@@ -241,7 +251,7 @@ export default function DirectorShotPanel({
 
       {GROUPS.map((group) => (
         <div key={group.title}>
-          <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6, letterSpacing: 1 }}>
+          <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6, letterSpacing: 1, textShadow: 'var(--text-halo)' }}>
             {group.title.toUpperCase()}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -271,6 +281,7 @@ export default function DirectorShotPanel({
                     border: `1.5px solid ${isActive ? activeColor : '#fdfffc22'}`,
                     background: isActive ? `${activeColor}22` : 'transparent',
                     color: disabled ? '#fdfffc44' : C.porcelain,
+                    textShadow: 'var(--text-halo)',
                     boxShadow: isActive ? `0 0 10px ${activeColor}66` : 'none',
                     fontSize: 13,
                     fontWeight: 600,
@@ -284,15 +295,23 @@ export default function DirectorShotPanel({
               );
             })}
 
-            {/* Pan direction selector, only shown alongside the Moving group */}
+            {/* Pan direction selector, only shown alongside the Moving group.
+                Build 3c: the CLOSED trigger gets the same transparent +
+                glow-border treatment as everything else -- but the OPEN
+                dropdown list is native OS chrome, not stylable from CSS
+                in most browsers, and will show default (usually opaque)
+                OS styling regardless of what's set here. A web-platform
+                limit, not an oversight. */}
             {group.title === 'Moving' && (
               <select
                 value={panDirection}
                 onChange={(e) => setPanDirection(e.target.value)}
                 style={{
-                  background: C.ink,
+                  background: 'transparent',
                   color: C.porcelain,
-                  border: '1.5px solid #fdfffc22',
+                  textShadow: 'var(--text-halo)',
+                  border: '1.5px solid rgba(46, 196, 182, 0.4)',
+                  boxShadow: '0 0 8px rgba(46, 196, 182, 0.2)',
                   borderRadius: 8,
                   padding: '0 10px',
                   fontSize: 12,

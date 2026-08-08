@@ -3,6 +3,34 @@
    Muted/secondary text reuses Porcelain or Ink at reduced opacity rather
    than introducing a third neutral. */
 
+/* Live-screen legibility (build 3c) -- every panel on a live screen
+   (artist + viewer, solo + versus) is fully transparent, floating
+   directly on the video, defined by border/glow rather than any fill.
+   Legibility over unpredictable video brightness (a bright-lit stage,
+   not just dark test footage) comes from a dark HALO around text/icons,
+   not a panel background -- a tight dark ring survives even against a
+   pure white frame (the ring itself is dark regardless of what's behind
+   it, same principle film captioning uses), while two wider, softer
+   blurred shadows underneath make it read as a gentle glow rather than a
+   harsh outline against normal/dark footage. Defined once here as custom
+   properties (values, not a class) specifically so nothing leaks onto
+   non-live pages by being a shared class name -- consumers are either
+   scoped CSS selectors (.page-shell--live ...) for components rendered
+   on multiple pages, or direct var() references in inline styles for
+   components that only ever render inside the live room. */
+:root {
+  --text-halo:
+    -1px -1px 1.5px rgba(1, 22, 39, 0.9),
+     1px -1px 1.5px rgba(1, 22, 39, 0.9),
+    -1px  1px 1.5px rgba(1, 22, 39, 0.9),
+     1px  1px 1.5px rgba(1, 22, 39, 0.9),
+     0 0 6px rgba(1, 22, 39, 0.7),
+     0 0 12px rgba(1, 22, 39, 0.4);
+  --icon-halo:
+    drop-shadow(0 0 1.5px rgba(1, 22, 39, 0.9))
+    drop-shadow(0 0 4px rgba(1, 22, 39, 0.6));
+}
+
 /* Global button reset -- this is the fix for the "AI-built" look: no
    default borders anywhere, rounded/pill corners everywhere, bold labels.
    A border only ever appears via .btn-active, signaling a genuinely
@@ -94,7 +122,10 @@ button {
   cursor: ns-resize;
 }
 
-/* Hexagonal chamfered chip, teal border+dots+glow -- not a rounded pill. */
+/* Hexagonal chamfered chip, teal border+dots+glow, transparent fill (build
+   3c) -- same "define by border/glow, not fill" treatment as every other
+   live-screen control. clip-path stays even at transparent -- it's the
+   chip's own silhouette against the video, not a solid-fill mask. */
 .drag-handle {
   position: absolute;
   top: 50%;
@@ -104,7 +135,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  background: #011627;
+  background: transparent;
   border: 1px solid #2ec4b6;
   clip-path: polygon(50% 0, 100% 20%, 100% 80%, 50% 100%, 0 80%, 0 20%);
   box-shadow: 0 0 8px rgba(46, 196, 182, 0.5);
@@ -138,7 +169,9 @@ button {
 }
 
 /* Borderless icon+label control -- state communicated only through color
-   (porcelain = on/default, red = off/muted). */
+   (porcelain = on/default, red = off/muted). Already had no fill;
+   text-shadow/filter added (build 3c) since it now floats directly on
+   video with nothing behind it for contrast. */
 .control-btn {
   background: none;
   border: none;
@@ -151,12 +184,20 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  text-shadow: var(--text-halo);
+  filter: var(--icon-halo);
 }
 
 .control-btn.off {
   color: #e71d36;
+  text-shadow: var(--text-halo), 0 0 8px rgba(231, 29, 54, 0.5);
 }
 
+/* Transparent + strong glow (build 3c), same treatment as every other
+   live-screen control -- kept deliberately vivid (unchanged strong
+   box-shadow, plus the icon halo) since this is a safety/urgency-coded
+   action (hang up the call): the glow alone needs to stay as visually
+   commanding as the old solid fill was, not just technically legible. */
 .leave-btn-floating {
   position: absolute;
   right: 24px;
@@ -165,14 +206,15 @@ button {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  border: none;
-  background: #e71d36;
+  border: 1.5px solid #e71d36;
+  background: transparent;
   color: #fdfffc;
   font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 0 16px rgba(231, 29, 54, 0.6);
+  filter: var(--icon-halo);
   cursor: pointer;
   z-index: 5;
 }
@@ -359,6 +401,11 @@ button {
   border-right: none;
 }
 
+/* onToggleCollapse (Sidebar.jsx) is only ever passed a real function from
+   the live page (see PageShell.jsx's own comment) -- every other page's
+   PageShell call omits it, so this button structurally can't render
+   anywhere else. Safe to style directly with the live-screen icon halo
+   below, no .page-shell--live scoping needed for THIS one element. */
 .sidebar-collapse-btn {
   position: absolute;
   top: 24px;
@@ -372,6 +419,7 @@ button {
   border: none;
   color: rgba(253, 255, 252, 0.5);
   cursor: pointer;
+  filter: var(--icon-halo);
 }
 
 .sidebar-collapse-btn:hover {
@@ -467,12 +515,13 @@ button {
   justify-content: center;
   width: 22px;
   height: 56px;
-  background: rgba(1, 22, 39, 0.6);
+  background: transparent;
   border: 1px solid rgba(46, 196, 182, 0.5);
   border-left: none;
   border-radius: 0 8px 8px 0;
   box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
   color: #2ec4b6;
+  filter: var(--icon-halo);
   z-index: 20;
   cursor: pointer;
 }
@@ -490,8 +539,60 @@ button {
   position: relative;
 }
 
+/* Build 3c -- live-screen-only overlay conversion for the shared Sidebar
+   component. .page-shell--live is added ONLY by LiveDemo.jsx (see
+   PageShell.jsx's liveOverlay prop) -- every other page's PageShell call
+   doesn't pass it, so .page-shell/.sidebar keep their exact normal-flow
+   desktop-first behavior everywhere else (Discover, Profile, etc.),
+   completely untouched by anything below.
+   On the live page, the sidebar stops being a flex column participant
+   (reserving its own 232px/72px of width next to the video) and becomes
+   a position:fixed overlay floating directly ON the video instead --
+   .page-shell-main then gets the full width back, so the video area
+   underneath isn't sharing space with it at all. Existing mechanisms
+   (sidebar--collapsed's width:0, sidebar--fan's mobile auto-hide) are
+   UNCHANGED -- they already worked by hiding/collapsing a positioned
+   element, which works identically whether that element is sticky or
+   fixed; only the DEFAULT positioning baseline changes here. */
+.page-shell--live .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  height: 100dvh;
+  background: transparent;
+  border-right: none;
+  z-index: 20;
+}
+
+.page-shell--live .page-shell-main {
+  width: 100%;
+}
+
+/* Text/icon halo (see :root's own comment) for the sidebar's own
+   content -- it previously relied on the solid Ink background above for
+   contrast and had zero text-shadow of its own; now floating on video,
+   it needs the same legibility treatment as everything else. Icons
+   (phosphor SVGs) don't take text-shadow -- filter:drop-shadow is the
+   equivalent, and applying it to the .sidebar-item/-icon wrapper
+   filters the whole rendered icon as one compositing step, same as
+   every other icon+button pairing in this file. */
+.page-shell--live .sidebar-title,
+.page-shell--live .sidebar-subtitle,
+.page-shell--live .sidebar-label {
+  text-shadow: var(--text-halo);
+}
+
+.page-shell--live .sidebar-icon {
+  filter: var(--icon-halo);
+}
+
 .live-room-shell {
   height: 100vh;
+  height: 100dvh; /* dvh where supported -- accounts for a mobile browser's
+    own address bar (the one uncontrollable element per build 3c); vh
+    above is the fallback for browsers that don't support dvh at all,
+    simply ignored by ones that do. */
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -504,14 +605,17 @@ button {
   background: #011627;
 }
 
-/* Performer view stacks video / mic-cam row / deck top to bottom instead
-   of overlaying everything on the video -- .stage-side-panel stays
-   position:absolute (comments still float over the video), but these
-   three are real flex children. */
-.stage-root--performer {
-  display: flex;
-  flex-direction: column;
-}
+/* Build 3c -- performer's own layout used to stack video / mic-cam row /
+   deck top to bottom in normal flex-column flow (deck reserving its own
+   space, video shrinking to make room). That's gone: EVERY live-screen
+   panel (menu, deck, director panel, QR panel, comments) is now a
+   floating overlay directly on the video, on both roles -- so performer
+   converges to the exact same base as .stage-root above (position:
+   absolute; inset:0, no flex) that the viewer already used. Nothing
+   performer-specific needs to override that base anymore; .stage-video-
+   area, .stage-bottom-overlay (mic-cam+deck, see BroadcastStage.jsx),
+   and .stage-side-panel are all position:absolute/fixed overlays within
+   it now, not flex participants. */
 
 .stage-video-area {
   position: absolute;
@@ -529,17 +633,27 @@ button {
    performer (below), reused here for consistency rather than a new
    number. Purely a container-size change -- ShotTransformFrame's crop
    transform and the portrait-crop TrackProcessor both work relative to
-   whatever size this box actually is, so neither is affected by it. */
+   whatever size this box actually is, so neither is affected by it.
+   Centering technique (build 3c): now that .stage-root--performer is no
+   longer display:flex (see its own comment above), margin:0 auto within
+   a flex column no longer applies -- position:absolute + inset:0 +
+   margin:auto is the standard technique for centering a max-sized box
+   within an absolutely-positioned full-bleed parent, and centers on
+   BOTH axes (the old flex version only ever centered horizontally; the
+   box just sat at the top of the column vertically). Deliberate,
+   consistent with mic-cam/deck now floating as a bottom overlay instead
+   of pushing the video down -- nothing above/below it competing for
+   space, so a fully centered video reads as the coherent middle-ground
+   the vision anyway asks for ("video is the only background"). */
 @media (min-width: 1025px) {
   .stage-root--performer .stage-video-area {
-    position: relative;
-    inset: auto;
-    flex: none;
+    position: absolute;
+    inset: 0;
+    margin: auto;
     width: min(380px, 100%);
+    height: fit-content;
     aspect-ratio: 9 / 16;
-    height: auto;
     max-height: 70vh;
-    margin: 0 auto;
     overflow: hidden;
   }
 
@@ -590,11 +704,15 @@ button {
      exactly "both panels scale up proportionally, staying centered" with
      no separate versus+maximized rule needed. */
   .stage-root--performer.stage-root--maximized .stage-video-area {
-    flex: 1;
+    /* flex:1 no longer means anything without a flex parent (build 3c)
+       -- full-bleed via inset:0 is the direct equivalent, matching the
+       base .stage-video-area rule's own full-bleed default. */
+    inset: 0;
+    margin: 0;
     width: auto;
+    height: auto;
     aspect-ratio: auto;
     max-height: none;
-    margin: 0;
     min-height: 0;
   }
 }
@@ -640,14 +758,14 @@ button {
   font-size: 11px;
   letter-spacing: 0.12em;
   color: #fdfffc;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+  text-shadow: var(--text-halo);
 }
 
 .stage-viewer-count {
   font-size: 11px;
   color: rgba(253, 255, 252, 0.75);
   margin-top: 3px;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+  text-shadow: var(--text-halo);
 }
 
 .stage-maximize-btn {
@@ -661,6 +779,7 @@ button {
   background: none;
   border: none;
   color: #fdfffc;
+  filter: var(--icon-halo);
 }
 
 .stage-maximize-btn:hover {
@@ -680,10 +799,35 @@ button {
   z-index: 6;
 }
 
+/* Build 3c -- wraps mic-cam + deck-toggle-row + deck-divider + deck-
+   wrapper (see BroadcastStage.jsx) in ONE fixed overlay at the bottom of
+   the screen, floating on the video rather than sitting in flex-column
+   flow beneath it (which used to shrink the video to make room). The
+   FOUR elements inside keep stacking via a normal nested flex column --
+   only the outer wrapper's own positioning changed, their relative
+   order/spacing logic is untouched. z-index:10 -- above the video (1)
+   and topbar controls (4-5, top of screen, no spatial overlap anyway),
+   below comments (bumped to 15 on mobile, see below) and the director/
+   QR panels (25/30, pre-existing and unrelated to this wrapper -- they
+   already float above/independent of wherever the deck happens to be,
+   same as before this change; not something this build needed to
+   solve). */
+.stage-bottom-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 /* Instant, no-menu-diving controls -- mic mute and camera on/off, both a
-   single tap, distinct from the tuning panels in PerformerDeck below. In
-   normal flex flow now (not an overlay), so it never covers the deck or
-   the video. */
+   single tap, distinct from the tuning panels in PerformerDeck below.
+   Already had no fill; text-shadow/filter added (build 3c, via
+   .control-btn's own rule above) since it now floats on video with
+   nothing behind it. */
 .stage-mic-cam {
   display: flex;
   align-items: center;
@@ -691,6 +835,7 @@ button {
   gap: 24px;
   padding: 12px 0;
   flex-shrink: 0;
+  width: 100%;
 }
 
 /* Vertical-drag divider between the mic/cam row and PerformerDeck --
@@ -701,6 +846,7 @@ button {
 .deck-divider {
   flex: 0 0 16px;
   flex-shrink: 0;
+  width: 100%;
   position: relative;
   cursor: ns-resize;
   touch-action: none;
@@ -723,6 +869,7 @@ button {
 .deck-wrapper {
   flex-shrink: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 /* Always-present row (both breakpoints) holding the down/up collapse
@@ -734,6 +881,7 @@ button {
   display: flex;
   justify-content: center;
   flex-shrink: 0;
+  width: 100%;
 }
 
 .deck-collapse-btn {
@@ -746,6 +894,7 @@ button {
   border: none;
   color: rgba(253, 255, 252, 0.5);
   cursor: pointer;
+  filter: var(--icon-halo);
 }
 
 .deck-collapse-btn:hover {
@@ -830,14 +979,19 @@ button {
   font-size: 10px;
   letter-spacing: 0.1em;
   color: rgba(253, 255, 252, 0.8);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+  text-shadow: var(--text-halo);
   margin-bottom: 4px;
   flex-shrink: 0;
 }
 
 /* Comments float directly over video in the side panel -- no background of
-   their own, legibility comes from text-shadow instead (matches the
-   design's "NO BACKGROUND OF ITS OWN" comments overlay). */
+   their own, legibility comes from the dark text halo instead (build 3c
+   -- upgraded from a single soft drop-shadow to the multi-ring halo
+   defined at :root, robust against a bright/white video frame, not just
+   dark footage). Applies identically to BOTH roles now -- performer's
+   comments used to keep a solid Ink fill (see the now-removed
+   --broadcast override below); that's gone, matching the "video is the
+   only background" rule everywhere. */
 .stage-side-panel .comments-panel {
   height: 100%;
   min-height: 0;
@@ -848,7 +1002,7 @@ button {
 
 .stage-side-panel .comment-row {
   border-bottom: none;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85);
+  text-shadow: var(--text-halo);
 }
 
 .stage-side-panel .comment-input-row {
@@ -860,18 +1014,20 @@ button {
   border: none;
   border-bottom: 1px solid rgba(253, 255, 252, 0.4);
   border-radius: 0;
+  text-shadow: var(--text-halo);
 }
 
-/* Artist-only glow, layered on top of the shared rules above via source
-   order (equal specificity: one modifier class + one descendant class in
-   both cases) -- scoped to --broadcast specifically so the fan's desktop
-   comments (still plain dark text-shadow) are untouched. */
+/* Artist-only teal glow LAYERED ON the shared dark halo above (not
+   replacing it) -- the halo is what survives against white video; the
+   glow on top is what makes it read as "artist's own" teal-tinted text
+   rather than plain white, same principle as every other accent-colored
+   element in this file. */
 .stage-side-panel--broadcast .comment-row {
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.5);
+  text-shadow: var(--text-halo), 0 0 8px rgba(46, 196, 182, 0.5);
 }
 
 .stage-side-panel--broadcast .quote-block {
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 8px rgba(46, 196, 182, 0.6);
+  text-shadow: var(--text-halo), 0 0 8px rgba(46, 196, 182, 0.6);
 }
 
 .stage-side-panel--broadcast .comment-input-row textarea {
@@ -930,74 +1086,56 @@ button {
     gap: 0;
   }
 
-  .live-room-shell {
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
-  }
+  /* Build 3c -- .live-room-shell/.stage-root REVERT to their shared base
+     rules here (deleted the old performer-only overrides that let the
+     page grow taller than one screen and scroll -- height:auto,
+     overflow:visible, position:static+flex-column+min-height:100vh).
+     Now that mic-cam/deck are a fixed overlay (.stage-bottom-overlay,
+     below) instead of flex-column participants, nothing is left in
+     normal flow to make the page taller than .live-room-shell's own
+     fixed height, on EITHER role -- same mechanism desktop already
+     proves works unconditionally, just now also true on mobile. */
 
-  .stage-root {
-    position: static;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-
-  /* Portrait is the output target always (Stage 1 of the portrait
-     capture work) -- the old fixed 45vh was landscape-shaped (near
-     square on a typical phone, ~390x380), which would crop off roughly
-     half of a portrait feed via object-fit: cover. aspect-ratio here
-     replaces that with a genuinely tall/narrow box; max-height keeps a
-     very tall phone from letting the video eat the entire viewport and
-     burying the mic/cam controls below it -- max-height wins over the
-     ratio-derived height there, and the box narrows (letterboxed) to
-     keep 9:16 intact rather than breaking the ratio. This rule is the
-     performer's own mobile screen only -- the viewer's mobile view has
-     its own separate, already-full-viewport override further down,
-     unaffected by this change. Desktop (.stage-root--performer
-     .stage-video-area under the 1025px+ query above) is unchanged here
-     -- portrait-vs-flex-fill layout on wide desktop viewports is an
-     open question, deliberately out of Stage 1's mobile-only scope. */
+  /* Converges performer with the viewer's own (already-proven) mobile
+     treatment below: a fixed, full-bleed background layer, not a
+     letterboxed aspect-ratio box -- "video is the only background" for
+     both roles now. The viewer's own more specific override further
+     down (:not(.stage-root--performer)) restates the same values --
+     harmless redundancy, left alone rather than touching that proven
+     block. Portrait crop pipeline is unaffected either way -- it
+     operates on the track's own pixels via canvas, independent of this
+     container's size (confirmed repeatedly this session). */
   .stage-video-area {
-    position: relative;
-    inset: auto;
+    position: fixed;
+    inset: 0;
     width: 100%;
-    aspect-ratio: 9 / 16;
-    height: auto;
-    max-height: 70vh;
+    height: 100%;
+    aspect-ratio: auto;
+    max-height: none;
     flex-shrink: 0;
   }
 
-  /* Versus, mobile -- deliberately NO per-panel aspect-ratio here, unlike
-     the desktop rule above. Tried that first and it broke mobile Versus
-     entirely (video collapsed to invisible): removing the outer box's
-     own aspect-ratio -- its only source of a DEFINITE height on mobile,
-     since nothing else in this chain sets one -- while leaving each
-     panel's height driven by VersusSplit's flexBasis (a percentage,
-     which in the column direction upright phones actually use resolves
-     against that now-indefinite parent height) collapsed the whole
-     chain to auto/zero. Circular, not fixable by capping one side.
-     Root design difference from desktop: useOrientation() puts mobile
-     Versus in .versus-stage.portrait (column/stacked), not row/side-by-
-     side -- confirmed this is also what the WORKING viewer mobile Versus
-     already does (its .stage-video-area is a plain fixed fullscreen box,
-     no aspect-ratio at all, and its .contestant-panel never gets any
-     aspect-ratio either). Stacked panels don't have desktop's distortion
-     problem in the first place (each already gets full width, real
-     height from the slider) -- forcing a ratio here was solving a
-     problem that didn't exist. So: no override needed. The single
-     .stage-video-area rule above (already correctly portrait-shaped,
-     unconditionally, same as it's always been for solo) plus
-     VersusSplit's own untouched flexBasis split is sufficient -- same
-     mechanism the working viewer relies on. */
+  /* Versus, mobile -- .versus-stage.portrait (column/stacked, the
+     upright-phone case -- see useOrientation()) still needs no
+     per-panel aspect-ratio, same conclusion as before, for a cleaner
+     reason now: the outer box above is a fixed, full-VIEWPORT box, so
+     its height is always definite -- VersusSplit's flexBasis split
+     (unchanged) resolves against that real, stable height with no
+     circular-collapse risk (the actual bug fixed two rounds ago, when
+     the box was still aspect-ratio-derived instead of viewport-fixed).
+     Each stacked panel gets a real share of the full screen at full
+     width; object-fit:cover in ShotTransformFrame handles the rest,
+     same mechanism the viewer already relies on. */
 
   .stage-mic-cam {
     gap: 14px;
   }
 
   /* Drag-to-resize is a desktop-only interaction for now -- dragging a
-     handle conflicts with a normal scrolling touch page, which is what
-     the artist's mobile view still is. Deck sizes naturally in flow. */
+     handle conflicts with a normal scrolling touch page. Unrelated to
+     the overlay conversion above -- same reasoning as always, .deck-
+     wrapper still sizes to its own content on mobile, just floats now
+     instead of sitting in flow. */
   .deck-divider {
     display: none;
   }
@@ -1006,62 +1144,47 @@ button {
     padding: 12px 16px;
   }
 
-  .stage-side-panel,
+  /* Performer's comments converge to the SAME fixed-bottom-sheet
+     pattern the viewer's mobile comments already use (further down,
+     untouched) -- written as an explicit PARALLEL rule here rather than
+     editing that block at all, so the proven viewer case can't be
+     affected by this change in any way. bottom offset is NOT set here
+     deliberately -- BroadcastStage.jsx already computes it inline
+     (style={{bottom: ...}}, derived from deckCollapsed/deckHeight) to
+     clear whatever height .stage-bottom-overlay currently has, same
+     mechanism already used on desktop; inline style always wins over
+     this class rule for that one property, so setting a competing value
+     here would just be dead weight. z-index:15 (not the base .stage-
+     side-panel's 4) -- above .stage-bottom-overlay's 10, so comments
+     stay reachable even if the deck is tall enough to get close. */
   .stage-side-panel--broadcast {
-    position: static;
-    width: 100%;
-    height: auto;
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+    max-height: 40vh;
     padding: 0 16px;
-    /* visible, not hidden -- same reasoning as the desktop fix: the
-       fixed-height emoji picker popup needs more room than this drawer's
-       20vh/140px box gives it. .comments-list still clips/scrolls its own
-       overflow independently via overflow-y: auto. */
-    overflow: visible;
+    z-index: 15;
   }
 
-  .stage-comments-label {
-    padding-top: 8px;
-  }
-
-  .stage-side-panel .comments-panel {
-    height: 20vh;
-    min-height: 140px;
-    border-top: 0.5px solid rgba(253, 255, 252, 0.15);
-    overflow: visible;
-  }
-
-  /* Solid Ink background is performer-only, split out from the shared
-     rule above rather than left for the "Fan mobile redesign (viewer
-     only)" section further down to override back to transparent --
-     that override (.stage-side-panel:not(.stage-side-panel--broadcast)
-     .comments-panel) has higher specificity and should win on paper, but
-     testing on a real mobile viewer showed the solid background still
-     painting there. Scoping background to --broadcast directly here
-     means viewer and performer never share a selector for this property
-     at all, so there's no override to rely on winning -- each role's
-     background is set exactly once, unconditionally, by a selector that
-     only ever matches that role. */
   .stage-side-panel--broadcast .comments-panel {
-    background: #011627;
+    background: transparent;
+    border-top: none;
+    height: auto;
+    max-height: 40vh;
   }
 
-  .stage-side-panel .comments-panel.expanded {
-    height: 50vh;
+  .stage-side-panel--broadcast .comment-row {
+    border-bottom: none;
   }
 
-  .stage-side-panel .comment-row {
-    border-bottom: 0.5px solid rgba(253, 255, 252, 0.1);
-    text-shadow: none;
+  .stage-side-panel--broadcast .comment-input-row {
+    border-top: none;
   }
 
-  .stage-side-panel .comment-input-row {
-    border-top: 0.5px solid rgba(253, 255, 252, 0.1);
-  }
-
-  .stage-side-panel .comment-input-row textarea {
-    background: rgba(253, 255, 252, 0.06);
-    border: 0.5px solid rgba(253, 255, 252, 0.2);
-    border-radius: 16px;
+  .stage-side-panel--broadcast .comment-input-row textarea {
+    border-radius: 0;
   }
 
   /* ===== Fan mobile redesign (viewer only) =====
@@ -1211,11 +1334,14 @@ button {
   max-height: 70vh;
 }
 
+/* Build 3c -- transparent + border/glow, same treatment as everything
+   else; text halo added since it now has no fill behind it. */
 .director-panel-toggle {
   flex-shrink: 0;
   padding: 10px 18px;
-  background: #011627;
+  background: transparent;
   color: #fdfffc;
+  text-shadow: var(--text-halo);
   border: 1px solid rgba(46, 196, 182, 0.5);
   box-shadow: 0 0 10px rgba(46, 196, 182, 0.3);
 }
@@ -1232,7 +1358,9 @@ button {
    persistent (unlike .stage-notice, which is a one-off ephemeral
    message). Sits below .director-panel's z-index since they're at
    opposite ends of the screen and shouldn't compete for taps if a
-   narrow viewport ever brings them close. */
+   narrow viewport ever brings them close. Build 3c -- was 85% opaque
+   Ink, now fully transparent like everything else; border/glow (per
+   state, below) plus the text halo carry legibility instead. */
 .lifecycle-banner {
   position: fixed;
   top: 12px;
@@ -1250,7 +1378,8 @@ button {
   letter-spacing: 0.06em;
   border-radius: 999px;
   max-width: 90vw;
-  background: rgba(1, 22, 39, 0.85);
+  background: transparent;
+  text-shadow: var(--text-halo);
 }
 
 .soundcheck-reminder {
@@ -1263,20 +1392,23 @@ button {
   color: #2ec4b6;
   border: 1px solid rgba(46, 196, 182, 0.5);
   box-shadow: 0 0 10px rgba(46, 196, 182, 0.3);
+  text-shadow: var(--text-halo), 0 0 8px rgba(46, 196, 182, 0.5);
 }
 
 .lifecycle-banner.live {
   color: #e71d36;
   border: 1px solid rgba(231, 29, 54, 0.5);
   box-shadow: 0 0 10px rgba(231, 29, 54, 0.4);
-  text-shadow: 0 0 8px rgba(231, 29, 54, 0.6);
+  text-shadow: var(--text-halo), 0 0 8px rgba(231, 29, 54, 0.6);
 }
 
 .lifecycle-banner.ended {
   color: #fdfffc;
   border: 1px solid rgba(253, 255, 252, 0.3);
   box-shadow: none;
-  text-shadow: none;
+  /* text-shadow inherited from .lifecycle-banner's own halo above --
+     'ended' has no accent glow to layer on top of it, unlike
+     soundcheck/live, so the base halo alone is correct here. */
 }
 
 .end-show-btn {
@@ -1286,7 +1418,7 @@ button {
   background: rgba(231, 29, 54, 0.15);
   color: #fdfffc;
   border: 1px solid rgba(231, 29, 54, 0.5);
-  text-shadow: none;
+  text-shadow: var(--text-halo);
 }
 
 /* Persistent write-failure warning, appended to the soundcheck/ended
@@ -1295,7 +1427,7 @@ button {
 .lifecycle-warning {
   color: #ff9f1c;
   font-weight: 700;
-  text-shadow: none;
+  text-shadow: var(--text-halo), 0 0 8px rgba(255, 159, 28, 0.5);
 }
 
 /* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- same
@@ -1313,8 +1445,16 @@ button {
   max-width: min(90vw, 480px);
 }
 
+/* Build 3c -- the PANEL CHROME (this wrapper, the toggle button, and the
+   role/link labels in CameraQRPanel.jsx) goes fully transparent like
+   everything else. The QR code IMAGES themselves are a hard exception,
+   deliberately NOT touched here or in CameraQRPanel.jsx -- a QR code
+   needs genuine high-contrast (its own white background, generated by
+   the qrcode package) to actually be scannable by a phone camera; that's
+   a functional requirement of the format, not a style choice this build
+   overrides. */
 .camera-qr-panel-body {
-  background: #011627;
+  background: transparent;
   border: 1px solid rgba(46, 196, 182, 0.3);
   border-radius: 8px;
   padding: 14px;

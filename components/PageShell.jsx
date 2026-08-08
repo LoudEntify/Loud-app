@@ -13,9 +13,16 @@ import './reactions.css';
 // stays mounted and animates via CSS width, rather than unmounting like
 // hideSidebar does; onToggleSidebarCollapse being undefined (viewer,
 // camfeed) means Sidebar simply never renders its collapse button.
-export default function PageShell({ active = 'live', hideSidebar = false, autoHideSidebar = false, sidebarCollapsed = false, onToggleSidebarCollapse, children }) {
+//
+// liveOverlay (build 3c) -- ONLY ever passed true by LiveDemo.jsx. Adds
+// .page-shell--live, the scoping hook every live-screen-only style in
+// reactions.css hangs off (sidebar-as-video-overlay, the text/icon
+// halo, etc.) -- every other page's call site omits it, so nothing in
+// this build can affect Discover/Profile/etc, structurally, not just by
+// convention: the class this all depends on can't exist there.
+export default function PageShell({ active = 'live', hideSidebar = false, autoHideSidebar = false, sidebarCollapsed = false, onToggleSidebarCollapse, liveOverlay = false, children }) {
   return (
-    <div className="page-shell">
+    <div className={`page-shell ${liveOverlay ? 'page-shell--live' : ''}`}>
       {!hideSidebar && (
         <Sidebar
           active={active}
