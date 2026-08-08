@@ -53,11 +53,19 @@ button {
    a distinct corner grammar from the pill/circle radius buttons use. Each
    video panel chamfers its own outer corner (top-left for slot A, top-right
    for slot B) rather than the whole stage sharing one cut. */
+/* Phase 2 -- gap was 2px, which (now that .contestant-panel is
+   transparent, Phase 1) exposed a 2px seam of whatever sat BEHIND it in
+   the stack (.stage-video-area/.stage-root, still Ink) on either side
+   of the divider element -- fixing .contestant-panel alone wasn't
+   enough to kill this, since the gap reveals a layer further back, not
+   the panel itself. Zero gap: panels sit flush against the 16px divider
+   element, no exposed background seam at all -- the divider's own
+   hairline (.divider::before, below) is the only visible line. */
 .versus-stage {
   display: flex;
   width: 100%;
   height: 100%;
-  gap: 2px;
+  gap: 0;
 }
 
 .versus-stage.portrait {
@@ -106,6 +114,11 @@ button {
   position: relative;
 }
 
+/* Phase 2 -- recolored from a translucent porcelain hairline to a thin
+   teal glow line, per "neon glow line, not a solid blue bar". This is
+   the ONLY visible seam now that .versus-stage's own gap is 0 (above)
+   -- the divider element itself has no fill of its own, just this
+   centered line plus the existing hex drag-handle chip. */
 .divider::before {
   content: '';
   position: absolute;
@@ -114,7 +127,8 @@ button {
   bottom: 0;
   width: 2px;
   transform: translateX(-50%);
-  background: rgba(253, 255, 252, 0.2);
+  background: #2ec4b6;
+  box-shadow: 0 0 6px rgba(46, 196, 182, 0.6);
 }
 
 .drag-divider {
@@ -636,99 +650,44 @@ button {
   z-index: 1;
 }
 
-/* Scoped to min-width so it never fights the mobile media query's own
-   .stage-video-area{height:45vh} override on specificity -- this only
-   ever applies above that breakpoint.
-   Default (not maximized): a phone-sized portrait box, not a flex-filled
-   full-bleed area -- lets the artist gauge framing/positioning against
-   roughly what a phone viewer will actually see, rather than a stretched
-   desktop preview. Same 9/16 ratio and 70vh cap already used for mobile
-   performer (below), reused here for consistency rather than a new
-   number. Purely a container-size change -- ShotTransformFrame's crop
-   transform and the portrait-crop TrackProcessor both work relative to
-   whatever size this box actually is, so neither is affected by it.
-   Centering technique (build 3c): now that .stage-root--performer is no
-   longer display:flex (see its own comment above), margin:0 auto within
-   a flex column no longer applies -- position:absolute + inset:0 +
-   margin:auto is the standard technique for centering a max-sized box
-   within an absolutely-positioned full-bleed parent, and centers on
-   BOTH axes (the old flex version only ever centered horizontally; the
-   box just sat at the top of the column vertically). Deliberate,
-   consistent with mic-cam/deck now floating as a bottom overlay instead
-   of pushing the video down -- nothing above/below it competing for
-   space, so a fully centered video reads as the coherent middle-ground
-   the vision anyway asks for ("video is the only background"). */
-@media (min-width: 1025px) {
-  .stage-root--performer .stage-video-area {
-    position: absolute;
-    inset: 0;
-    margin: auto;
-    width: min(380px, 100%);
-    height: fit-content;
-    aspect-ratio: 9 / 16;
-    max-height: 70vh;
-    overflow: hidden;
-  }
-
-  /* Versus: the outer box above was sized for ONE portrait feed (solo).
-     Versus needs TWO -- forcing a single 9:16 shape onto the pair
-     combined (rather than each panel individually) is exactly why this
-     used to render "meshed at center", cramped, only readable by
-     dragging the slider to an extreme. Fix: the outer box drops its OWN
-     aspect-ratio (each panel gets its own below instead) and widens to
-     comfortably hold two 9:16 boxes side by side plus the divider --
-     roughly double the solo cap, not unconstrained, so it stays a
-     centered, bounded positioning aid rather than becoming a full-bleed
-     stretch (which is what the VIEWER's Versus already does, and
-     deliberately isn't what the performer's screen -- a viewfinder/
-     positioning aid, per the phone-box rule above -- should copy). */
-  .stage-root--performer .stage-video-area.stage-video-area--versus {
-    width: min(780px, 100%);
-    aspect-ratio: auto;
-  }
-
-  /* Each panel gets its OWN portrait box -- this is the actual fix.
-     Width still comes from VersusSplit's inline flexBasis (the slider,
-     unchanged, still ${split}%/${100-split}%); aspect-ratio derives
-     height from that width, same width-drives-height-capped-by-
-     max-height pattern the solo box above already uses (an accepted,
-     existing tradeoff in this file, not a new one). align-self:center
-     avoids relying on the parent's default cross-axis stretch, which
-     would otherwise fight the aspect-ratio-derived height. */
-  .stage-video-area--versus .contestant-panel {
-    aspect-ratio: 9 / 16;
-    height: auto;
-    max-height: 70vh;
-    align-self: center;
-    flex-grow: 0;
-    flex-shrink: 1;
-  }
-
-  /* Maximized: today's fill-the-available-space behavior, unchanged --
-     restores exactly what .stage-root--performer .stage-video-area used
-     to be unconditionally, before the phone-box default above. Comes
-     AFTER the versus rule above (equal specificity, both 3 classes) so
-     it correctly wins the outer box's own width/aspect-ratio when BOTH
-     maximized and versus apply -- maximize should always give the most
-     room available, versus's own cap shouldn't fight that. The versus
-     panel rule directly above is UNAFFECTED by this (different target,
-     .contestant-panel not .stage-video-area) -- each panel keeps its own
-     9:16 shape and just has more outer room to scale into, which is
-     exactly "both panels scale up proportionally, staying centered" with
-     no separate versus+maximized rule needed. */
-  .stage-root--performer.stage-root--maximized .stage-video-area {
-    /* flex:1 no longer means anything without a flex parent (build 3c)
-       -- full-bleed via inset:0 is the direct equivalent, matching the
-       base .stage-video-area rule's own full-bleed default. */
-    inset: 0;
-    margin: 0;
-    width: auto;
-    height: auto;
-    aspect-ratio: auto;
-    max-height: none;
-    min-height: 0;
-  }
-}
+/* Phase 2 (redesign) -- REVERSES the phone-box viewfinder box that used
+   to live here: a capped, centered 380px/9:16 box for solo, widened to
+   780px with a per-panel aspect-ratio for versus, with a SEPARATE
+   "maximized" override that restored full-bleed on demand. Explicit
+   product decision, not a bug fix -- confirmed: the empty Ink space
+   around that small box WAS the problem, not something the box was
+   solving. Video is now always the full canvas, on every breakpoint,
+   solo AND versus, with no separate "maximized" CSS state needed at all
+   -- deleted this whole @media block. Performer's .stage-video-area now
+   falls straight through to the plain base rule right above
+   (position:absolute; inset:0), the exact same unconditional full-bleed
+   rule the viewer's desktop video has ALWAYS used, untouched, since
+   build 2 only ever scoped its box to .stage-root--performer. That's
+   why this is a real simplification, not just a value change: the
+   380px/780px/9:16/max-height/margin:auto machinery existed ENTIRELY in
+   service of the viewfinder goal now being reversed, so none of it is
+   needed in ANY form -- confirmed by checking that viewer's versus,
+   which already looks correct with zero per-panel sizing, relies only
+   on .versus-stage's own height:100% + flexbox's default cross-axis
+   stretch + VersusSplit's existing flexBasis split. Performer gets that
+   identical, already-proven mechanism for free once its own box stops
+   overriding it -- no new versus-specific CSS needed here either.
+   stage-video-area--versus (the modifier this deleted CSS was the only
+   consumer of) is removed from BroadcastStage.jsx to match -- dead
+   without a CSS target.
+   Portrait crop pipeline unaffected either way, confirmed yet again --
+   ShotTransformFrame's transform and the portrait-crop TrackProcessor
+   both operate on the track's real pixels via canvas, never on this
+   container's size.
+   .stage-root--maximized's CSS effect on .stage-video-area is ALSO
+   deleted here, since "maximized" and "default" are now the same state
+   for the video element -- there's nothing left to toggle. The
+   maximized JS state/button/class-application themselves are UNTOUCHED
+   (Phase 4's job is to give that toggle new meaning via the Fullscreen
+   API) -- until Phase 4 ships, clicking maximize is a temporary visual
+   no-op, expected for this phase, not a regression. Mobile needed no
+   change here at all -- build 3c already made it unconditionally
+   fixed/full-bleed. */
 
 @keyframes glowPulse {
   0%, 100% { opacity: 0.55; }

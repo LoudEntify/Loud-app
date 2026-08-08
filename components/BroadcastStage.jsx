@@ -115,13 +115,10 @@ export default function BroadcastStage({
 
   return (
     <div className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`} ref={stageRef}>
-      {/* stage-video-area--versus is only ever added HERE, never in
-          ViewerStage.jsx -- on top of every new rule being scoped under
-          .stage-root--performer, this is a second, independent guarantee
-          the viewer's Versus layout (which already works) can never be
-          affected: the modifier class this fix depends on physically
-          cannot exist in the viewer's DOM. */}
-      <div className={`stage-video-area ${performanceMode === 'versus' ? 'stage-video-area--versus' : ''}`} onClick={onStageClick}>
+      {/* stage-video-area--versus modifier retired in Phase 2 (redesign) --
+          it existed only to widen/reshape the phone-box for versus mode,
+          which no longer exists (video is always full-bleed now). */}
+      <div className="stage-video-area" onClick={onStageClick}>
         <VersusSplit
           mode={performanceMode}
           renderA={renderSlot(role)}
