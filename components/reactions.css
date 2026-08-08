@@ -68,8 +68,15 @@ button {
   flex-direction: row;
 }
 
+/* Phase 1 (build 3c redesign) -- this was the actual source of the blue
+   showing in the phone-box gap and the versus divider seam: the direct
+   wrapper around every video slot, still solid Ink. Placeholder text
+   ("waiting for contestant...") keeps its own porcelain color -- no
+   video is playing behind it in that state, so there's nothing for the
+   text to compete with; no halo needed there either for the same
+   reason. */
 .contestant-panel {
-  background: #011627;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -287,6 +294,11 @@ button {
   cursor: pointer;
 }
 
+/* Phase 1 -- outside .comment-row, so it doesn't inherit that element's
+   halo (text-shadow IS an inherited CSS property, unlike background/
+   border/box-shadow, but only ever cascades to DESCENDANTS -- this sits
+   as a sibling, not a child, of any .comment-row). Needs its own
+   explicit halo. */
 .composing-context {
   font-size: 12px;
   color: rgba(253, 255, 252, 0.55);
@@ -294,6 +306,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  text-shadow: var(--text-halo);
 }
 
 .composing-context button {
@@ -1297,6 +1310,9 @@ button {
     transform: translateX(-100%);
   }
 
+  /* Phase 1 -- was 60% opaque Ink, missed in build 3c (only its
+     --collapse sibling got fixed then). Now transparent + icon halo,
+     matching that sibling exactly. */
   .sidebar-reveal-tab {
     display: flex;
     position: fixed;
@@ -1307,12 +1323,13 @@ button {
     justify-content: center;
     width: 22px;
     height: 56px;
-    background: rgba(1, 22, 39, 0.6);
+    background: transparent;
     border: 1px solid rgba(46, 196, 182, 0.5);
     border-left: none;
     border-radius: 0 8px 8px 0;
     box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
     color: #2ec4b6;
+    filter: var(--icon-halo);
     z-index: 20;
   }
 }
