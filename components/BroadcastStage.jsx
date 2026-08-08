@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp, CaretLeft } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
@@ -13,9 +13,13 @@ import VideoDeckPanel from './VideoDeckPanel';
 // Sizing constants for the deck drag-resize / bottom-overlay offset math.
 // MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
 // height (padding + button), not a computed value -- re-check it visually
-// if that row's own styling changes.
+// if that row's own styling changes. Bumped 52 -> 100 since Phase 4 added
+// a 4th button (leave) to that row with flex-wrap:wrap -- on a narrow
+// enough width it can wrap to two lines, and this estimate needs to cover
+// that taller case too, not just the single-line one, or comments' own
+// bottom offset (below) underestimates real occupied height.
 const MIN_DECK_HEIGHT = 160;
-const MIC_CAM_HEIGHT = 52;
+const MIC_CAM_HEIGHT = 100;
 const DECK_DIVIDER_HEIGHT = 16;
 const DEFAULT_DECK_HEIGHT = 340;
 
@@ -287,15 +291,24 @@ export default function BroadcastStage({
         </div>
       </div>
 
-      {/* Phase 4 -- comments gets its own minimize/restore arrow, same
-          pattern as the deck's down/up toggle. CommentsPanel itself stays
-          ALWAYS mounted (never conditionally rendered) -- only its
-          wrapper collapses via CSS (stage-side-panel-body--collapsed,
-          reactions.css), the same reasoning the deck's own collapse
-          already uses: an in-progress typed comment must survive a
-          collapse/restore cycle, not get wiped by an unmount. */}
+      {/* Comments gets its own minimize/restore arrow, same pattern as the
+          deck's down/up toggle. CommentsPanel itself stays ALWAYS mounted
+          (never conditionally rendered) -- only VISIBILITY toggles via
+          CSS, so an in-progress typed comment survives a collapse/
+          restore cycle rather than being wiped by an unmount.
+          Fix: the header's own arrow used to be the ONLY way back once
+          collapsed, and lived INSIDE .stage-side-panel -- whose position
+          depends on deckHeight/MIC_CAM_HEIGHT math that can go stale
+          (the mic-cam row can now wrap to 2 lines on narrow widths,
+          Phase 4's 4th button), letting the deck's higher z-index
+          visually cover the whole panel, arrow included, with no way
+          back. Mirrors Sidebar.jsx's own two-element pattern exactly now:
+          the panel itself renders normally when open, and a SEPARATE,
+          independently position:fixed reveal tab (comments-reveal-tab,
+          z-index above the deck) renders ONLY when collapsed -- never
+          nested inside anything whose own sizing could hide it. */}
       <div
-        className="stage-side-panel stage-side-panel--broadcast"
+        className={`stage-side-panel stage-side-panel--broadcast ${commentsCollapsed ? 'stage-side-panel--collapsed' : ''}`}
         style={{ bottom: (deckCollapsed ? 0 : deckHeight) + MIC_CAM_HEIGHT + (deckCollapsed ? 0 : DECK_DIVIDER_HEIGHT) }}
       >
         <div className="stage-side-panel-header">
@@ -304,12 +317,12 @@ export default function BroadcastStage({
             type="button"
             className="comments-collapse-btn"
             onClick={onToggleCommentsCollapsed}
-            aria-label={commentsCollapsed ? 'show comments' : 'hide comments'}
+            aria-label="hide comments"
           >
-            {commentsCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+            <CaretDown size={14} weight="bold" />
           </button>
         </div>
-        <div className={`stage-side-panel-body ${commentsCollapsed ? 'stage-side-panel-body--collapsed' : ''}`}>
+        <div className="stage-side-panel-body">
           <CommentsPanel
             comments={comments}
             onSend={sendComment}
@@ -319,6 +332,17 @@ export default function BroadcastStage({
           />
         </div>
       </div>
+
+      {commentsCollapsed && (
+        <button
+          type="button"
+          className="comments-reveal-tab"
+          onClick={onToggleCommentsCollapsed}
+          aria-label="show comments"
+        >
+          <CaretLeft size={16} weight="bold" />
+        </button>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { CaretDown, CaretUp } from '@phosphor-icons/react';
+import { CaretDown, CaretLeft } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
@@ -40,27 +40,30 @@ export default function ViewerStage({
         />
       </div>
 
-      {/* Phase 4 -- same minimize/restore arrow BroadcastStage's comments
-          got, reusing the exact same commentsCollapsed state/control
-          (threaded via stageProps from RoomInner) for a consistent
-          declutter affordance on both roles. Viewer has no deck/QR panel
-          to stay mutually exclusive WITH -- this is just a plain
-          standalone toggle here, not part of a 3-way coordination group,
-          but the mechanism (CommentsPanel always mounted, only its
-          wrapper collapses via CSS) is identical either way. */}
-      <div className="stage-side-panel">
+      {/* Same minimize/restore arrow BroadcastStage's comments has, reusing
+          the exact same commentsCollapsed state/control (threaded via
+          stageProps from RoomInner) for a consistent declutter
+          affordance on both roles. Mirrors Sidebar.jsx's own two-element
+          pattern: the panel renders normally when open, and a SEPARATE,
+          independently position:fixed reveal tab renders only when
+          collapsed -- never nested inside anything whose own sizing
+          could hide it (same fix BroadcastStage's comments needed after
+          it got stuck un-reachable there). CommentsPanel itself stays
+          ALWAYS mounted -- only visibility toggles via CSS, so an
+          in-progress typed comment survives a collapse/restore cycle. */}
+      <div className={`stage-side-panel ${commentsCollapsed ? 'stage-side-panel--collapsed' : ''}`}>
         <div className="stage-side-panel-header">
           <span className="stage-comments-label">COMMENTS</span>
           <button
             type="button"
             className="comments-collapse-btn"
             onClick={onToggleCommentsCollapsed}
-            aria-label={commentsCollapsed ? 'show comments' : 'hide comments'}
+            aria-label="hide comments"
           >
-            {commentsCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+            <CaretDown size={14} weight="bold" />
           </button>
         </div>
-        <div className={`stage-side-panel-body ${commentsCollapsed ? 'stage-side-panel-body--collapsed' : ''}`}>
+        <div className="stage-side-panel-body">
           <CommentsPanel
             comments={comments}
             onSend={sendComment}
@@ -70,6 +73,17 @@ export default function ViewerStage({
           />
         </div>
       </div>
+
+      {commentsCollapsed && (
+        <button
+          type="button"
+          className="comments-reveal-tab"
+          onClick={onToggleCommentsCollapsed}
+          aria-label="show comments"
+        >
+          <CaretLeft size={16} weight="bold" />
+        </button>
+      )}
     </div>
   );
 }

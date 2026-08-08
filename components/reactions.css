@@ -1032,10 +1032,7 @@ button {
 }
 
 /* Phase 4 -- header row holding the COMMENTS label + its own minimize/
-   restore arrow, same pattern as .deck-toggle-row above the deck.
-   Always visible regardless of collapsed state (only the BODY below
-   collapses) -- same reasoning as the deck's own toggle staying
-   reachable while collapsed. */
+   restore arrow, same pattern as .deck-toggle-row above the deck. */
 .stage-side-panel-header {
   display: flex;
   align-items: center;
@@ -1061,26 +1058,56 @@ button {
   color: #2ec4b6;
 }
 
-/* CommentsPanel stays ALWAYS mounted (see BroadcastStage.jsx/
-   ViewerStage.jsx's own comments) -- only this wrapper collapses, so an
-   in-progress typed comment survives a collapse/restore cycle instead of
-   being wiped by an unmount. Same max-height-based collapse technique as
-   .deck-wrapper --collapsed above; flex:1 fills whatever space
-   .stage-side-panel's own top/bottom insets allow when expanded, and
-   max-height:0 still hard-clamps that to nothing when collapsed
-   regardless of the flex-grow wanting more (the actual rendered box is
-   clamped by max-height as an explicit constraint either way). */
 .stage-side-panel-body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  max-height: 2000px;
-  transition: max-height 0.25s ease;
 }
 
-.stage-side-panel-body--collapsed {
-  max-height: 0;
-  flex: none;
+/* Fix: collapsing used to only hide THIS body (stage-side-panel-body--
+   collapsed, max-height:0), leaving the header -- the only way back --
+   inside .stage-side-panel itself. That panel's position depends on
+   deckHeight/MIC_CAM_HEIGHT math that can go stale (mic-cam can wrap to
+   2 lines on narrow widths), letting the deck's higher z-index visually
+   cover the WHOLE panel, header included, with no way back -- confirmed
+   as the actual cause of "comments disappears and I can't bring it
+   back". Fixed by collapsing the WHOLE .stage-side-panel (this class,
+   on the outer element -- see BroadcastStage.jsx/ViewerStage.jsx) and
+   adding a SEPARATE, independently position:fixed reveal tab
+   (.comments-reveal-tab, below) that renders only while collapsed --
+   mirrors Sidebar.jsx's own two-element open/collapsed pattern exactly,
+   never nested inside anything whose own sizing could hide it. opacity
+   (not display:none) so CommentsPanel + its in-progress draft state
+   stay mounted underneath, exactly as before. */
+.stage-side-panel--collapsed {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Mirrors .sidebar-reveal-tab--collapse (left edge) on the right edge
+   instead -- same transparent + teal border/glow treatment, same icon
+   halo, same "always reachable regardless of anything else on screen"
+   design intent. z-index:20 -- above .stage-bottom-overlay's 10 and
+   .stage-side-panel's own 4, so a tall deck can never cover it. */
+.comments-reveal-tab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 56px;
+  background: transparent;
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+  color: #2ec4b6;
+  filter: var(--icon-halo);
+  cursor: pointer;
+  z-index: 20;
 }
 
 /* Comments float directly over video in the side panel -- no background of

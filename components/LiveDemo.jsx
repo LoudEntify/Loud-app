@@ -1275,12 +1275,32 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [qrPanelOpen, setQrPanelOpen] = useState(false);
 
+  // Bug fix: the original version of this only handled the OPENING side
+  // of deck/QR (auto-collapse comments) and never restored comments when
+  // the thing that displaced it closed again -- exactly the reported
+  // symptom ("comment disappears once I maximize tech panel and I cannot
+  // seem to bring it back"). Fixed with an explicit "was this collapse
+  // the artist's OWN action, or a side effect of something else taking
+  // the spotlight" flag -- distinguishing those needs its own bit,
+  // there's no way to infer it from commentsCollapsed alone. Only
+  // toggleCommentsCollapsed (the artist's own control) ever sets this;
+  // the auto-collapse branches below never do, so it correctly survives
+  // across any number of auto-collapse/auto-restore cycles until the
+  // artist explicitly touches comments' own arrow again.
+  const commentsManuallyHiddenRef = useRef(false);
+
   const toggleDeckCollapsed = useCallback(() => {
     setDeckCollapsed((prev) => {
       const next = !prev;
       if (!next) {
+        // Opening -- auto-collapse comments/QR (mutual exclusivity).
         setCommentsCollapsed(true);
         setQrPanelOpen(false);
+      } else if (!commentsManuallyHiddenRef.current) {
+        // Closing -- pop comments back up, UNLESS the artist had
+        // deliberately minimized it themselves (that's a real,
+        // requested exception, not an oversight).
+        setCommentsCollapsed(false);
       }
       return next;
     });
@@ -1289,6 +1309,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const toggleCommentsCollapsed = useCallback(() => {
     setCommentsCollapsed((prev) => {
       const next = !prev;
+      commentsManuallyHiddenRef.current = next;
       if (!next) {
         setDeckCollapsed(true);
         setQrPanelOpen(false);
@@ -1303,6 +1324,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       if (next) {
         setDeckCollapsed(true);
         setCommentsCollapsed(true);
+      } else if (!commentsManuallyHiddenRef.current) {
+        setCommentsCollapsed(false);
       }
       return next;
     });
