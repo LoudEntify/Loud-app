@@ -214,30 +214,35 @@ button {
   text-shadow: var(--text-halo), 0 0 8px rgba(231, 29, 54, 0.5);
 }
 
-/* Transparent + strong glow (build 3c), same treatment as every other
-   live-screen control -- kept deliberately vivid (unchanged strong
-   box-shadow, plus the icon halo) since this is a safety/urgency-coded
-   action (hang up the call): the glow alone needs to stay as visually
-   commanding as the old solid fill was, not just technically legible. */
-.leave-btn-floating {
-  position: absolute;
-  right: 24px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 1.5px solid #e71d36;
-  background: transparent;
-  color: #fdfffc;
-  font-size: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 16px rgba(231, 29, 54, 0.6);
-  filter: var(--icon-halo);
+/* Phase 4 -- was an independently floating circle (right:24px;top:50%),
+   which overlapped comments' own right-edge column on most viewport
+   heights (both anchored to the exact same right:24px). Moved inline
+   into .stage-mic-cam, the same "session controls" row as mute/camera/
+   flip -- a coherent grouping, not a separately-floating element hoping
+   not to collide with something else. Pill shape (matches .control-btn's
+   own sizing/gap) instead of a standalone circle, since it's one item in
+   a row now, not alone; kept the strong red glow (unchanged box-shadow)
+   so it still reads as visually distinct/urgent within that row. */
+.leave-btn-inline {
+  background: none;
+  border: 1px solid rgba(231, 29, 54, 0.5);
+  border-radius: 999px;
+  color: #e71d36;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   cursor: pointer;
-  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-shadow: var(--text-halo), 0 0 8px rgba(231, 29, 54, 0.5);
+  filter: var(--icon-halo);
+  box-shadow: 0 0 10px rgba(231, 29, 54, 0.35);
+}
+
+.leave-btn-inline:hover {
+  box-shadow: 0 0 14px rgba(231, 29, 54, 0.55);
 }
 
 .comments-panel {
@@ -799,15 +804,21 @@ button {
    single tap, distinct from the tuning panels in PerformerDeck below.
    Already had no fill; text-shadow/filter added (build 3c, via
    .control-btn's own rule above) since it now floats on video with
-   nothing behind it. */
+   nothing behind it. flex-wrap:wrap added Phase 4 -- this row holds a
+   4th button now (leave, moved in from its own floating position), and
+   four full-label buttons (MIC MUTED, CAM OFF, etc.) can genuinely
+   overflow a narrow phone width in one line; wrapping to two rows there
+   is a no-op on desktop, where they already fit on one. */
 .stage-mic-cam {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 24px;
-  padding: 12px 0;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 12px 16px;
   flex-shrink: 0;
   width: 100%;
+  box-sizing: border-box;
 }
 
 /* Vertical-drag divider between the mic/cam row and PerformerDeck --
@@ -970,14 +981,20 @@ button {
 /* The panel's own box is a sibling of .stage-video-area with a higher
    z-index, so its full rectangle -- including empty space below a short
    comment list -- would otherwise intercept clicks meant for controls
-   underneath (leave button, mic/cam, thumbnails), no matter how high
-   their own z-index is: they're trapped inside .stage-video-area's
-   stacking context, which as a whole ranks below this one. Default to
-   click-through, then opt individual interactive pieces back in below. */
+   underneath (mic/cam, thumbnails), no matter how high their own
+   z-index is: they're trapped inside .stage-video-area's stacking
+   context, which as a whole ranks below this one. Default to
+   click-through, then opt individual interactive pieces back in below.
+   Phase 4 -- top raised from 80px to 112px so this never overlaps ADD
+   CAMERA's own collapsed toggle button (top:64px + ~36px tall, see
+   .camera-qr-panel), which sits alone in that upper-right zone
+   regardless of the deck/comments/QR mutual-exclusivity group -- the
+   COLLAPSED toggle itself is always visible even when its own panel body
+   isn't. */
 .stage-side-panel {
   position: absolute;
   right: 24px;
-  top: 80px;
+  top: 112px;
   bottom: 24px;
   width: 340px;
   display: flex;
@@ -1011,8 +1028,59 @@ button {
   letter-spacing: 0.1em;
   color: rgba(253, 255, 252, 0.8);
   text-shadow: var(--text-halo);
-  margin-bottom: 4px;
   flex-shrink: 0;
+}
+
+/* Phase 4 -- header row holding the COMMENTS label + its own minimize/
+   restore arrow, same pattern as .deck-toggle-row above the deck.
+   Always visible regardless of collapsed state (only the BODY below
+   collapses) -- same reasoning as the deck's own toggle staying
+   reachable while collapsed. */
+.stage-side-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.comments-collapse-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: rgba(253, 255, 252, 0.5);
+  cursor: pointer;
+  filter: var(--icon-halo);
+}
+
+.comments-collapse-btn:hover {
+  color: #2ec4b6;
+}
+
+/* CommentsPanel stays ALWAYS mounted (see BroadcastStage.jsx/
+   ViewerStage.jsx's own comments) -- only this wrapper collapses, so an
+   in-progress typed comment survives a collapse/restore cycle instead of
+   being wiped by an unmount. Same max-height-based collapse technique as
+   .deck-wrapper --collapsed above; flex:1 fills whatever space
+   .stage-side-panel's own top/bottom insets allow when expanded, and
+   max-height:0 still hard-clamps that to nothing when collapsed
+   regardless of the flex-grow wanting more (the actual rendered box is
+   clamped by max-height as an explicit constraint either way). */
+.stage-side-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  max-height: 2000px;
+  transition: max-height 0.25s ease;
+}
+
+.stage-side-panel-body--collapsed {
+  max-height: 0;
+  flex: none;
 }
 
 /* Comments float directly over video in the side panel -- no background of
@@ -1159,7 +1227,7 @@ button {
      same mechanism the viewer already relies on. */
 
   .stage-mic-cam {
-    gap: 14px;
+    gap: 10px 14px;
   }
 
   /* Drag-to-resize is a desktop-only interaction for now -- dragging a
@@ -1446,12 +1514,15 @@ button {
   text-shadow: var(--text-halo), 0 0 8px rgba(255, 159, 28, 0.5);
 }
 
-/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- same
-   collapsible-drawer pattern as .director-panel, top-right instead of
-   bottom-center so the two never compete for space. */
+/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- top-right,
+   below .stage-topbar. Phase 4 -- was top:12px, which put its own toggle
+   button's box (roughly top:12-50px) directly inside the maximize
+   button's own box (.stage-topbar's 20px padding-top + 34px button height
+   = roughly top:20-54px) -- a real, confirmed overlap, not a hypothetical
+   one. top:64px clears the topbar's own ~54px height with a clean margin. */
 .camera-qr-panel {
   position: fixed;
-  top: 12px;
+  top: 64px;
   right: 12px;
   z-index: 25;
   display: flex;

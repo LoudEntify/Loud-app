@@ -82,6 +82,10 @@ export default function BroadcastStage({
   onCommand,
   autoState,
   onToggleAuto,
+  deckCollapsed,
+  onToggleDeckCollapsed,
+  commentsCollapsed,
+  onToggleCommentsCollapsed,
 }) {
   const otherSlot = role === 'a' ? 'b' : 'a';
   const candidates = tracksForSlot(role);
@@ -90,13 +94,12 @@ export default function BroadcastStage({
   const draggingRef = useRef(false);
   const [deckHeight, setDeckHeight] = useState(DEFAULT_DECK_HEIGHT);
 
-  // Bottom-panel collapse (down-arrow/up-arrow) -- independent of
-  // deckHeight itself, which stays exactly where the artist last dragged
-  // it; collapsing just visually zeroes it via CSS (deck-wrapper--
-  // collapsed, reactions.css) rather than overwriting deckHeight, so
-  // there's nothing to remember/restore across a collapse/expand cycle.
-  const [deckCollapsed, setDeckCollapsed] = useState(false);
-  const toggleDeckCollapsed = useCallback(() => setDeckCollapsed((v) => !v), []);
+  // deckCollapsed/onToggleDeckCollapsed (Phase 4) moved up to RoomInner
+  // (LiveDemo.jsx) -- it now needs to coordinate with commentsCollapsed
+  // and the QR panel's own open state (mutual exclusivity: opening one
+  // auto-collapses the other two), which live there too. deckHeight
+  // itself stays local here, untouched -- it's purely a drag-resize
+  // value, nothing else needs to read or coordinate with it.
 
   // When BOTH the left menu and the bottom deck are collapsed, the video
   // should go full-view -- same visual result as the existing maximize
@@ -151,10 +154,6 @@ export default function BroadcastStage({
         />
 
         <TopBar label="YOU'RE LIVE" maximized={maximized} onToggleMaximize={onToggleMaximize} />
-
-        <button type="button" className="leave-btn-floating" onClick={leaveCall} aria-label="leave call">
-          <PhoneDisconnect size={20} weight="bold" />
-        </button>
       </div>
 
       {/* Build 3c -- mic-cam + the deck's own toggle/divider/wrapper are
@@ -163,7 +162,13 @@ export default function BroadcastStage({
           elements inside keep stacking via a normal nested flex column
           (see .stage-bottom-overlay in reactions.css) -- only the outer
           wrapper's positioning changed, nothing about their own
-          relative order/spacing. */}
+          relative order/spacing.
+          Phase 4 -- leave call moved INTO this row from its old
+          independent floating position (right:24px;top:50%), which
+          overlapped comments' own right-edge column on most viewport
+          heights. Session controls (mute/camera/flip/leave) are one
+          coherent group now, not a separately-floating element hoping
+          not to collide with something else. */}
       <div className="stage-bottom-overlay">
         <div className="stage-mic-cam">
           <button type="button" className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
@@ -178,6 +183,10 @@ export default function BroadcastStage({
             <CameraRotate size={16} weight="bold" />
             {facingMode === 'user' ? 'FRONT' : 'REAR'}
           </button>
+          <button type="button" className="leave-btn-inline" onClick={leaveCall} aria-label="leave call">
+            <PhoneDisconnect size={16} weight="bold" />
+            LEAVE
+          </button>
         </div>
 
         {/* Down/up arrow -- collapses/restores the deck below, independent
@@ -185,12 +194,14 @@ export default function BroadcastStage({
             hidden entirely while collapsed, since there's nothing to
             resize). Rendered as its own always-present row rather than
             folded into .deck-divider so it works identically on mobile,
-            where the divider itself is hidden. */}
+            where the divider itself is hidden. onToggleDeckCollapsed
+            (Phase 4) now lives in RoomInner, coordinated with comments/QR
+            mutual exclusivity -- see LiveDemo.jsx. */}
         <div className="deck-toggle-row">
           <button
             type="button"
             className="deck-collapse-btn"
-            onClick={toggleDeckCollapsed}
+            onClick={onToggleDeckCollapsed}
             aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
           >
             {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
@@ -276,18 +287,37 @@ export default function BroadcastStage({
         </div>
       </div>
 
+      {/* Phase 4 -- comments gets its own minimize/restore arrow, same
+          pattern as the deck's down/up toggle. CommentsPanel itself stays
+          ALWAYS mounted (never conditionally rendered) -- only its
+          wrapper collapses via CSS (stage-side-panel-body--collapsed,
+          reactions.css), the same reasoning the deck's own collapse
+          already uses: an in-progress typed comment must survive a
+          collapse/restore cycle, not get wiped by an unmount. */}
       <div
         className="stage-side-panel stage-side-panel--broadcast"
         style={{ bottom: (deckCollapsed ? 0 : deckHeight) + MIC_CAM_HEIGHT + (deckCollapsed ? 0 : DECK_DIVIDER_HEIGHT) }}
       >
-        <span className="stage-comments-label">COMMENTS</span>
-        <CommentsPanel
-          comments={comments}
-          onSend={sendComment}
-          expanded={commentsExpanded}
-          onExpand={onCommentsExpand}
-          onCollapse={onCommentsCollapse}
-        />
+        <div className="stage-side-panel-header">
+          <span className="stage-comments-label">COMMENTS</span>
+          <button
+            type="button"
+            className="comments-collapse-btn"
+            onClick={onToggleCommentsCollapsed}
+            aria-label={commentsCollapsed ? 'show comments' : 'hide comments'}
+          >
+            {commentsCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+          </button>
+        </div>
+        <div className={`stage-side-panel-body ${commentsCollapsed ? 'stage-side-panel-body--collapsed' : ''}`}>
+          <CommentsPanel
+            comments={comments}
+            onSend={sendComment}
+            expanded={commentsExpanded}
+            onExpand={onCommentsExpand}
+            onCollapse={onCommentsCollapse}
+          />
+        </div>
       </div>
     </div>
   );

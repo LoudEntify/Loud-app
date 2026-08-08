@@ -754,8 +754,65 @@ export default function LiveDemo() {
   const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Phase 4 (redesign) -- true browser Fullscreen API, not the CSS-only
+  // "fill the stage box" toggle this used to be (that CSS effect no
+  // longer exists at all since Phase 2 made full-bleed the permanent
+  // default, not something to toggle into). maximized itself stays a
+  // plain boolean the rest of the app already reads -- it's now kept in
+  // sync FROM the browser's own fullscreen state via the event listener
+  // below, rather than being the thing that DRIVES entering/exiting.
+  //
+  // Hard platform limit, not a bug: iOS Safari does not implement
+  // requestFullscreen() for arbitrary elements at all (only <video>
+  // elements get a separate, video-specific fullscreen API there) --
+  // canUseFullscreenApi is a feature-detect, not a device-sniff, so this
+  // falls back gracefully on any browser in the same situation, not just
+  // iPhone specifically. Where it's unavailable, "maximize" still does
+  // something -- the same instant declutter (hide sidebar/deck/comments/
+  // QR) the cascade effect below already does on real fullscreen entry --
+  // just without genuine OS-level fullscreen alongside it.
   const [maximized, setMaximized] = useState(false);
-  const toggleMaximize = useCallback(() => setMaximized((v) => !v), []);
+  const canUseFullscreenApi =
+    typeof document !== 'undefined' &&
+    !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+
+  const toggleMaximize = useCallback(() => {
+    if (!canUseFullscreenApi) {
+      setMaximized((v) => !v);
+      return;
+    }
+    const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!isFullscreen) {
+      const request = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+      request.call(document.documentElement).catch((e) => {
+        // A user gesture requirement not being met, or the platform
+        // refusing for its own reasons, is the realistic failure case --
+        // fall back to the CSS-only declutter so the button still does
+        // SOMETHING rather than silently no-op.
+        console.warn('[fullscreen] requestFullscreen failed, using CSS-only fallback', e);
+        setMaximized((v) => !v);
+      });
+    } else {
+      const exit = document.exitFullscreen ? document.exitFullscreen.bind(document) : document.webkitExitFullscreen?.bind(document);
+      exit?.();
+    }
+  }, [canUseFullscreenApi]);
+
+  // Keeps `maximized` truthful if the user exits fullscreen via the
+  // browser's OWN control (Escape key, its native UI) rather than this
+  // button -- without this, the icon/state would desync and keep
+  // claiming "fullscreen" after the browser already left it.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setMaximized(!!(document.fullscreenElement || document.webkitFullscreenElement));
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // Performer-only left-menu collapse (separate from maximize's own
   // hideSidebar, which fully unmounts the sidebar with no animation) --
@@ -764,6 +821,23 @@ export default function LiveDemo() {
   // the bottom deck also being collapsed, the video should go full-view).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebarCollapsed = useCallback(() => setSidebarCollapsed((v) => !v), []);
+
+  // Phase 4 -- entering fullscreen also collapses the sidebar once, so
+  // true browser fullscreen (which only makes the PAGE fill the screen,
+  // not declutter OUR OWN overlay chrome on top of it) still lands on a
+  // genuinely clean "just video" view. One-time on the FALSE->TRUE
+  // transition -- the reveal tab still works normally afterward if the
+  // artist wants the menu back mid-fullscreen. RoomInner runs the
+  // matching effect for deck/comments/QR (that state lives there, not
+  // here) -- same trigger, same one-time-on-entry reasoning, split
+  // across the two components that actually own each piece of state.
+  const prevMaximizedRef = useRef(maximized);
+  useEffect(() => {
+    if (maximized && !prevMaximizedRef.current) {
+      setSidebarCollapsed(true);
+    }
+    prevMaximizedRef.current = maximized;
+  }, [maximized]);
 
   // Show lifecycle (SHOW_LIFECYCLE_SPEC.md L1). `now` ticks locally every
   // second so effectiveState's clock check (and any countdown built on
@@ -1182,9 +1256,70 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [audioContext, setAudioContext] = useState(null);
   const audioHandleRef = useRef(null);
 
-  // QR codes are a setup-time tool, not something that needs to stay on
-  // screen once cameras are paired -- collapsed by default.
+  // Phase 4 (redesign) -- mutual exclusivity between the three floating
+  // content panels (SHOTS/AUDIO/VIDEO tech panel, comments, ADD CAMERA):
+  // opening any one auto-collapses the other two, so their footprints
+  // can never functionally compete for the same screen space even where
+  // they're positioned close together. Not a hard lock -- each panel's
+  // own control still opens/closes it individually at any time, it just
+  // also nudges the other two shut. deckCollapsed lived in
+  // BroadcastStage.jsx before this; moved here so it's a sibling of
+  // commentsCollapsed/qrPanelOpen and all three can coordinate directly,
+  // matching the existing pattern sidebarCollapsed already established
+  // (owned by whichever component needs to coordinate it with siblings,
+  // threaded down as a prop + setter). Defaults: deck starts collapsed,
+  // comments starts open -- avoids an initial-load overlap without
+  // either default feeling arbitrary (comments is the lighter-weight,
+  // ambient one; SHOTS/AUDIO/VIDEO is opt-in when actually needed).
+  const [deckCollapsed, setDeckCollapsed] = useState(true);
+  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [qrPanelOpen, setQrPanelOpen] = useState(false);
+
+  const toggleDeckCollapsed = useCallback(() => {
+    setDeckCollapsed((prev) => {
+      const next = !prev;
+      if (!next) {
+        setCommentsCollapsed(true);
+        setQrPanelOpen(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleCommentsCollapsed = useCallback(() => {
+    setCommentsCollapsed((prev) => {
+      const next = !prev;
+      if (!next) {
+        setDeckCollapsed(true);
+        setQrPanelOpen(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleQrPanel = useCallback(() => {
+    setQrPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setDeckCollapsed(true);
+        setCommentsCollapsed(true);
+      }
+      return next;
+    });
+  }, []);
+
+  // Matching half of the outer LiveDemo's own sidebar-collapse effect --
+  // entering fullscreen declutters these three too, once, on the
+  // FALSE->TRUE transition only.
+  const prevMaximizedForPanelsRef = useRef(maximized);
+  useEffect(() => {
+    if (maximized && !prevMaximizedForPanelsRef.current) {
+      setDeckCollapsed(true);
+      setCommentsCollapsed(true);
+      setQrPanelOpen(false);
+    }
+    prevMaximizedForPanelsRef.current = maximized;
+  }, [maximized]);
 
   const isMainPerformer = role === 'a' || role === 'b';
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
@@ -1860,6 +1995,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     commentsExpanded,
     onCommentsExpand: () => setCommentsExpanded(true),
     onCommentsCollapse: () => setCommentsExpanded(false),
+    // Phase 4 -- the minimize/restore control on the comments panel
+    // itself (separate from commentsExpanded's tall/compact toggle
+    // above); shared by both BroadcastStage and ViewerStage since both
+    // render their own comments column. Viewer has nothing else to stay
+    // mutually exclusive WITH (no deck/QR panel on that screen), but
+    // reuses the exact same state/control for a consistent declutter
+    // affordance on both roles.
+    commentsCollapsed,
+    onToggleCommentsCollapsed: toggleCommentsCollapsed,
   };
 
   return (
@@ -1931,6 +2075,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
           autoState={autoState}
           onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
+          deckCollapsed={deckCollapsed}
+          onToggleDeckCollapsed={toggleDeckCollapsed}
         />
       ) : displayShowState === 'ended' ? (
         <EndedCard />
@@ -1940,17 +2086,18 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         <ViewerStage {...stageProps} />
       )}
 
-      {/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- same
-          sibling-from-RoomInner placement rule as the shot panel above,
-          top-right so it doesn't compete with the bottom drawer or the
-          top-center lifecycle banner. Setup-time only, collapsed by
-          default. */}
+      {/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- top-right,
+          repositioned below .stage-topbar (Phase 4) so it no longer
+          overlaps the maximize button (both were fighting for the same
+          top-right ~54px strip before). Setup-time only, collapsed by
+          default; toggleQrPanel (above) is part of the deck/comments/QR
+          mutual-exclusivity group, not a bare boolean flip anymore. */}
       {isMainPerformer && (
         <div className={`camera-qr-panel ${qrPanelOpen ? 'open' : ''}`}>
           <button
             type="button"
             className="director-panel-toggle"
-            onClick={() => setQrPanelOpen((v) => !v)}
+            onClick={toggleQrPanel}
           >
             {qrPanelOpen ? 'HIDE CAMERAS' : 'ADD CAMERA'}
           </button>
