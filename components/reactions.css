@@ -968,46 +968,28 @@ button {
     flex-shrink: 0;
   }
 
-  /* Versus, mobile -- same root cause and fix as the desktop rule above,
-     mirrored for whichever direction VersusSplit is actually stacking in
-     on THIS device: column on an upright phone (useOrientation()'s
-     primary/common case -- touch + portrait orientation), row if a
-     touch device happens to be physically rotated to landscape. Unlike
-     desktop, there's no extra viewport width to widen into here -- the
-     outer box's width:100% above IS the phone's own screen width
-     already, sized correctly for one portrait panel -- so this only
-     drops the outer box's own aspect-ratio (which was forcing a single
-     9:16 shape onto the PAIR combined) and gives each panel its own
-     instead. */
-  .stage-video-area.stage-video-area--versus {
-    aspect-ratio: auto;
-  }
-
-  /* Portrait/column (upright phone): main axis is vertical, so
-     VersusSplit's flexBasis (the slider) controls HEIGHT -- stays
-     exactly as-is, untouched. WIDTH is the cross axis here and derives
-     from aspect-ratio instead, capped via max-width (not max-height,
-     axes are swapped from the row/landscape case below). */
-  .stage-video-area--versus .versus-stage.portrait .contestant-panel {
-    aspect-ratio: 9 / 16;
-    width: auto;
-    max-width: 100%;
-    align-self: center;
-    flex-grow: 0;
-    flex-shrink: 1;
-  }
-
-  /* Landscape/row (a touch device rotated sideways) -- same
-     width-drives-height-capped-by-max-height pattern as desktop's fix,
-     since the main axis is horizontal here too. */
-  .stage-video-area--versus .versus-stage.landscape .contestant-panel {
-    aspect-ratio: 9 / 16;
-    height: auto;
-    max-height: 70vh;
-    align-self: center;
-    flex-grow: 0;
-    flex-shrink: 1;
-  }
+  /* Versus, mobile -- deliberately NO per-panel aspect-ratio here, unlike
+     the desktop rule above. Tried that first and it broke mobile Versus
+     entirely (video collapsed to invisible): removing the outer box's
+     own aspect-ratio -- its only source of a DEFINITE height on mobile,
+     since nothing else in this chain sets one -- while leaving each
+     panel's height driven by VersusSplit's flexBasis (a percentage,
+     which in the column direction upright phones actually use resolves
+     against that now-indefinite parent height) collapsed the whole
+     chain to auto/zero. Circular, not fixable by capping one side.
+     Root design difference from desktop: useOrientation() puts mobile
+     Versus in .versus-stage.portrait (column/stacked), not row/side-by-
+     side -- confirmed this is also what the WORKING viewer mobile Versus
+     already does (its .stage-video-area is a plain fixed fullscreen box,
+     no aspect-ratio at all, and its .contestant-panel never gets any
+     aspect-ratio either). Stacked panels don't have desktop's distortion
+     problem in the first place (each already gets full width, real
+     height from the slider) -- forcing a ratio here was solving a
+     problem that didn't exist. So: no override needed. The single
+     .stage-video-area rule above (already correctly portrait-shaped,
+     unconditionally, same as it's always been for solo) plus
+     VersusSplit's own untouched flexBasis split is sufficient -- same
+     mechanism the working viewer relies on. */
 
   .stage-mic-cam {
     gap: 14px;
