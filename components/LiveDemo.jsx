@@ -758,6 +758,14 @@ export default function LiveDemo() {
   const [maximized, setMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setMaximized((v) => !v), []);
 
+  // Performer-only left-menu collapse (separate from maximize's own
+  // hideSidebar, which fully unmounts the sidebar with no animation) --
+  // owned here since it needs to reach both PageShell (renders Sidebar)
+  // and RoomInner/BroadcastStage (needs it to know when, combined with
+  // the bottom deck also being collapsed, the video should go full-view).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const toggleSidebarCollapsed = useCallback(() => setSidebarCollapsed((v) => !v), []);
+
   // Show lifecycle (SHOW_LIFECYCLE_SPEC.md L1). `now` ticks locally every
   // second so effectiveState's clock check (and any countdown built on
   // it) stays live without a fresh fetch -- true from a cached
@@ -1011,7 +1019,13 @@ export default function LiveDemo() {
   const isViewerRole = conn.assignedRole === 'viewer';
 
   return (
-    <PageShell active="live" hideSidebar={maximized} autoHideSidebar={isViewerRole}>
+    <PageShell
+      active="live"
+      hideSidebar={maximized}
+      autoHideSidebar={isViewerRole}
+      sidebarCollapsed={sidebarCollapsed}
+      onToggleSidebarCollapse={!isViewerRole && !isCamFeedRole ? toggleSidebarCollapsed : undefined}
+    >
       <div className="live-room-shell">
         <LiveKitRoom
           token={conn.token}
@@ -1038,6 +1052,7 @@ export default function LiveDemo() {
             selfName={conn.name}
             maximized={maximized}
             onToggleMaximize={toggleMaximize}
+            sidebarCollapsed={sidebarCollapsed}
             show={show}
             showState={showState}
             now={now}
@@ -1130,7 +1145,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
+function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
@@ -1841,6 +1856,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     renderSlot,
     maximized,
     onToggleMaximize,
+    sidebarCollapsed,
     onStageClick: collapseComments,
     comments,
     sendComment,

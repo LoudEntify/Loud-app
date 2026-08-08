@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
@@ -58,6 +58,7 @@ export default function BroadcastStage({
   onCommentsCollapse,
   maximized,
   onToggleMaximize,
+  sidebarCollapsed,
   onStageClick,
 }) {
   const otherSlot = role === 'a' ? 'b' : 'a';
@@ -66,6 +67,22 @@ export default function BroadcastStage({
   const stageRef = useRef(null);
   const draggingRef = useRef(false);
   const [deckHeight, setDeckHeight] = useState(DEFAULT_DECK_HEIGHT);
+
+  // Bottom-panel collapse (down-arrow/up-arrow) -- independent of
+  // deckHeight itself, which stays exactly where the artist last dragged
+  // it; collapsing just visually zeroes it via CSS (deck-wrapper--
+  // collapsed, reactions.css) rather than overwriting deckHeight, so
+  // there's nothing to remember/restore across a collapse/expand cycle.
+  const [deckCollapsed, setDeckCollapsed] = useState(false);
+  const toggleDeckCollapsed = useCallback(() => setDeckCollapsed((v) => !v), []);
+
+  // When BOTH the left menu and the bottom deck are collapsed, the video
+  // should go full-view -- same visual result as the existing maximize
+  // toggle, reached a second way. Deliberately a one-way derivation (
+  // collapsing both panels implies full-view; explicitly maximizing does
+  // NOT force the panels to collapse) rather than entangling maximized
+  // with the two collapse states as one combined piece of state.
+  const videoFullView = maximized || (sidebarCollapsed && deckCollapsed);
 
   const clampDeckHeight = useCallback((px) => {
     const stage = stageRef.current;
@@ -97,7 +114,7 @@ export default function BroadcastStage({
   };
 
   return (
-    <div className={`stage-root stage-root--performer ${maximized ? 'stage-root--maximized' : ''}`} ref={stageRef}>
+    <div className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`} ref={stageRef}>
       <div className="stage-video-area" onClick={onStageClick}>
         <VersusSplit
           mode={performanceMode}
@@ -127,31 +144,53 @@ export default function BroadcastStage({
         </button>
       </div>
 
-      <div
-        className="deck-divider"
-        onPointerDown={onDividerPointerDown}
-        onPointerMove={onDividerPointerMove}
-        onPointerUp={onDividerPointerUp}
-        onPointerCancel={onDividerPointerUp}
-        role="slider"
-        aria-label="resize control deck"
-        aria-valuemin={MIN_DECK_HEIGHT}
-        aria-valuemax={Math.round(clampDeckHeight(Infinity))}
-        aria-valuenow={Math.round(deckHeight)}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
-          if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
-        }}
-      >
-        <div className="drag-handle portrait">
-          <span className="drag-dot" />
-          <span className="drag-dot" />
-          <span className="drag-dot" />
-        </div>
+      {/* Down/up arrow -- collapses/restores the deck below, independent
+          of the drag-resize divider (which stays desktop-only and is
+          hidden entirely while collapsed, since there's nothing to
+          resize). Rendered as its own always-present row rather than
+          folded into .deck-divider so it works identically on mobile,
+          where the divider itself is hidden. */}
+      <div className="deck-toggle-row">
+        <button
+          type="button"
+          className="deck-collapse-btn"
+          onClick={toggleDeckCollapsed}
+          aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
+        >
+          {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+        </button>
       </div>
 
-      <div className="deck-wrapper" style={{ '--deck-height': `${deckHeight}px` }}>
+      {!deckCollapsed && (
+        <div
+          className="deck-divider"
+          onPointerDown={onDividerPointerDown}
+          onPointerMove={onDividerPointerMove}
+          onPointerUp={onDividerPointerUp}
+          onPointerCancel={onDividerPointerUp}
+          role="slider"
+          aria-label="resize control deck"
+          aria-valuemin={MIN_DECK_HEIGHT}
+          aria-valuemax={Math.round(clampDeckHeight(Infinity))}
+          aria-valuenow={Math.round(deckHeight)}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
+            if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
+          }}
+        >
+          <div className="drag-handle portrait">
+            <span className="drag-dot" />
+            <span className="drag-dot" />
+            <span className="drag-dot" />
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
+        style={{ '--deck-height': `${deckHeight}px` }}
+      >
         <PerformerDeck
           audioNodes={audioNodes}
           audioContext={audioContext}
@@ -165,7 +204,7 @@ export default function BroadcastStage({
 
       <div
         className="stage-side-panel stage-side-panel--broadcast"
-        style={{ bottom: deckHeight + MIC_CAM_HEIGHT + DECK_DIVIDER_HEIGHT }}
+        style={{ bottom: (deckCollapsed ? 0 : deckHeight) + MIC_CAM_HEIGHT + (deckCollapsed ? 0 : DECK_DIVIDER_HEIGHT) }}
       >
         <span className="stage-comments-label">COMMENTS</span>
         <CommentsPanel

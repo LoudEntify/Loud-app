@@ -338,6 +338,44 @@ button {
   padding: 24px 0;
   box-sizing: border-box;
   border-right: 1px solid rgba(253, 255, 252, 0.08);
+  /* overflow:hidden clips header/nav content during the width collapse
+     below rather than letting it spill out; the transition applies at
+     any breakpoint (mobile's own width:72px override, further down,
+     animates the same way). */
+  overflow: hidden;
+  transition: width 0.25s ease;
+}
+
+/* Performer-only manual collapse (Sidebar.jsx's collapsed/onToggleCollapse
+   props) -- genuinely shrinks width, unlike the viewer's auto-hide
+   (sidebar--hidden, further down) which translates a position:fixed
+   element instead. .sidebar is still position:sticky and a real flex
+   child of .page-shell, so only an actual width change lets
+   .page-shell-main reclaim the space. Two classes for extra specificity
+   over both the base 232px and the mobile 72px width, no !important
+   needed. */
+.sidebar.sidebar--collapsed {
+  width: 0;
+  border-right: none;
+}
+
+.sidebar-collapse-btn {
+  position: absolute;
+  top: 24px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: rgba(253, 255, 252, 0.5);
+  cursor: pointer;
+}
+
+.sidebar-collapse-btn:hover {
+  color: #2ec4b6;
 }
 
 .sidebar-header {
@@ -409,6 +447,34 @@ button {
    media query below. */
 .sidebar-reveal-tab {
   display: none;
+}
+
+/* Manual-collapse reveal tab (Sidebar.jsx's `collapsed` prop) -- a
+   SEPARATE modifier from the base .sidebar-reveal-tab above, styled the
+   same way but shown unconditionally (not gated to the mobile media
+   query below, since performer collapse works at every breakpoint). The
+   base rule's display:none doesn't apply here -- equal specificity, but
+   this rule comes later in the file, so normal cascade order wins,
+   same reasoning as the .stage-side-panel--broadcast split earlier in
+   this file. */
+.sidebar-reveal-tab--collapse {
+  display: flex;
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 56px;
+  background: rgba(1, 22, 39, 0.6);
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+  color: #2ec4b6;
+  z-index: 20;
+  cursor: pointer;
 }
 
 .page-shell {
@@ -613,6 +679,34 @@ button {
 
 .deck-wrapper {
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Always-present row (both breakpoints) holding the down/up collapse
+   arrow for the bottom panel -- separate from .deck-divider, which is
+   desktop-only and fully unrendered while collapsed (see
+   BroadcastStage.jsx), so this is the one control that has to work
+   everywhere regardless of collapse state. */
+.deck-toggle-row {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.deck-collapse-btn {
+  width: 32px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: rgba(253, 255, 252, 0.5);
+  cursor: pointer;
+}
+
+.deck-collapse-btn:hover {
+  color: #2ec4b6;
 }
 
 /* Scoped to min-width for the same reason as .stage-root--performer
@@ -622,6 +716,31 @@ button {
   .deck-wrapper {
     height: var(--deck-height);
     overflow-y: auto;
+    transition: height 0.25s ease;
+  }
+
+  /* Desktop collapse reuses the SAME --deck-height mechanism the drag
+     divider already drives -- deckHeight itself (the remembered drag
+     value) is untouched in BroadcastStage.jsx, this just visually
+     overrides height to 0 via a higher-specificity rule, so expanding
+     again needs no restore logic, the old height is just still there. */
+  .deck-wrapper.deck-wrapper--collapsed {
+    height: 0 !important;
+  }
+}
+
+/* Mobile has no existing height mechanism to reuse (deck-wrapper sizes
+   to content there, no --deck-height involved) -- max-height is the
+   collapse axis instead, animated the same way. 600px is a generous cap
+   well above any real PerformerDeck content height, not a real limit. */
+@media (max-width: 1024px) {
+  .deck-wrapper {
+    max-height: 600px;
+    transition: max-height 0.25s ease;
+  }
+
+  .deck-wrapper.deck-wrapper--collapsed {
+    max-height: 0;
   }
 }
 

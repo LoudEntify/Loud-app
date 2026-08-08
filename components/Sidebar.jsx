@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight } from '@phosphor-icons/react';
+import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft } from '@phosphor-icons/react';
 import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
 
 // Matches Sidebar.dc.html from the Claude Design project exactly (icons,
@@ -29,7 +29,16 @@ const HIDE_DELAY_MS = 2000;
 // a small edge tab to bring it back. The timer itself runs regardless of
 // viewport, but since the visual effect is media-query-gated, that's inert
 // on desktop.
-export default function Sidebar({ active = 'live', autoHide = false }) {
+// collapsed/onToggleCollapse are a SEPARATE mechanism from autoHide/hidden
+// above -- a manual, performer-only toggle (left-menu collapse, see
+// BroadcastStage/LiveDemo) rather than an idle timer. Deliberately kept
+// independent: autoHide's slide-away CSS (sidebar--hidden) only works
+// because .sidebar--fan is position:fixed and mobile-only, taken fully
+// out of flex flow -- the performer's sidebar stays position:sticky,
+// genuinely occupying its flex column, so collapsing it needs to
+// actually shrink its width (sidebar--collapsed, below) for the page
+// content to reclaim the space, not just translate it off-screen.
+export default function Sidebar({ active = 'live', autoHide = false, collapsed = false, onToggleCollapse }) {
   const [hidden, setHidden] = useState(false);
   const timerRef = useRef(null);
 
@@ -63,11 +72,21 @@ export default function Sidebar({ active = 'live', autoHide = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoHide]);
 
-  const navClassName = `sidebar ${autoHide ? 'sidebar--fan' : ''} ${autoHide && hidden ? 'sidebar--hidden' : ''}`;
+  const navClassName = `sidebar ${autoHide ? 'sidebar--fan' : ''} ${autoHide && hidden ? 'sidebar--hidden' : ''} ${collapsed ? 'sidebar--collapsed' : ''}`;
 
   return (
     <>
       <nav className={navClassName} onPointerDown={resetTimer} onScroll={resetTimer}>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={onToggleCollapse}
+            aria-label="hide navigation"
+          >
+            <CaretLeft size={14} weight="bold" />
+          </button>
+        )}
         <div className="sidebar-header">
           <div className="sidebar-title">Neon Meridian</div>
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
@@ -102,6 +121,22 @@ export default function Sidebar({ active = 'live', autoHide = false }) {
 
       {autoHide && hidden && (
         <button type="button" className="sidebar-reveal-tab" onClick={resetTimer} aria-label="show navigation">
+          <CaretRight size={16} weight="bold" />
+        </button>
+      )}
+
+      {/* Separate from the reveal tab above -- see this file's own
+          top-of-function comment for why collapsed/autoHide are two
+          independent mechanisms. Uses its own CSS
+          (sidebar-reveal-tab--collapse) so it works at any breakpoint,
+          without touching autoHide's existing mobile-only styling. */}
+      {collapsed && (
+        <button
+          type="button"
+          className="sidebar-reveal-tab sidebar-reveal-tab--collapse"
+          onClick={onToggleCollapse}
+          aria-label="show navigation"
+        >
           <CaretRight size={16} weight="bold" />
         </button>
       )}
