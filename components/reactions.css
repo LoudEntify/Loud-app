@@ -873,6 +873,65 @@ button {
   color: #2ec4b6;
 }
 
+/* Phase 3 (redesign) -- SwipePages.jsx, the unified SHOTS/AUDIO/VIDEO
+   panel replacing both PerformerDeck's own internal tab-switcher and the
+   separately-floating director-panel drawer. Renders inside .deck-wrapper
+   (BroadcastStage.jsx) -- same collapse mechanism (deck-wrapper--
+   collapsed, unchanged) governs the whole thing as one unit, tabs
+   included. Transparent + glow, same treatment as every other live
+   panel; the tab row deliberately reuses the exact visual language
+   PerformerDeck's old AUDIO/VIDEO tabs already had (teal active +
+   underline, translucent porcelain inactive), just generalized to N
+   tabs instead of 2. */
+.swipe-pages-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 16px 16px 0;
+}
+
+.swipe-pages-tab {
+  flex: 1;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: rgba(253, 255, 252, 0.55);
+  text-shadow: var(--text-halo);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.swipe-pages-tab.active {
+  color: #2ec4b6;
+  border-bottom-color: #2ec4b6;
+}
+
+.swipe-pages-viewport {
+  overflow-x: hidden;
+  /* Explicit, not left implicit -- setting overflow-x alone makes the
+     browser treat overflow-y as an implicit scroll container too (per
+     spec, not "visible" by default once ANY overflow axis is set),
+     which would create a SECOND, nested scrollbar here instead of
+     letting content overflow up to .deck-wrapper's own overflow-y:auto
+     (the one actual scroll container this panel should have). */
+  overflow-y: visible;
+  touch-action: pan-y;
+}
+
+.swipe-pages-track {
+  display: flex;
+}
+
+.swipe-pages-page {
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
 /* Scoped to min-width for the same reason as .stage-root--performer
    .stage-video-area above -- the deck sizes naturally on mobile,
    unconstrained by this desktop-only drag state. */
@@ -1293,22 +1352,11 @@ button {
   }
 }
 
-/* Director shot panel (SHOT_INTEGRATION_LIVEDEMO.md Edit 5) -- a
-   collapsible bottom drawer. Fixed position so it never disturbs
-   .stage-root's fullscreen layout math; collapsed by default so it never
-   covers the video on mobile. Same on every breakpoint for now --
-   function over polish, restyle once the manual test plan passes. */
-.director-panel {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  max-height: 70vh;
-}
+/* .director-panel/.director-panel-body (the separately-floating SHOTS
+   drawer) retired in Phase 3 -- SHOTS is now one page inside
+   SwipePages/.deck-wrapper (BroadcastStage.jsx), no longer its own
+   independent fixed-position element. .director-panel-toggle survives
+   below -- still reused by the QR/ADD CAMERA button. */
 
 /* Build 3c -- transparent + border/glow, same treatment as everything
    else; text halo added since it now has no fill behind it. */
@@ -1320,14 +1368,6 @@ button {
   text-shadow: var(--text-halo);
   border: 1px solid rgba(46, 196, 182, 0.5);
   box-shadow: 0 0 10px rgba(46, 196, 182, 0.3);
-}
-
-.director-panel-body {
-  width: 100%;
-  max-width: 480px;
-  overflow-y: auto;
-  padding: 0 12px 12px;
-  box-sizing: border-box;
 }
 
 /* Soundcheck/live banner (SHOW_LIFECYCLE_SPEC.md L2) -- artist-side only,

@@ -16,7 +16,6 @@ import '@livekit/components-styles';
 import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
-import DirectorShotPanel from './DirectorShotPanel';
 import CameraQRPanel from './CameraQRPanel';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useTrackAspect, useNativeIsLandscape } from '../lib/useSourceDimensions';
@@ -1183,14 +1182,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [audioContext, setAudioContext] = useState(null);
   const audioHandleRef = useRef(null);
 
-  // Collapsed by default so it never covers the video on mobile -- see
-  // the .director-panel rules in reactions.css. Function over polish
-  // per the shot-integration spec; restyle once the test plan passes.
-  const [directorPanelOpen, setDirectorPanelOpen] = useState(false);
-
-  // Same collapsed-by-default reasoning as directorPanelOpen -- QR codes
-  // are a setup-time tool, not something that needs to stay on screen
-  // once cameras are paired.
+  // QR codes are a setup-time tool, not something that needs to stay on
+  // screen once cameras are paired -- collapsed by default.
   const [qrPanelOpen, setQrPanelOpen] = useState(false);
 
   const isMainPerformer = role === 'a' || role === 'b';
@@ -1257,8 +1250,9 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       const handle = await createPilotAudioTrack();
       audioHandleRef.current = handle;
       // audioHandleRef is a ref, not state -- setting it alone doesn't
-      // trigger a re-render, so PerformerDeck's AudioDeckPanel would never
-      // see the live Web Audio nodes once the async setup above resolves.
+      // trigger a re-render, so AudioDeckPanel (rendered via SwipePages in
+      // BroadcastStage.jsx) would never see the live Web Audio nodes once
+      // the async setup above resolves.
       // This state mirror is what actually gets them there. audioContext
       // is needed too now, for BackingTrackPanel to decode/play a file
       // into the same graph.
@@ -1457,13 +1451,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   };
 
   // Rewired per the shot-integration spec: a direct feed pick (from
-  // PerformerDeck's own picker, untouched -- this is just the callback it
-  // already calls) is now a human SHOT_COMMAND using the nearest shot for
-  // that feed's role, not the old untracked 'active-camera' message --
-  // so direct picks get logged to the flywheel like every other cut, and
-  // 'active-camera' (now unused on both send and receive) is fully retired.
+  // VideoDeckPanel's own picker, untouched -- this is just the callback it
+  // already calls, now threaded through SwipePages/BroadcastStage instead
+  // of PerformerDeck since Phase 3's redesign) is now a human SHOT_COMMAND
+  // using the nearest shot for that feed's role, not the old untracked
+  // 'active-camera' message -- so direct picks get logged to the flywheel
+  // like every other cut, and 'active-camera' (now unused on both send
+  // and receive) is fully retired.
   const setActiveForSlot = useCallback((letter, identity) => {
-    // Local-only UI highlight for PerformerDeck's own picker -- no longer
+    // Local-only UI highlight for VideoDeckPanel's own picker -- no longer
     // broadcast; each device only needs to know what IT last picked.
     setActiveCamera((prev) => ({ ...prev, [letter]: identity }));
 
@@ -1926,6 +1922,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           audioContext={audioContext}
           showEnded={displayShowState === 'ended'}
           showPhase={showPhase}
+          room={room}
+          showId={ROOM_NAME}
+          availableRoles={directorAvailableRoles}
+          tracks={tracks}
+          onExclusiveMode={(on) => (on ? auto?.suspend() : auto?.resume())}
+          onHumanCommand={() => auto?.notifyHumanCommand()}
+          onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
+          autoState={autoState}
+          onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
         />
       ) : displayShowState === 'ended' ? (
         <EndedCard />
@@ -1933,39 +1938,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         <HoldingScreen show={show} now={now} />
       ) : (
         <ViewerStage {...stageProps} />
-      )}
-
-      {/* Sibling from RoomInner, not nested in BroadcastStage/PerformerDeck
-          -- keeps PerformerDeck.jsx and VideoDeckPanel.jsx untouched.
-          Fixed-position bottom drawer, collapsed by default: reachable
-          while the show is visible, never covers the video on mobile. */}
-      {isMainPerformer && (
-        <div className={`director-panel ${directorPanelOpen ? 'open' : ''}`}>
-          <button
-            type="button"
-            className="director-panel-toggle"
-            onClick={() => setDirectorPanelOpen((v) => !v)}
-          >
-            {directorPanelOpen ? 'HIDE SHOTS' : 'SHOTS'}
-          </button>
-          {directorPanelOpen && (
-            <div className="director-panel-body">
-              <DirectorShotPanel
-                room={room}
-                showId={ROOM_NAME}
-                slot={role}
-                availableRoles={directorAvailableRoles}
-                tracks={tracks}
-                showPhase={showPhase}
-                onExclusiveMode={(on) => (on ? auto?.suspend() : auto?.resume())}
-                onHumanCommand={() => auto?.notifyHumanCommand()}
-                onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
-                autoState={autoState}
-                onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
-              />
-            </div>
-          )}
-        </div>
       )}
 
       {/* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- same

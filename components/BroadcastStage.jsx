@@ -5,7 +5,10 @@ import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDiscon
 import VersusSplit from './VersusSplit';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
-import PerformerDeck from './PerformerDeck';
+import SwipePages from './SwipePages';
+import DirectorShotPanel from './DirectorShotPanel';
+import AudioDeckPanel from './AudioDeckPanel';
+import VideoDeckPanel from './VideoDeckPanel';
 
 // Sizing constants for the deck drag-resize / bottom-overlay offset math.
 // MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
@@ -20,16 +23,29 @@ const DEFAULT_DECK_HEIGHT = 340;
 // the performer's own multi-cam preview left / opponent right (with the
 // drag divider); solo drops the split entirely and shows one full-bleed
 // panel. Build 3c: mic/camera row, the deck's collapse toggle + drag
-// divider, and PerformerDeck itself are wrapped in ONE fixed overlay
-// (.stage-bottom-overlay) floating directly on the video, rather than
-// flex-column siblings that used to shrink the video to make room for
-// them -- every live-screen panel is a floating overlay now, artist and
-// viewer alike. Comments float over the video the same way the fan
+// divider, and the SHOTS/AUDIO/VIDEO swipe panel are wrapped in ONE fixed
+// overlay (.stage-bottom-overlay) floating directly on the video, rather
+// than flex-column siblings that used to shrink the video to make room
+// for them -- every live-screen panel is a floating overlay now, artist
+// and viewer alike. Comments float over the video the same way the fan
 // mobile view does -- transparent, teal glow, no background -- their
 // bottom offset tracks the same deckHeight state driving the divider,
 // since a hardcoded pixel value can't work once that height is
-// user-adjustable. Every handler here is passed straight through from
-// RoomInner -- no LiveKit calls happen in this file.
+// user-adjustable.
+//
+// Phase 3 (redesign): PerformerDeck's own internal AUDIO/VIDEO
+// tab-switcher and the separately-floating director-panel drawer (SHOTS)
+// used to be two independent things, which is exactly why they could
+// (and did) visually collide -- both position:fixed at the bottom, with
+// nothing coordinating them. Replaced with ONE SwipePages instance
+// holding all three as pages; DirectorShotPanel/AudioDeckPanel/
+// VideoDeckPanel are rendered directly here now, PerformerDeck.jsx is
+// retired. This does mean BroadcastStage is no longer purely LiveKit-
+// agnostic passthrough -- it now needs the shot-director's own props
+// (room, showId, availableRoles, tracks, autoState, the on* callbacks),
+// threaded straight through from RoomInner exactly as DirectorShotPanel
+// used to receive them directly; still no LiveKit CALLS happen in this
+// file itself, just prop plumbing.
 export default function BroadcastStage({
   performanceMode,
   role,
@@ -57,6 +73,15 @@ export default function BroadcastStage({
   onToggleMaximize,
   sidebarCollapsed,
   onStageClick,
+  room,
+  showId,
+  availableRoles,
+  tracks,
+  onExclusiveMode,
+  onHumanCommand,
+  onCommand,
+  autoState,
+  onToggleAuto,
 }) {
   const otherSlot = role === 'a' ? 'b' : 'a';
   const candidates = tracksForSlot(role);
@@ -202,14 +227,51 @@ export default function BroadcastStage({
           className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
           style={{ '--deck-height': `${deckHeight}px` }}
         >
-          <PerformerDeck
-            audioNodes={audioNodes}
-            audioContext={audioContext}
-            showEnded={showEnded}
-            showPhase={showPhase}
-            cameraCandidates={candidates}
-            activeCameraIdentity={activeCamera[role]}
-            onPickCamera={(identity) => setActiveForSlot(role, identity)}
+          <SwipePages
+            pages={[
+              {
+                key: 'shots',
+                label: 'SHOTS',
+                content: (
+                  <DirectorShotPanel
+                    room={room}
+                    showId={showId}
+                    slot={role}
+                    availableRoles={availableRoles}
+                    tracks={tracks}
+                    showPhase={showPhase}
+                    onExclusiveMode={onExclusiveMode}
+                    onHumanCommand={onHumanCommand}
+                    onCommand={onCommand}
+                    autoState={autoState}
+                    onToggleAuto={onToggleAuto}
+                  />
+                ),
+              },
+              {
+                key: 'audio',
+                label: 'AUDIO',
+                content: (
+                  <AudioDeckPanel
+                    nodes={audioNodes}
+                    audioContext={audioContext}
+                    showEnded={showEnded}
+                    showPhase={showPhase}
+                  />
+                ),
+              },
+              {
+                key: 'video',
+                label: 'VIDEO',
+                content: (
+                  <VideoDeckPanel
+                    candidates={candidates}
+                    activeIdentity={activeCamera[role]}
+                    onPick={(identity) => setActiveForSlot(role, identity)}
+                  />
+                ),
+              },
+            ]}
           />
         </div>
       </div>
