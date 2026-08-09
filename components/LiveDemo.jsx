@@ -9,7 +9,7 @@ import {
   useDataChannel,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, RoomEvent } from 'livekit-client';
 import { VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
@@ -20,7 +20,7 @@ import CameraQRPanel from './CameraQRPanel';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
-import { onProbeLog } from '../lib/tapProbeBus';
+import { probeLog, onProbeLog } from '../lib/tapProbeBus';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
@@ -808,6 +808,39 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
+
+  // DEBUG (live pilot bug, round 3 -- "PC manager is closed" investigation)
+  // -- see lib/tapProbeBus.js. Logs the room's actual connection-health
+  // events directly into the same on-screen feed, instead of only seeing
+  // the SDK's raw uncaught-rejection text after the fact. Disconnected
+  // fires "when room.disconnect() is called OR when an unrecoverable
+  // connection issue had occurred" (livekit-client's own doc comment) --
+  // logging the reason distinguishes an intentional leave from a real
+  // dropped connection, which is exactly the question here. Safe to
+  // delete once the real cause is found and fixed.
+  useEffect(() => {
+    if (!room) return undefined;
+    const onReconnecting = () => probeLog('ROOM: Reconnecting -- media connection interrupted, attempting to restore');
+    const onSignalReconnecting = () => probeLog('ROOM: SignalReconnecting -- signaling connection interrupted');
+    const onReconnected = () => probeLog('ROOM: Reconnected -- connection restored');
+    const onDisconnected = (reason) => probeLog(`ROOM: Disconnected -- reason=${reason ?? 'unknown'} (this closes pcManager; anything that touches the room after this throws "PC manager is closed")`);
+    const onConnectionStateChanged = (state) => probeLog(`ROOM: ConnectionStateChanged -> ${state}`);
+    room
+      .on(RoomEvent.Reconnecting, onReconnecting)
+      .on(RoomEvent.SignalReconnecting, onSignalReconnecting)
+      .on(RoomEvent.Reconnected, onReconnected)
+      .on(RoomEvent.Disconnected, onDisconnected)
+      .on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    probeLog(`ROOM: probe attached -- current state=${room.state}`);
+    return () => {
+      room
+        .off(RoomEvent.Reconnecting, onReconnecting)
+        .off(RoomEvent.SignalReconnecting, onSignalReconnecting)
+        .off(RoomEvent.Reconnected, onReconnected)
+        .off(RoomEvent.Disconnected, onDisconnected)
+        .off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    };
+  }, [room]);
 
   // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
   // only. Second link in the chain, between "did the SHOT_COMMAND arrive"

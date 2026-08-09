@@ -180,7 +180,13 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
           <span className="control-btn" style={{ display: 'inline-block' }}>
             {loading ? 'Loading...' : 'Choose audio file'}
           </span>
-          <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
+          <input
+            type="file"
+            accept="audio/*"
+            onChange={handleFile}
+            onClick={() => probeLog('AUDIO: <input type=file> onClick fired -- native dialog should be opening now')}
+            style={{ display: 'none' }}
+          />
         </label>
       ) : (
         <>
@@ -214,7 +220,13 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
 
           <label style={{ fontSize: 11, color: '#2ec4b6', cursor: 'pointer' }}>
             Choose a different file
-            <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
+            <input
+              type="file"
+              accept="audio/*"
+              onChange={handleFile}
+              onClick={() => probeLog('AUDIO: <input type=file> (different file) onClick fired -- native dialog should be opening now')}
+              style={{ display: 'none' }}
+            />
           </label>
         </>
       )}
