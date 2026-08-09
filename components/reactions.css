@@ -965,11 +965,26 @@ button {
 
 /* Mobile has no existing height mechanism to reuse (deck-wrapper sizes
    to content there, no --deck-height involved) -- max-height is the
-   collapse axis instead, animated the same way. 600px is a generous cap
-   well above any real PerformerDeck content height, not a real limit. */
+   collapse axis instead, animated the same way. 600px was assumed a
+   generous cap well above any real PerformerDeck content height -- NOT
+   true in practice: the AUDIO page alone (manual-mix toggles, 5 knobs/
+   faders, the soundcheck monitor block, audio-sync calibration, and the
+   backing-track file picker) measures ~675px, past the cap.
+   Fix (live pilot bug): this block never overrode `overflow`, so it fell
+   through to the base .deck-wrapper rule's `overflow: hidden` above --
+   unlike the desktop block, which deliberately sets overflow-y:auto.
+   `overflow: hidden` doesn't just clip visually, it also blocks ALL
+   user-driven scrolling (touch-drag, wheel, keyboard) on that element --
+   so anything past the 600px cutoff (confirmed: audio sync's
+   Calibrate/Dismiss buttons, the backing-track file picker) was not just
+   hidden, it was UNREACHABLE on mobile, with no way to scroll down to it.
+   overflow-y:auto here gives mobile the same real scrollbox desktop
+   already had, so a tall page scrolls inside the cap instead of clipping
+   past it. */
 @media (max-width: 1024px) {
   .deck-wrapper {
     max-height: 600px;
+    overflow-y: auto;
     transition: max-height 0.25s ease;
   }
 
