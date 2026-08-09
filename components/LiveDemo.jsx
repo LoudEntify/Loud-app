@@ -132,12 +132,13 @@ async function updateShowStateWithRetry(nextState) {
 // on top of a live show, never a dependency of it. Callers don't await
 // this; a failed request is logged and swallowed, same principle as
 // flywheel logging in lib/shotCommands.js (a broken recorder must never
-// take the show down).
-function triggerEgress(action, room) {
+// take the show down). performanceMode (Stage 4) is only meaningful for
+// 'start' -- the route ignores it for 'stop', harmless to always pass.
+function triggerEgress(action, room, performanceMode) {
   fetch(`/api/egress/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ room }),
+    body: JSON.stringify({ room, performanceMode }),
   })
     .then((res) => res.json())
     .then((data) => {
@@ -1377,9 +1378,9 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     if (showState === 'live' && !showLiveBroadcastSentRef.current) {
       showLiveBroadcastSentRef.current = true;
       send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_LIVE' })), {});
-      triggerEgress('start', ROOM_NAME); // Stage 3: server-side recording, same once-only guard as the broadcast above
+      triggerEgress('start', ROOM_NAME, performanceMode); // Stage 4: directed portrait recording, same once-only guard as the broadcast above
     }
-  }, [isMainPerformer, showState, send]);
+  }, [isMainPerformer, showState, send, performanceMode]);
 
   // Forced failover (SHOW_LIFECYCLE_SPEC.md L6-2): if the track behind
   // the slot's currently-shown targetIdentity mutes or drops mid-live,

@@ -1,20 +1,33 @@
 import { EgressClient } from 'livekit-server-sdk';
-import { EncodedFileOutput, EncodedFileType, EgressStatus, S3Upload } from '@livekit/protocol';
+import { EncodedFileOutput, EncodedFileType, EncodingOptions, EgressStatus, S3Upload } from '@livekit/protocol';
 import { NextResponse } from 'next/server';
 
-// Stage 3: stock LiveKit grid template only -- proves the record/store
-// pipeline end-to-end before Stage 4 (a custom shot-directed template via
-// customBaseUrl, once a grid file has actually landed in the bucket and
-// been downloaded and confirmed).
+// Stage 4: directed portrait egress -- replaces Stage 3's stock grid
+// template with LiveKit's customBaseUrl mechanism, pointed at this app's
+// own /egress route (components/EgressPage.jsx). That page renders the
+// SAME directed view (ShotVideo/VersusSplit, reused from the live app)
+// a real viewer sees, with no UI chrome -- so the recorded file is a
+// clean capture of the actual performance, in portrait, not a landscape
+// grid of raw feeds. `layout` carries this show's performanceMode
+// ('solo' | 'versus') through to that page -- LiveKit passes whatever
+// string is given here straight through as a query param, untouched;
+// reused for that purpose rather than inventing a parallel channel.
 //
 // Required environment variables, server-side only (same scope as
 // app/api/token/route.js's LiveKit vars):
 //   LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL   (existing)
 //   LIVEKIT_S3_ACCESS_KEY, LIVEKIT_S3_SECRET,
 //   LIVEKIT_S3_ENDPOINT, LIVEKIT_S3_REGION,
-//   LIVEKIT_S3_BUCKET                                   (new, Supabase's
+//   LIVEKIT_S3_BUCKET                                   (existing, Supabase's
 //     S3-compatible Storage connection -- distinct from the app's own
 //     NEXT_PUBLIC_SUPABASE_* anon-key pair used elsewhere)
+//   EGRESS_TEMPLATE_BASE_URL                            (new -- this
+//     app's own real, publicly-reachable origin, e.g.
+//     https://loudentify.vercel.app. LiveKit's Egress service runs
+//     OUTSIDE this deployment and navigates a headless browser to
+//     customBaseUrl directly -- it can never reach localhost or a
+//     preview-only URL, so this has to be the stable production domain,
+//     not derived from the incoming request.)
 
 function toHttpUrl(wsUrl) {
   return wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
@@ -39,16 +52,22 @@ export async function POST(request) {
       LIVEKIT_S3_ENDPOINT: endpoint,
       LIVEKIT_S3_REGION: region,
       LIVEKIT_S3_BUCKET: bucket,
+      EGRESS_TEMPLATE_BASE_URL: templateBaseUrl,
     } = process.env;
 
-    if (!apiKey || !apiSecret || !livekitUrl || !accessKey || !secret || !endpoint || !region || !bucket) {
+    if (!apiKey || !apiSecret || !livekitUrl || !accessKey || !secret || !endpoint || !region || !bucket || !templateBaseUrl) {
       return NextResponse.json({ error: 'Server missing egress environment variables' }, { status: 500 });
     }
 
-    const { room } = await request.json();
+    const { room, performanceMode } = await request.json();
     if (!room) {
       return NextResponse.json({ error: 'room is required' }, { status: 400 });
     }
+    // Defaults to 'solo' for anything other than exactly 'versus' --
+    // EgressPage.jsx's own layout handling has the identical fallback
+    // (components/EgressPage.jsx), so an unexpected/missing value here
+    // still lands on a sane, working result rather than an ambiguous one.
+    const layout = performanceMode === 'versus' ? 'versus' : 'solo';
 
     const egressClient = new EgressClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
 
@@ -86,10 +105,22 @@ export async function POST(request) {
       },
     });
 
-    // opts.layout omitted -> LiveKit's own default composite layout
-    // ("grid" of published tracks). Explicit here for Stage 3's stock
-    // template requirement, not left implicit.
-    const info = await egressClient.startRoomCompositeEgress(room, { file: output }, { layout: 'grid' });
+    // customBaseUrl points at this app's own headless template
+    // (components/EgressPage.jsx) instead of LiveKit's built-in grid
+    // renderer -- LiveKit appends its own url/token (auto-generated,
+    // never minted by us) and this `layout` string as query params when
+    // it navigates there. encodingOptions sets the actual output canvas
+    // to portrait -- this is what was missing before, not the template
+    // choice alone: the default canvas is 1920x1080 regardless of what
+    // shape the SOURCE tracks are (confirmed against the installed
+    // @livekit/protocol's own EncodingOptions defaults), which is why
+    // the old grid recording came out landscape/letterboxed even though
+    // the feeds themselves were already portrait.
+    const info = await egressClient.startRoomCompositeEgress(room, { file: output }, {
+      layout,
+      customBaseUrl: `${templateBaseUrl.replace(/\/+$/, '')}/egress`,
+      encodingOptions: new EncodingOptions({ width: 1080, height: 1920 }),
+    });
     // info.status/error here only reflect the SYNCHRONOUS start call --
     // the actual S3 upload happens after this returns, so a bad
     // credential/bucket often won't surface until the stop response
