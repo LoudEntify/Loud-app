@@ -17,25 +17,49 @@ import { useRef, useState } from 'react';
 // pattern VersusSplit's divider and BroadcastStage's own deck-resize
 // divider already use elsewhere in this app -- one consistent gesture
 // idiom, not a new one just for this.
+//
+// Fix (live pilot bug): capture used to be grabbed on the viewport
+// immediately on pointerdown, before it was known whether the gesture was
+// a swipe or a plain tap. A captured element becomes the sole target of
+// all subsequent pointer events for that pointerId -- so tapping any
+// control INSIDE a page (audio knobs/faders, shot buttons, video toggles)
+// handed its pointerup to the viewport instead of the button, and the
+// browser's click never reached it. The swipe-pages-tabs row above was
+// never affected since it sits outside this viewport, which is exactly
+// why tab-switching kept working while every in-panel control went dead.
+// Capture is now deferred to onPointerMove, only once real horizontal
+// movement proves this is actually a drag -- a tap-and-release with no
+// meaningful movement never captures anything, so its native click reaches
+// whatever was actually tapped, untouched.
+const DRAG_START_THRESHOLD_PX = 8;
+
 export default function SwipePages({ pages }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dragDelta, setDragDelta] = useState(0);
   const draggingRef = useRef(false);
+  const activePointerIdRef = useRef(null);
   const dragStartXRef = useRef(0);
   const viewportRef = useRef(null);
 
   const onPointerDown = (e) => {
-    draggingRef.current = true;
+    activePointerIdRef.current = e.pointerId;
     dragStartXRef.current = e.clientX;
-    e.currentTarget.setPointerCapture?.(e.pointerId);
+    // Deliberately no setPointerCapture here -- see fix note above.
   };
 
   const onPointerMove = (e) => {
-    if (!draggingRef.current) return;
-    setDragDelta(e.clientX - dragStartXRef.current);
+    if (activePointerIdRef.current !== e.pointerId) return;
+    const delta = e.clientX - dragStartXRef.current;
+    if (!draggingRef.current) {
+      if (Math.abs(delta) < DRAG_START_THRESHOLD_PX) return;
+      draggingRef.current = true;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }
+    setDragDelta(delta);
   };
 
   const endDrag = () => {
+    activePointerIdRef.current = null;
     if (!draggingRef.current) return;
     draggingRef.current = false;
     const viewportWidth = viewportRef.current?.getBoundingClientRect().width || 1;
