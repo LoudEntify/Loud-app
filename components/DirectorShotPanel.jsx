@@ -36,6 +36,7 @@ import {
   createStaccatoSequencer,
   resolveTargetIdentity,
 } from '../lib/shotCommands';
+import { probeLog } from '../lib/tapProbeBus';
 
 // Loudentify palette — Ink Black base, Porcelain text,
 // Teal = live/selected, Orange = running mode, Red = stop states.
@@ -123,60 +124,71 @@ export default function DirectorShotPanel({
 
   const fire = useCallback(
     async (shotKey, params = {}) => {
-      if (!room) return;
-      onHumanCommand?.(); // every tap through this function is a human tap
+      // DEBUG (live pilot bug, round 2) -- see lib/tapProbeBus.js. Proves
+      // whether React's onClick actually reaches this function at all,
+      // independent of the tap-probe's own click/React-attached checks.
+      // Safe to delete once the real cause is found and fixed.
+      probeLog(`SHOTS: fire("${shotKey}") called -- room=${room ? 'ok' : 'NULL (would abort here)'}`);
+      try {
+        if (!room) return;
+        onHumanCommand?.(); // every tap through this function is a human tap
 
-      // Any direct shot tap while staccato runs = intent to leave the mode
-      if (staccatoOn && shotKey !== 'staccato') {
-        sequencer?.stop();
-        setStaccatoOn(false);
-        onExclusiveMode?.(false);
-      }
-
-      if (shotKey === 'staccato') {
-        if (staccatoOn) {
+        // Any direct shot tap while staccato runs = intent to leave the mode
+        if (staccatoOn && shotKey !== 'staccato') {
           sequencer?.stop();
           setStaccatoOn(false);
           onExclusiveMode?.(false);
-        } else {
-          onExclusiveMode?.(true); // pause auto-rotate BEFORE the first auto cut
-          sequencer?.start();
-          setStaccatoOn(true);
         }
-        setActiveShot(staccatoOn ? null : 'staccato');
-        return;
+
+        if (shotKey === 'staccato') {
+          if (staccatoOn) {
+            sequencer?.stop();
+            setStaccatoOn(false);
+            onExclusiveMode?.(false);
+          } else {
+            onExclusiveMode?.(true); // pause auto-rotate BEFORE the first auto cut
+            sequencer?.start();
+            setStaccatoOn(true);
+          }
+          setActiveShot(staccatoOn ? null : 'staccato');
+          return;
+        }
+
+        const sourceRole = resolveSourceRole(
+          shotKey,
+          availableRoles,
+          lastShotRef.current
+            ? SHOT_TYPES[lastShotRef.current]?.source?.[0]
+            : null
+        );
+
+        // Resolved from the live `tracks` prop at tap time, never from
+        // stale state -- the same per-cut resolution pattern as the
+        // sequencer above.
+        const targetIdentity = resolveTargetIdentity(tracks, slot, sourceRole);
+
+        const command = buildShotCommand({
+          showId,
+          slot,
+          shotKey,
+          fromShotKey: lastShotRef.current, // negative signal for the flywheel
+          sourceRole,
+          targetIdentity,
+          params,
+          decisionSource: 'human', // gold label
+          showPhase,
+          availableRoles, // flywheel context (L6-5) -- already a prop, captured at fire time
+        });
+
+        lastShotRef.current = shotKey;
+        setActiveShot(shotKey);
+        await broadcastShotCommand(room, command);
+        onCommand?.(command);
+        probeLog(`SHOTS: fire("${shotKey}") completed -- setActiveShot + broadcast sent`);
+      } catch (err) {
+        probeLog(`SHOTS: fire("${shotKey}") THREW: ${err?.message || String(err)}`);
+        throw err;
       }
-
-      const sourceRole = resolveSourceRole(
-        shotKey,
-        availableRoles,
-        lastShotRef.current
-          ? SHOT_TYPES[lastShotRef.current]?.source?.[0]
-          : null
-      );
-
-      // Resolved from the live `tracks` prop at tap time, never from
-      // stale state -- the same per-cut resolution pattern as the
-      // sequencer above.
-      const targetIdentity = resolveTargetIdentity(tracks, slot, sourceRole);
-
-      const command = buildShotCommand({
-        showId,
-        slot,
-        shotKey,
-        fromShotKey: lastShotRef.current, // negative signal for the flywheel
-        sourceRole,
-        targetIdentity,
-        params,
-        decisionSource: 'human', // gold label
-        showPhase,
-        availableRoles, // flywheel context (L6-5) -- already a prop, captured at fire time
-      });
-
-      lastShotRef.current = shotKey;
-      setActiveShot(shotKey);
-      await broadcastShotCommand(room, command);
-      onCommand?.(command);
     },
     [room, showId, slot, availableRoles, tracks, showPhase, staccatoOn, sequencer, onExclusiveMode, onHumanCommand, onCommand]
   );

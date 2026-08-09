@@ -20,6 +20,7 @@ import CameraQRPanel from './CameraQRPanel';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
+import { onProbeLog } from '../lib/tapProbeBus';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
@@ -119,47 +120,94 @@ function describeEl(el) {
   return `${el.tagName}${cls}${txt}`;
 }
 
+// Round 2: the probe data came back clean -- clicks land on the right
+// element every time. So the gap isn't event DELIVERY, it's whether
+// REACT'S OWN synthetic onClick, attached via its single delegated
+// listener, actually runs once the native event gets there. A native
+// capture-phase document listener (below) fires on the way DOWN to the
+// target and proves delivery -- but it can't see anything that happens
+// during the BUBBLE phase afterward, which is where React's delegated
+// listener actually lives. This checks for that gap directly: every DOM
+// element React attaches props/handlers to carries an internal
+// `__reactProps$<id>` (or, older React, `__reactEventHandlers$<id>`) key.
+// If the tapped element is missing that key, React never wired it at
+// all -- direct, conclusive evidence of a hydration/mount failure on
+// that specific node, independent of anything happening in the event's
+// propagation path.
+function reactPropsKeyStatus(el) {
+  if (!el) return 'n/a (no element)';
+  const keys = Object.keys(el);
+  const hit = keys.find((k) => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
+  if (hit) return `YES (${hit})`;
+  const fiberHit = keys.find((k) => k.startsWith('__reactFiber$'));
+  return fiberHit ? 'fiber present but NO props key -- suspicious' : 'NO -- React never attached to this node';
+}
+
 function useTapProbe(enabled) {
   const [log, setLog] = useState([]);
-  const pendingRef = useRef(null);
+  const idRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) return undefined;
+
+    function push(entry) {
+      idRef.current += 1;
+      setLog((prev) => [...prev.slice(-11), { id: idRef.current, ...entry }]);
+    }
 
     function onPointerDown(e) {
       const x = e.clientX;
       const y = e.clientY;
       const atPoint = document.elementFromPoint(x, y);
-      const entry = {
-        id: Date.now() + Math.random(),
-        x: Math.round(x),
-        y: Math.round(y),
-        downTarget: describeEl(e.target),
-        downAtPoint: describeEl(atPoint),
-        clickTarget: null,
-        gotClick: false,
-      };
-      pendingRef.current = entry;
-      setLog((prev) => [...prev.slice(-5), entry]);
+      push({
+        kind: 'pointerdown',
+        text: `@(${Math.round(x)},${Math.round(y)})\ntarget: ${describeEl(e.target)}\nelementFromPoint: ${describeEl(atPoint)}\nReact attached: ${reactPropsKeyStatus(e.target)}`,
+      });
     }
 
+    // NOT gated to "first click per tap" -- some interactions (a <label>
+    // wrapping a hidden file <input>) legitimately fire a SECOND,
+    // browser-forwarded click on a different element right after the
+    // first. Logging every click, unfiltered, is the only way to see
+    // whether that forwarding actually happens.
     function onClick(e) {
-      const pending = pendingRef.current;
-      if (!pending) return;
-      pending.gotClick = true;
-      pending.clickTarget = describeEl(e.target);
-      setLog((prev) => prev.map((l) => (l.id === pending.id ? { ...pending } : l)));
-      pendingRef.current = null;
+      push({ kind: 'click', text: `click -> ${describeEl(e.target)}\nReact attached: ${reactPropsKeyStatus(e.target)}` });
     }
+
+    function onWindowError(e) {
+      push({ kind: 'error', text: `JS ERROR: ${e.message}\n${e.filename ? `${e.filename}:${e.lineno}` : ''}` });
+    }
+
+    function onRejection(e) {
+      push({ kind: 'error', text: `UNHANDLED REJECTION: ${e.reason?.message || e.reason}` });
+    }
+
+    // Fed by probeLog() calls placed directly inside the suspect
+    // handlers (DirectorShotPanel's fire, BackingTrackPanel's handleFile,
+    // CalibrateSyncPanel's cancel/dismiss, LevelMeterFader's gain change)
+    // -- lib/tapProbeBus.js. If a tap logs [click] but never logs a
+    // matching [handler] line, React's onClick never actually ran for
+    // that element, no matter what the click/React-attached lines above
+    // say. If [handler] logs but nothing changes on screen, the handler
+    // itself ran fine and the bug is downstream (state not reflected in
+    // render), a different problem than "the click didn't work."
+    const offProbeLog = onProbeLog((message) => push({ kind: 'handler', text: message }));
 
     // Capture phase (true) -- runs before any descendant's own listener,
     // including one that calls stopPropagation(), so this always sees
-    // the real target/point regardless of what happens deeper in the tree.
+    // the real target/point regardless of what happens deeper in the tree
+    // ON THE WAY DOWN. It can't see interference during the bubble phase
+    // afterward -- that's what reactPropsKeyStatus is for instead.
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('click', onClick, true);
+    window.addEventListener('error', onWindowError);
+    window.addEventListener('unhandledrejection', onRejection);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('click', onClick, true);
+      window.removeEventListener('error', onWindowError);
+      window.removeEventListener('unhandledrejection', onRejection);
+      offProbeLog();
     };
   }, [enabled]);
 
@@ -170,16 +218,18 @@ function TapProbeOverlay({ enabled }) {
   const log = useTapProbe(enabled);
   if (!enabled) return null;
 
+  const KIND_COLOR = { pointerdown: '#39ff88', click: '#7fd4ff', error: '#ff5c5c', handler: '#ffd166' };
+
   return (
     <div
       style={{
         position: 'fixed',
         top: 4,
         left: 4,
-        maxWidth: 340,
-        maxHeight: '55vh',
+        maxWidth: 360,
+        maxHeight: '60vh',
         overflow: 'auto',
-        background: 'rgba(0,0,0,0.88)',
+        background: 'rgba(0,0,0,0.9)',
         color: '#39ff88',
         fontFamily: 'monospace',
         fontSize: 10,
@@ -192,11 +242,11 @@ function TapProbeOverlay({ enabled }) {
         whiteSpace: 'pre-wrap',
       }}
     >
-      TAP PROBE -- last {log.length} tap(s):
+      TAP PROBE v2 -- last {log.length} event(s):
       {log.length === 0 && '\n(tap anywhere)'}
       {[...log].reverse().map((l) => (
-        <div key={l.id} style={{ marginTop: 6, borderTop: '1px solid rgba(57,255,136,0.25)', paddingTop: 4 }}>
-          {`@(${l.x},${l.y})\ndown target: ${l.downTarget}\ndown elementFromPoint: ${l.downAtPoint}\nclick fired: ${l.gotClick ? 'yes' : 'NO -- swallowed before click'}${l.gotClick ? `\nclick target: ${l.clickTarget}` : ''}`}
+        <div key={l.id} style={{ marginTop: 6, borderTop: '1px solid rgba(57,255,136,0.25)', paddingTop: 4, color: KIND_COLOR[l.kind] || '#39ff88' }}>
+          [{l.kind}] {l.text}
         </div>
       ))}
     </div>

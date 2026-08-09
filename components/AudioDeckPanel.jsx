@@ -9,6 +9,7 @@ import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
   tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
 } from '../lib/audioProcessing';
+import { probeLog } from '../lib/tapProbeBus';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
@@ -101,9 +102,22 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
 
   function update(key, tuneFn) {
     return (v) => {
+      // DEBUG (live pilot bug, round 2) -- see lib/tapProbeBus.js. Safe
+      // to delete once the real cause is found and fixed.
+      probeLog(`AUDIO: update("${key}") called with v=${v}`);
       setValues((prev) => ({ ...prev, [key]: v }));
       tuneFn(v);
     };
+  }
+
+  // The input/output faders and every knob are DELIBERATELY inert while
+  // manualMix is off (Knob's own `disabled` prop, and the input fader's
+  // onChangeGainDb below) -- "Preset sound (locked)" is the default,
+  // by-design state, not a bug. Logged so a report of "the mic level
+  // fader doesn't respond" can be told apart from an actual bug: if this
+  // fires, the control IS wired and IS intentionally a no-op right now.
+  function lockedFaderTap(key) {
+    probeLog(`AUDIO: ${key} fader onChange fired but manualMix is OFF -- intentional no-op (Preset sound is locked)`);
   }
 
   function handleBackingPlayerChange(player) {
@@ -171,7 +185,7 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
             label="Mic level"
             analyser={nodes.inputAnalyser}
             gainDb={values.inputDb}
-            onChangeGainDb={manualMix ? update('inputDb', (v) => tuneInputGainDb(nodes, v)) : () => {}}
+            onChangeGainDb={manualMix ? update('inputDb', (v) => tuneInputGainDb(nodes, v)) : () => lockedFaderTap('inputDb')}
             minDb={-12}
             maxDb={24}
           />
@@ -213,7 +227,7 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
             label="Published level"
             analyser={nodes.outputAnalyser}
             gainDb={values.outputDb}
-            onChangeGainDb={manualMix ? update('outputDb', (v) => tuneOutputGainDb(nodes, v)) : () => {}}
+            onChangeGainDb={manualMix ? update('outputDb', (v) => tuneOutputGainDb(nodes, v)) : () => lockedFaderTap('outputDb')}
             minDb={-12}
             maxDb={12}
           />

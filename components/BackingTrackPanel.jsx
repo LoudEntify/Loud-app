@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { loadBackingTrack } from '../lib/audioProcessing';
+import { probeLog } from '../lib/tapProbeBus';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -112,21 +113,34 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
   }, []);
 
   async function handleFile(e) {
+    // DEBUG (live pilot bug, round 2) -- see lib/tapProbeBus.js. Safe to
+    // delete once the real cause is found and fixed.
+    probeLog(`AUDIO: handleFile() called -- files=${e.target.files?.length ?? 0}, audioContext=${!!audioContext}, outputBus=${!!outputBus}`);
     const file = e.target.files?.[0];
-    if (!file || !audioContext || !outputBus) return;
-    setLoading(true);
-    playerRef.current?.disconnect();
-    const player = await loadBackingTrack(audioContext, outputBus, file);
-    player.setVolume(volume);
-    playerRef.current = player;
-    setDuration(player.duration);
-    setPeaks(computePeaks(player.audioBuffer));
-    setFileName(file.name);
-    setPlaying(false);
-    setLoading(false);
-    // trackGain/delayNode are created fresh per load -- the parent
-    // re-applies whatever sync compensation is currently calibrated.
-    onPlayerChange?.(player);
+    if (!file || !audioContext || !outputBus) {
+      probeLog(`AUDIO: handleFile() ABORTED early -- file=${!!file} audioContext=${!!audioContext} outputBus=${!!outputBus}`);
+      return;
+    }
+    try {
+      setLoading(true);
+      playerRef.current?.disconnect();
+      const player = await loadBackingTrack(audioContext, outputBus, file);
+      player.setVolume(volume);
+      playerRef.current = player;
+      setDuration(player.duration);
+      setPeaks(computePeaks(player.audioBuffer));
+      setFileName(file.name);
+      setPlaying(false);
+      setLoading(false);
+      // trackGain/delayNode are created fresh per load -- the parent
+      // re-applies whatever sync compensation is currently calibrated.
+      onPlayerChange?.(player);
+      probeLog(`AUDIO: handleFile() completed -- loaded "${file.name}"`);
+    } catch (err) {
+      probeLog(`AUDIO: handleFile() THREW: ${err?.message || String(err)}`);
+      setLoading(false);
+      throw err;
+    }
   }
 
   function togglePlay() {
