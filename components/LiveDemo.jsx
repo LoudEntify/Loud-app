@@ -93,6 +93,116 @@ function SourceDimsDebugLabel({ state, style }) {
 // full cut-timing debug-bus history moved to components/ShotRendering.jsx
 // (Stage 4) -- imported above.
 
+// DEBUG -- live pilot bug: several deck controls (Choose audio file,
+// Cancel/Dismiss after starting calibration, the input meter, SHOTS
+// buttons) are STILL dead after two CSS/JS fixes (SwipePages pointer-
+// capture, deck-wrapper mobile overflow). Both those fixes were
+// mobile-width-specific -- if the real device is desktop-width, neither
+// could have touched this, which is exactly the kind of wrong-hypothesis
+// risk that makes guess-fixing a third time pointless. This instruments
+// the REAL device instead of a local reproduction: a capture-phase
+// listener on document (fires before any element's own handler can stop
+// propagation, so it sees the truth even if something IS swallowing the
+// event downstream) logs, per tap: the coordinates, what
+// document.elementFromPoint(x, y) reports sits at that exact point right
+// now, and what the browser actually dispatched the event to (e.target)
+// -- captured on BOTH pointerdown and click, since a mismatch between
+// those two, or a pointerdown with no click ever following it, are two
+// different failure signatures (an overlay stealing the tap vs. capture
+// eating the event entirely). pointerEvents:none on the readout itself so
+// it can never be the thing intercepting a tap. Safe to delete once the
+// real cause is found and fixed -- not meant for artist-facing use.
+function describeEl(el) {
+  if (!el) return 'null';
+  const cls = el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : '';
+  const txt = el.textContent ? ` "${el.textContent.trim().slice(0, 24)}"` : '';
+  return `${el.tagName}${cls}${txt}`;
+}
+
+function useTapProbe(enabled) {
+  const [log, setLog] = useState([]);
+  const pendingRef = useRef(null);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    function onPointerDown(e) {
+      const x = e.clientX;
+      const y = e.clientY;
+      const atPoint = document.elementFromPoint(x, y);
+      const entry = {
+        id: Date.now() + Math.random(),
+        x: Math.round(x),
+        y: Math.round(y),
+        downTarget: describeEl(e.target),
+        downAtPoint: describeEl(atPoint),
+        clickTarget: null,
+        gotClick: false,
+      };
+      pendingRef.current = entry;
+      setLog((prev) => [...prev.slice(-5), entry]);
+    }
+
+    function onClick(e) {
+      const pending = pendingRef.current;
+      if (!pending) return;
+      pending.gotClick = true;
+      pending.clickTarget = describeEl(e.target);
+      setLog((prev) => prev.map((l) => (l.id === pending.id ? { ...pending } : l)));
+      pendingRef.current = null;
+    }
+
+    // Capture phase (true) -- runs before any descendant's own listener,
+    // including one that calls stopPropagation(), so this always sees
+    // the real target/point regardless of what happens deeper in the tree.
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, [enabled]);
+
+  return log;
+}
+
+function TapProbeOverlay({ enabled }) {
+  const log = useTapProbe(enabled);
+  if (!enabled) return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 4,
+        left: 4,
+        maxWidth: 340,
+        maxHeight: '55vh',
+        overflow: 'auto',
+        background: 'rgba(0,0,0,0.88)',
+        color: '#39ff88',
+        fontFamily: 'monospace',
+        fontSize: 10,
+        lineHeight: 1.4,
+        padding: '6px 8px',
+        borderRadius: 6,
+        border: '1px solid rgba(57,255,136,0.4)',
+        zIndex: 999999,
+        pointerEvents: 'none',
+        whiteSpace: 'pre-wrap',
+      }}
+    >
+      TAP PROBE -- last {log.length} tap(s):
+      {log.length === 0 && '\n(tap anywhere)'}
+      {[...log].reverse().map((l) => (
+        <div key={l.id} style={{ marginTop: 6, borderTop: '1px solid rgba(57,255,136,0.25)', paddingTop: 4 }}>
+          {`@(${l.x},${l.y})\ndown target: ${l.downTarget}\ndown elementFromPoint: ${l.downAtPoint}\nclick fired: ${l.gotClick ? 'yes' : 'NO -- swallowed before click'}${l.gotClick ? `\nclick target: ${l.clickTarget}` : ''}`}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatCountdown(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const mm = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
@@ -1491,11 +1601,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         </div>
       )}
 
-      {isMainPerformer && (
-        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 50 }}>
-          <SourceDimsDebugLabel state={sourceDims} style={{ position: 'static' }} />
-        </div>
-      )}
+      <TapProbeOverlay enabled={isMainPerformer} />
 
       {isMainPerformer ? (
         <BroadcastStage
