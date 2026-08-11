@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { probeLog } from '../lib/tapProbeBus';
 
 // Phase 3 (redesign) -- the performer's technical controls (SHOTS, AUDIO,
 // VIDEO) used to be TWO separate things: PerformerDeck's own internal
@@ -76,6 +77,45 @@ export default function SwipePages({ pages }) {
     }
     setDragDelta(0);
   };
+
+  // Hardening (live pilot bug investigation, round 4) -- a mouse's
+  // pointerId is the SAME value for every mouse interaction in the tab
+  // (unlike touch, where each new contact gets a fresh id), so if a
+  // capture ever gets left engaged without its matching pointerup/
+  // pointercancel ever reaching this element -- e.g. a real mouse click
+  // that drifts past DRAG_START_THRESHOLD_PX while a native OS dialog
+  // (the file picker) is opening as a side effect of that same click --
+  // the browser would keep routing EVERY subsequent mouse interaction
+  // ANYWHERE on the page to this captured element, since it's still the
+  // same pointerId forever. That reads exactly as "works once, every
+  // click after is dead," and only on desktop (mobile's file picker
+  // doesn't take OS-level window focus the same way, and each touch gets
+  // its own pointerId regardless). window blur is the one signal
+  // available for "focus left the page for a reason JS can't see inside"
+  // -- forcing a reset here means a gesture can never stay wedged past
+  // whatever interrupted it, independent of confirming the exact trigger.
+  useEffect(() => {
+    function onBlur() {
+      if (!draggingRef.current && activePointerIdRef.current === null) return;
+      // If this ever fires, it's direct, positive confirmation of the
+      // theory: a gesture was genuinely left mid-flight (capture engaged
+      // or a pointer tracked) at the moment focus left the page.
+      probeLog(`SwipePages: window blur with a gesture in flight -- dragging=${draggingRef.current}, pointerId=${activePointerIdRef.current}. Forcing reset + releasing capture.`);
+      const pointerId = activePointerIdRef.current;
+      draggingRef.current = false;
+      activePointerIdRef.current = null;
+      setDragDelta(0);
+      if (pointerId !== null) {
+        try {
+          viewportRef.current?.releasePointerCapture(pointerId);
+        } catch {
+          // no-op -- already released or never captured, nothing to clean up
+        }
+      }
+    }
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
 
   return (
     <div>

@@ -152,7 +152,10 @@ function useTapProbe(enabled) {
 
     function push(entry) {
       idRef.current += 1;
-      setLog((prev) => [...prev.slice(-11), { id: idRef.current, ...entry }]);
+      // Bumped from 12 -- the Video->Audio->Choose-music repro plus
+      // blur/focus tracking plus the broken clicks after it easily runs
+      // past a 12-entry buffer before the user can read/report it.
+      setLog((prev) => [...prev.slice(-34), { id: idRef.current, ...entry }]);
     }
 
     function onPointerDown(e) {
@@ -182,6 +185,27 @@ function useTapProbe(enabled) {
       push({ kind: 'error', text: `UNHANDLED REJECTION: ${e.reason?.message || e.reason}` });
     }
 
+    // DEBUG (round 4) -- desktop-only repro: Video -> Audio -> "Choose
+    // music" works once, everything after it stops. Desktop's native
+    // file-open dialog is an OS-level window that steals focus from the
+    // browser tab entirely (mobile's file picker is an in-page/OS sheet
+    // that doesn't do this the same way) -- exactly the kind of thing
+    // that's invisible to a click/pointerdown probe but would explain
+    // "desktop only" and "breaks right after the file button" in one
+    // shot. These log the moment the window loses/regains OS focus and
+    // the moment the document's own visibility state changes, so we can
+    // see directly whether either coincides with the exact tap where
+    // things stop responding.
+    function onBlur() {
+      push({ kind: 'focus', text: 'window BLUR -- page lost OS focus (native dialog opening?)' });
+    }
+    function onFocus() {
+      push({ kind: 'focus', text: 'window FOCUS -- page regained OS focus' });
+    }
+    function onVisibility() {
+      push({ kind: 'focus', text: `document visibilitychange -> ${document.visibilityState}` });
+    }
+
     // Fed by probeLog() calls placed directly inside the suspect
     // handlers (DirectorShotPanel's fire, BackingTrackPanel's handleFile,
     // CalibrateSyncPanel's cancel/dismiss, LevelMeterFader's gain change)
@@ -202,11 +226,17 @@ function useTapProbe(enabled) {
     document.addEventListener('click', onClick, true);
     window.addEventListener('error', onWindowError);
     window.addEventListener('unhandledrejection', onRejection);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('click', onClick, true);
       window.removeEventListener('error', onWindowError);
       window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
       offProbeLog();
     };
   }, [enabled]);
@@ -218,7 +248,7 @@ function TapProbeOverlay({ enabled }) {
   const log = useTapProbe(enabled);
   if (!enabled) return null;
 
-  const KIND_COLOR = { pointerdown: '#39ff88', click: '#7fd4ff', error: '#ff5c5c', handler: '#ffd166' };
+  const KIND_COLOR = { pointerdown: '#39ff88', click: '#7fd4ff', error: '#ff5c5c', handler: '#ffd166', focus: '#c792ea' };
 
   return (
     <div
