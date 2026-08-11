@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState, useEffect } from 'react';
-import { probeLog } from '../lib/tapProbeBus';
 
 // Phase 3 (redesign) -- the performer's technical controls (SHOTS, AUDIO,
 // VIDEO) used to be TWO separate things: PerformerDeck's own internal
@@ -14,108 +13,127 @@ import { probeLog } from '../lib/tapProbeBus';
 // never moves. Fully generic (pages: [{key, label, content}]) -- doesn't
 // know or care what's actually inside each page.
 //
-// Pointer events (not touch-specific) for the drag, matching the same
-// pattern VersusSplit's divider and BroadcastStage's own deck-resize
-// divider already use elsewhere in this app -- one consistent gesture
-// idiom, not a new one just for this.
+// Round 5 rewrite -- CAPTURE-FREE by design, not another edge-case patch.
+// Every earlier version of this file (rounds 1-4) used
+// element.setPointerCapture() to keep tracking the pointer once a drag
+// started. That mechanism has a global side effect that's easy to
+// underestimate: once engaged, EVERY subsequent pointer event for that
+// pointerId, page-wide, is redirected to the capturing element until an
+// up/cancel event arrives. On desktop, a mouse has exactly ONE pointerId
+// for the entire tab's lifetime -- so any interruption that loses that
+// release event (a native file dialog stealing focus, a <select> opening,
+// literally any modal) silently froze mouse input for the WHOLE PAGE,
+// not just this component, until reload. Touch never hit this because
+// each contact gets a fresh pointerId, so a stuck capture from one
+// gesture can't contaminate the next touch. Rounds 1 and 4 patched
+// individual interruption sources (defer capture past a movement
+// threshold; reset on window blur) -- both were narrowing the list of
+// ways the release event could be lost, not removing the mechanism whose
+// failure mode was severe every time that list was incomplete.
 //
-// Fix (live pilot bug): capture used to be grabbed on the viewport
-// immediately on pointerdown, before it was known whether the gesture was
-// a swipe or a plain tap. A captured element becomes the sole target of
-// all subsequent pointer events for that pointerId -- so tapping any
-// control INSIDE a page (audio knobs/faders, shot buttons, video toggles)
-// handed its pointerup to the viewport instead of the button, and the
-// browser's click never reached it. The swipe-pages-tabs row above was
-// never affected since it sits outside this viewport, which is exactly
-// why tab-switching kept working while every in-panel control went dead.
-// Capture is now deferred to onPointerMove, only once real horizontal
-// movement proves this is actually a drag -- a tap-and-release with no
-// meaningful movement never captures anything, so its native click reaches
-// whatever was actually tapped, untouched.
+// This version never calls setPointerCapture at all. Pointer position is
+// tracked via listeners on `window` (not the element), attached once and
+// gated internally on whether a gesture is actually in progress --
+// window-level listeners keep firing wherever the pointer physically is,
+// giving the identical "track movement even outside my box" property
+// capture provided, without ever monopolizing anyone else's events. If a
+// release event is STILL missed for some reason nobody's thought of yet,
+// the worst case is a stale internal ref in THIS component alone -- the
+// swipe transform might sit mid-drag until the next gesture starts fresh
+// -- never a page-wide click freeze, because nothing is ever captured in
+// the first place. It's also self-healing: gestureRef is a single object,
+// fully replaced (not mutated piecemeal) on every new pointerdown, so
+// even a hypothetically stuck previous gesture is wiped the instant the
+// next one starts.
+//
+// Uniform across desktop and mobile by construction, not by branching on
+// pointerType: each gesture captures whatever pointerId it's given at
+// pointerdown into a fresh object, and only that gesture's own
+// move/up/cancel events are matched against it -- doesn't matter whether
+// the NEXT gesture reuses the same id (desktop) or gets a new one
+// (mobile), since every gesture starts from a clean object either way.
 const DRAG_START_THRESHOLD_PX = 8;
 
 export default function SwipePages({ pages }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [dragDelta, setDragDelta] = useState(0);
-  const draggingRef = useRef(false);
-  const activePointerIdRef = useRef(null);
-  const dragStartXRef = useRef(0);
   const viewportRef = useRef(null);
 
-  const onPointerDown = (e) => {
-    activePointerIdRef.current = e.pointerId;
-    dragStartXRef.current = e.clientX;
-    // Deliberately no setPointerCapture here -- see fix note above.
-  };
+  // The one source of truth for "is a gesture in progress and what do we
+  // know about it" -- null when idle. A single object (not several
+  // separate refs the way rounds 1-4 had it) so there's no way for
+  // pieces of gesture state to disagree with each other or survive only
+  // partially reset.
+  const gestureRef = useRef(null);
 
-  const onPointerMove = (e) => {
-    if (activePointerIdRef.current !== e.pointerId) return;
-    const delta = e.clientX - dragStartXRef.current;
-    if (!draggingRef.current) {
-      if (Math.abs(delta) < DRAG_START_THRESHOLD_PX) return;
-      draggingRef.current = true;
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-    }
-    setDragDelta(delta);
-  };
-
-  const endDrag = () => {
-    activePointerIdRef.current = null;
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    const viewportWidth = viewportRef.current?.getBoundingClientRect().width || 1;
-    // Swipe past 25% of the viewport's own width to advance a page --
-    // short of that, snap back to where it already was. Dragging past
-    // the first/last page just has nowhere further to go (the track's
-    // own width is exactly pages.length * 100%) -- a small harmless
-    // overshoot at the edges, not a bug worth clamping for a 3-page set.
-    const threshold = viewportWidth * 0.25;
-    if (dragDelta < -threshold && activeIndex < pages.length - 1) {
-      setActiveIndex((i) => i + 1);
-    } else if (dragDelta > threshold && activeIndex > 0) {
-      setActiveIndex((i) => i - 1);
-    }
-    setDragDelta(0);
-  };
-
-  // Hardening (live pilot bug investigation, round 4) -- a mouse's
-  // pointerId is the SAME value for every mouse interaction in the tab
-  // (unlike touch, where each new contact gets a fresh id), so if a
-  // capture ever gets left engaged without its matching pointerup/
-  // pointercancel ever reaching this element -- e.g. a real mouse click
-  // that drifts past DRAG_START_THRESHOLD_PX while a native OS dialog
-  // (the file picker) is opening as a side effect of that same click --
-  // the browser would keep routing EVERY subsequent mouse interaction
-  // ANYWHERE on the page to this captured element, since it's still the
-  // same pointerId forever. That reads exactly as "works once, every
-  // click after is dead," and only on desktop (mobile's file picker
-  // doesn't take OS-level window focus the same way, and each touch gets
-  // its own pointerId regardless). window blur is the one signal
-  // available for "focus left the page for a reason JS can't see inside"
-  // -- forcing a reset here means a gesture can never stay wedged past
-  // whatever interrupted it, independent of confirming the exact trigger.
   useEffect(() => {
-    function onBlur() {
-      if (!draggingRef.current && activePointerIdRef.current === null) return;
-      // If this ever fires, it's direct, positive confirmation of the
-      // theory: a gesture was genuinely left mid-flight (capture engaged
-      // or a pointer tracked) at the moment focus left the page.
-      probeLog(`SwipePages: window blur with a gesture in flight -- dragging=${draggingRef.current}, pointerId=${activePointerIdRef.current}. Forcing reset + releasing capture.`);
-      const pointerId = activePointerIdRef.current;
-      draggingRef.current = false;
-      activePointerIdRef.current = null;
-      setDragDelta(0);
-      if (pointerId !== null) {
-        try {
-          viewportRef.current?.releasePointerCapture(pointerId);
-        } catch {
-          // no-op -- already released or never captured, nothing to clean up
-        }
+    function onMove(e) {
+      const gesture = gestureRef.current;
+      if (!gesture || e.pointerId !== gesture.pointerId) return;
+      const delta = e.clientX - gesture.startX;
+      gesture.lastDelta = delta;
+      if (!gesture.dragging) {
+        if (Math.abs(delta) < DRAG_START_THRESHOLD_PX) return;
+        gesture.dragging = true;
       }
+      setDragDelta(delta);
     }
+
+    function onEnd(e) {
+      const gesture = gestureRef.current;
+      if (!gesture || (e && e.pointerId !== undefined && e.pointerId !== gesture.pointerId)) return;
+      gestureRef.current = null;
+      // A plain tap (never crossed the threshold) never touched dragDelta
+      // -- nothing to resolve, and the click already reached its real
+      // target normally, since we never captured anything.
+      if (!gesture.dragging) return;
+      const viewportWidth = viewportRef.current?.getBoundingClientRect().width || 1;
+      // Swipe past 25% of the viewport's own width to advance a page --
+      // short of that, snap back to where it already was.
+      const threshold = viewportWidth * 0.25;
+      const delta = gesture.lastDelta || 0;
+      if (delta < -threshold) {
+        setActiveIndex((i) => Math.min(i + 1, pages.length - 1));
+      } else if (delta > threshold) {
+        setActiveIndex((i) => Math.max(i - 1, 0));
+      }
+      setDragDelta(0);
+    }
+
+    // Cosmetic only, not a correctness/safety mechanism (unlike round
+    // 4's blur handler, which existed to release a stuck capture -- there
+    // is no capture left to release). Without this, a gesture abandoned
+    // mid-drag by an alt-tab/dialog would leave the panel's CSS transform
+    // visually offset until the next gesture happens to touch it again --
+    // harmless (nothing is blocked), just a stray visual until then. This
+    // just snaps it back immediately instead of leaving it stale.
+    function onBlur() {
+      if (!gestureRef.current) return;
+      gestureRef.current = null;
+      setDragDelta(0);
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
     window.addEventListener('blur', onBlur);
-    return () => window.removeEventListener('blur', onBlur);
-  }, []);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [pages.length]);
+
+  const onPointerDown = (e) => {
+    // No preventDefault, no setPointerCapture -- just remember where this
+    // pointer started. The window listeners above (always attached,
+    // gated internally on gestureRef being non-null) do the rest. A
+    // plain click's native mouseup/click generation is completely
+    // untouched by any of this, on every browser, since we never call
+    // the API that could interfere with it.
+    gestureRef.current = { pointerId: e.pointerId, startX: e.clientX, dragging: false, lastDelta: 0 };
+  };
 
   return (
     <div>
@@ -140,15 +158,12 @@ export default function SwipePages({ pages }) {
         ref={viewportRef}
         className="swipe-pages-viewport"
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
       >
         <div
           className="swipe-pages-track"
           style={{
             transform: `translateX(calc(${-activeIndex * 100}% + ${dragDelta}px))`,
-            transition: draggingRef.current ? 'none' : 'transform 0.25s ease',
+            transition: gestureRef.current?.dragging ? 'none' : 'transform 0.25s ease',
           }}
         >
           {pages.map((p) => (
