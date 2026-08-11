@@ -7,7 +7,6 @@ import {
   CALIBRATION_DISCARD_COUNT,
   SYNC_LARGE_DELAY_WARNING_MS,
 } from '../lib/audioSyncCalibration';
-import { probeLog } from '../lib/tapProbeBus';
 
 const TOTAL_COUNTED = CALIBRATION_REP_COUNT - CALIBRATION_DISCARD_COUNT;
 
@@ -29,7 +28,6 @@ export default function CalibrateSyncPanel({ audioContext, inputGain, syncDelayM
   const controllerRef = useRef(null);
 
   async function startCalibration() {
-    probeLog(`AUDIO: startCalibration() called -- audioContext=${!!audioContext} inputGain=${!!inputGain}`);
     if (!audioContext || !inputGain) return;
     setStatus('running');
     setRepIndex(0);
@@ -45,25 +43,18 @@ export default function CalibrateSyncPanel({ audioContext, inputGain, syncDelayM
   }
 
   function cancelCalibration() {
-    // DEBUG (live pilot bug, round 2) -- see lib/tapProbeBus.js. Safe to
-    // delete once the real cause is found and fixed.
-    probeLog(`AUDIO: cancelCalibration() called -- controller=${controllerRef.current ? 'present' : 'NULL (no-op)'}`);
     controllerRef.current?.cancel();
   }
 
   function applyResult() {
-    probeLog(`AUDIO: applyResult() called -- result.accepted=${!!result?.accepted}`);
     if (!result?.accepted) return;
     onApply(result.compensationMs);
     setCalibratedAt(Date.now());
     setStatus('idle');
-    probeLog('AUDIO: applyResult() completed -- status set to idle');
   }
 
   function dismissResult() {
-    probeLog(`AUDIO: dismissResult() called -- status was "${status}"`);
     setStatus('idle');
-    probeLog('AUDIO: dismissResult() completed -- setStatus(idle) called');
   }
 
   return (

@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { loadBackingTrack } from '../lib/audioProcessing';
-import { probeLog } from '../lib/tapProbeBus';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -113,34 +112,21 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
   }, []);
 
   async function handleFile(e) {
-    // DEBUG (live pilot bug, round 2) -- see lib/tapProbeBus.js. Safe to
-    // delete once the real cause is found and fixed.
-    probeLog(`AUDIO: handleFile() called -- files=${e.target.files?.length ?? 0}, audioContext=${!!audioContext}, outputBus=${!!outputBus}`);
     const file = e.target.files?.[0];
-    if (!file || !audioContext || !outputBus) {
-      probeLog(`AUDIO: handleFile() ABORTED early -- file=${!!file} audioContext=${!!audioContext} outputBus=${!!outputBus}`);
-      return;
-    }
-    try {
-      setLoading(true);
-      playerRef.current?.disconnect();
-      const player = await loadBackingTrack(audioContext, outputBus, file);
-      player.setVolume(volume);
-      playerRef.current = player;
-      setDuration(player.duration);
-      setPeaks(computePeaks(player.audioBuffer));
-      setFileName(file.name);
-      setPlaying(false);
-      setLoading(false);
-      // trackGain/delayNode are created fresh per load -- the parent
-      // re-applies whatever sync compensation is currently calibrated.
-      onPlayerChange?.(player);
-      probeLog(`AUDIO: handleFile() completed -- loaded "${file.name}"`);
-    } catch (err) {
-      probeLog(`AUDIO: handleFile() THREW: ${err?.message || String(err)}`);
-      setLoading(false);
-      throw err;
-    }
+    if (!file || !audioContext || !outputBus) return;
+    setLoading(true);
+    playerRef.current?.disconnect();
+    const player = await loadBackingTrack(audioContext, outputBus, file);
+    player.setVolume(volume);
+    playerRef.current = player;
+    setDuration(player.duration);
+    setPeaks(computePeaks(player.audioBuffer));
+    setFileName(file.name);
+    setPlaying(false);
+    setLoading(false);
+    // trackGain/delayNode are created fresh per load -- the parent
+    // re-applies whatever sync compensation is currently calibrated.
+    onPlayerChange?.(player);
   }
 
   function togglePlay() {
@@ -180,13 +166,7 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
           <span className="control-btn" style={{ display: 'inline-block' }}>
             {loading ? 'Loading...' : 'Choose audio file'}
           </span>
-          <input
-            type="file"
-            accept="audio/*"
-            onChange={handleFile}
-            onClick={() => probeLog('AUDIO: <input type=file> onClick fired -- native dialog should be opening now')}
-            style={{ display: 'none' }}
-          />
+          <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
         </label>
       ) : (
         <>
@@ -220,13 +200,7 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
 
           <label style={{ fontSize: 11, color: '#2ec4b6', cursor: 'pointer' }}>
             Choose a different file
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleFile}
-              onClick={() => probeLog('AUDIO: <input type=file> (different file) onClick fired -- native dialog should be opening now')}
-              style={{ display: 'none' }}
-            />
+            <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
           </label>
         </>
       )}

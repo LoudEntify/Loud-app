@@ -9,7 +9,7 @@ import {
   useDataChannel,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track, RoomEvent } from 'livekit-client';
+import { Track } from 'livekit-client';
 import { VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
@@ -20,7 +20,6 @@ import CameraQRPanel from './CameraQRPanel';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
-import { probeLog, onProbeLog } from '../lib/tapProbeBus';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
@@ -93,195 +92,6 @@ function SourceDimsDebugLabel({ state, style }) {
 // CUT_DEBUG_ENABLED/logCutDebug/CutTimingDebugOverlay/trackKey and the
 // full cut-timing debug-bus history moved to components/ShotRendering.jsx
 // (Stage 4) -- imported above.
-
-// DEBUG -- live pilot bug: several deck controls (Choose audio file,
-// Cancel/Dismiss after starting calibration, the input meter, SHOTS
-// buttons) are STILL dead after two CSS/JS fixes (SwipePages pointer-
-// capture, deck-wrapper mobile overflow). Both those fixes were
-// mobile-width-specific -- if the real device is desktop-width, neither
-// could have touched this, which is exactly the kind of wrong-hypothesis
-// risk that makes guess-fixing a third time pointless. This instruments
-// the REAL device instead of a local reproduction: a capture-phase
-// listener on document (fires before any element's own handler can stop
-// propagation, so it sees the truth even if something IS swallowing the
-// event downstream) logs, per tap: the coordinates, what
-// document.elementFromPoint(x, y) reports sits at that exact point right
-// now, and what the browser actually dispatched the event to (e.target)
-// -- captured on BOTH pointerdown and click, since a mismatch between
-// those two, or a pointerdown with no click ever following it, are two
-// different failure signatures (an overlay stealing the tap vs. capture
-// eating the event entirely). pointerEvents:none on the readout itself so
-// it can never be the thing intercepting a tap. Safe to delete once the
-// real cause is found and fixed -- not meant for artist-facing use.
-function describeEl(el) {
-  if (!el) return 'null';
-  const cls = el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : '';
-  const txt = el.textContent ? ` "${el.textContent.trim().slice(0, 24)}"` : '';
-  return `${el.tagName}${cls}${txt}`;
-}
-
-// Round 2: the probe data came back clean -- clicks land on the right
-// element every time. So the gap isn't event DELIVERY, it's whether
-// REACT'S OWN synthetic onClick, attached via its single delegated
-// listener, actually runs once the native event gets there. A native
-// capture-phase document listener (below) fires on the way DOWN to the
-// target and proves delivery -- but it can't see anything that happens
-// during the BUBBLE phase afterward, which is where React's delegated
-// listener actually lives. This checks for that gap directly: every DOM
-// element React attaches props/handlers to carries an internal
-// `__reactProps$<id>` (or, older React, `__reactEventHandlers$<id>`) key.
-// If the tapped element is missing that key, React never wired it at
-// all -- direct, conclusive evidence of a hydration/mount failure on
-// that specific node, independent of anything happening in the event's
-// propagation path.
-function reactPropsKeyStatus(el) {
-  if (!el) return 'n/a (no element)';
-  const keys = Object.keys(el);
-  const hit = keys.find((k) => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-  if (hit) return `YES (${hit})`;
-  const fiberHit = keys.find((k) => k.startsWith('__reactFiber$'));
-  return fiberHit ? 'fiber present but NO props key -- suspicious' : 'NO -- React never attached to this node';
-}
-
-function useTapProbe(enabled) {
-  const [log, setLog] = useState([]);
-  const idRef = useRef(0);
-
-  useEffect(() => {
-    if (!enabled) return undefined;
-
-    function push(entry) {
-      idRef.current += 1;
-      // Bumped from 12 -- the Video->Audio->Choose-music repro plus
-      // blur/focus tracking plus the broken clicks after it easily runs
-      // past a 12-entry buffer before the user can read/report it.
-      setLog((prev) => [...prev.slice(-34), { id: idRef.current, ...entry }]);
-    }
-
-    function onPointerDown(e) {
-      const x = e.clientX;
-      const y = e.clientY;
-      const atPoint = document.elementFromPoint(x, y);
-      push({
-        kind: 'pointerdown',
-        text: `@(${Math.round(x)},${Math.round(y)})\ntarget: ${describeEl(e.target)}\nelementFromPoint: ${describeEl(atPoint)}\nReact attached: ${reactPropsKeyStatus(e.target)}`,
-      });
-    }
-
-    // NOT gated to "first click per tap" -- some interactions (a <label>
-    // wrapping a hidden file <input>) legitimately fire a SECOND,
-    // browser-forwarded click on a different element right after the
-    // first. Logging every click, unfiltered, is the only way to see
-    // whether that forwarding actually happens.
-    function onClick(e) {
-      push({ kind: 'click', text: `click -> ${describeEl(e.target)}\nReact attached: ${reactPropsKeyStatus(e.target)}` });
-    }
-
-    function onWindowError(e) {
-      push({ kind: 'error', text: `JS ERROR: ${e.message}\n${e.filename ? `${e.filename}:${e.lineno}` : ''}` });
-    }
-
-    function onRejection(e) {
-      push({ kind: 'error', text: `UNHANDLED REJECTION: ${e.reason?.message || e.reason}` });
-    }
-
-    // DEBUG (round 4) -- desktop-only repro: Video -> Audio -> "Choose
-    // music" works once, everything after it stops. Desktop's native
-    // file-open dialog is an OS-level window that steals focus from the
-    // browser tab entirely (mobile's file picker is an in-page/OS sheet
-    // that doesn't do this the same way) -- exactly the kind of thing
-    // that's invisible to a click/pointerdown probe but would explain
-    // "desktop only" and "breaks right after the file button" in one
-    // shot. These log the moment the window loses/regains OS focus and
-    // the moment the document's own visibility state changes, so we can
-    // see directly whether either coincides with the exact tap where
-    // things stop responding.
-    function onBlur() {
-      push({ kind: 'focus', text: 'window BLUR -- page lost OS focus (native dialog opening?)' });
-    }
-    function onFocus() {
-      push({ kind: 'focus', text: 'window FOCUS -- page regained OS focus' });
-    }
-    function onVisibility() {
-      push({ kind: 'focus', text: `document visibilitychange -> ${document.visibilityState}` });
-    }
-
-    // Fed by probeLog() calls placed directly inside the suspect
-    // handlers (DirectorShotPanel's fire, BackingTrackPanel's handleFile,
-    // CalibrateSyncPanel's cancel/dismiss, LevelMeterFader's gain change)
-    // -- lib/tapProbeBus.js. If a tap logs [click] but never logs a
-    // matching [handler] line, React's onClick never actually ran for
-    // that element, no matter what the click/React-attached lines above
-    // say. If [handler] logs but nothing changes on screen, the handler
-    // itself ran fine and the bug is downstream (state not reflected in
-    // render), a different problem than "the click didn't work."
-    const offProbeLog = onProbeLog((message) => push({ kind: 'handler', text: message }));
-
-    // Capture phase (true) -- runs before any descendant's own listener,
-    // including one that calls stopPropagation(), so this always sees
-    // the real target/point regardless of what happens deeper in the tree
-    // ON THE WAY DOWN. It can't see interference during the bubble phase
-    // afterward -- that's what reactPropsKeyStatus is for instead.
-    document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('click', onClick, true);
-    window.addEventListener('error', onWindowError);
-    window.addEventListener('unhandledrejection', onRejection);
-    window.addEventListener('blur', onBlur);
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('click', onClick, true);
-      window.removeEventListener('error', onWindowError);
-      window.removeEventListener('unhandledrejection', onRejection);
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-      offProbeLog();
-    };
-  }, [enabled]);
-
-  return log;
-}
-
-function TapProbeOverlay({ enabled }) {
-  const log = useTapProbe(enabled);
-  if (!enabled) return null;
-
-  const KIND_COLOR = { pointerdown: '#39ff88', click: '#7fd4ff', error: '#ff5c5c', handler: '#ffd166', focus: '#c792ea' };
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 4,
-        left: 4,
-        maxWidth: 360,
-        maxHeight: '60vh',
-        overflow: 'auto',
-        background: 'rgba(0,0,0,0.9)',
-        color: '#39ff88',
-        fontFamily: 'monospace',
-        fontSize: 10,
-        lineHeight: 1.4,
-        padding: '6px 8px',
-        borderRadius: 6,
-        border: '1px solid rgba(57,255,136,0.4)',
-        zIndex: 999999,
-        pointerEvents: 'none',
-        whiteSpace: 'pre-wrap',
-      }}
-    >
-      TAP PROBE v2 -- last {log.length} event(s):
-      {log.length === 0 && '\n(tap anywhere)'}
-      {[...log].reverse().map((l) => (
-        <div key={l.id} style={{ marginTop: 6, borderTop: '1px solid rgba(57,255,136,0.25)', paddingTop: 4, color: KIND_COLOR[l.kind] || '#39ff88' }}>
-          [{l.kind}] {l.text}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function formatCountdown(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -838,39 +648,6 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
-
-  // DEBUG (live pilot bug, round 3 -- "PC manager is closed" investigation)
-  // -- see lib/tapProbeBus.js. Logs the room's actual connection-health
-  // events directly into the same on-screen feed, instead of only seeing
-  // the SDK's raw uncaught-rejection text after the fact. Disconnected
-  // fires "when room.disconnect() is called OR when an unrecoverable
-  // connection issue had occurred" (livekit-client's own doc comment) --
-  // logging the reason distinguishes an intentional leave from a real
-  // dropped connection, which is exactly the question here. Safe to
-  // delete once the real cause is found and fixed.
-  useEffect(() => {
-    if (!room) return undefined;
-    const onReconnecting = () => probeLog('ROOM: Reconnecting -- media connection interrupted, attempting to restore');
-    const onSignalReconnecting = () => probeLog('ROOM: SignalReconnecting -- signaling connection interrupted');
-    const onReconnected = () => probeLog('ROOM: Reconnected -- connection restored');
-    const onDisconnected = (reason) => probeLog(`ROOM: Disconnected -- reason=${reason ?? 'unknown'} (this closes pcManager; anything that touches the room after this throws "PC manager is closed")`);
-    const onConnectionStateChanged = (state) => probeLog(`ROOM: ConnectionStateChanged -> ${state}`);
-    room
-      .on(RoomEvent.Reconnecting, onReconnecting)
-      .on(RoomEvent.SignalReconnecting, onSignalReconnecting)
-      .on(RoomEvent.Reconnected, onReconnected)
-      .on(RoomEvent.Disconnected, onDisconnected)
-      .on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
-    probeLog(`ROOM: probe attached -- current state=${room.state}`);
-    return () => {
-      room
-        .off(RoomEvent.Reconnecting, onReconnecting)
-        .off(RoomEvent.SignalReconnecting, onSignalReconnecting)
-        .off(RoomEvent.Reconnected, onReconnected)
-        .off(RoomEvent.Disconnected, onDisconnected)
-        .off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
-    };
-  }, [room]);
 
   // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
   // only. Second link in the chain, between "did the SHOT_COMMAND arrive"
@@ -1713,8 +1490,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           )}
         </div>
       )}
-
-      <TapProbeOverlay enabled={isMainPerformer} />
 
       {isMainPerformer ? (
         <BroadcastStage
