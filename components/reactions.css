@@ -595,6 +595,30 @@ button {
   background: transparent;
   border-right: none;
   z-index: 20;
+  /* Fix (live pilot bug) -- the sidebar's own box is still the SAME
+     width:232px/height:100vh as the base .sidebar rule above; only
+     `position` changed here, from a sticky flex participant to a fixed
+     overlay. Its real content (header + ~5 nav items) only fills the
+     TOP portion of that box -- on every other page that's harmless,
+     since the sidebar there is a normal-flow participant with nothing
+     positioned underneath it. On the live page it's a z-index:20 overlay
+     sitting in the SAME left:0 column as the deck's bottom-left corner
+     (.stage-bottom-overlay, z-index:10) -- and the EMPTY lower portion
+     of the nav's own 100vh box, not just its visible nav items, was
+     still part of its hit-testable area, silently swallowing every
+     click that landed there before it could reach the deck underneath.
+     Confirmed directly: tapping a bottom-left SHOTS/AUDIO/VIDEO control
+     returned NAV.sidebar from elementFromPoint, not the button. Same
+     click-through-by-default pattern as .stage-side-panel above --
+     default the whole element to click-through, opt the actual
+     interactive pieces back in individually below. */
+  pointer-events: none;
+}
+
+.page-shell--live .sidebar-header,
+.page-shell--live .sidebar-nav,
+.page-shell--live .sidebar-collapse-btn {
+  pointer-events: auto;
 }
 
 .page-shell--live .page-shell-main {
