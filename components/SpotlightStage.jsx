@@ -1,7 +1,6 @@
 'use client';
 
 import { CaretLeft, CaretRight } from '@phosphor-icons/react';
-import { logTap } from '../lib/tapDebug';
 
 // Stage 5 of MULTI_PERFORMER_SPEC.md, generalized for N performer slots,
 // then corrected against real feedback twice more: (1) the thumbnail
@@ -67,15 +66,7 @@ export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch
                 type="button"
                 className="spotlight-thumbnail-tile spotlight-thumbnail-tile--interactive"
                 disabled={switching}
-                onTouchStart={() => logTap(`[${slot}] touchstart (disabled=${switching})`)}
-                onTouchMove={() => logTap(`[${slot}] touchmove (movement detected -- may cancel the click as a scroll gesture)`)}
-                onTouchEnd={() => logTap(`[${slot}] touchend`)}
-                onPointerDown={() => logTap(`[${slot}] pointerdown`)}
-                onPointerUp={() => logTap(`[${slot}] pointerup`)}
-                onClick={() => {
-                  logTap(`[${slot}] CLICK FIRED -> calling onSwitch`);
-                  onSwitch(slot);
-                }}
+                onClick={() => onSwitch(slot)}
               >
                 {renderSlot(slot)()}
               </button>
