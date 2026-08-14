@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback } from 'react';
-import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp, CaretLeft } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp, CaretLeft, CaretRight } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
@@ -96,6 +96,10 @@ export default function BroadcastStage({
   onToggleDeckCollapsed,
   commentsCollapsed,
   onToggleCommentsCollapsed,
+  feedsCollapsed,
+  onToggleFeedsCollapsed,
+  controlsCollapsed,
+  onToggleControlsCollapsed,
 }) {
   const otherSlot = role === 'a' ? 'b' : 'a';
   const candidates = tracksForSlot(role);
@@ -168,6 +172,8 @@ export default function BroadcastStage({
             renderSlot={renderSlot}
             onSwitch={role === 'a' ? onSwitchActivePerformer : undefined}
             switching={switchingPerformer}
+            collapsed={feedsCollapsed}
+            onToggleCollapse={onToggleFeedsCollapsed}
           />
         ) : (
           <VersusSplit
@@ -194,7 +200,18 @@ export default function BroadcastStage({
           coherent group now, not a separately-floating element hoping
           not to collide with something else. */}
       <div className="stage-bottom-overlay">
-        <div className="stage-mic-cam">
+        {/* Mobile declutter (post-Stage-5 fix, MULTI_PERFORMER_SPEC.md) --
+            this whole row moves to a right-docked column sharing the
+            bottom band with the spotlight feeds strip (mobile-only CSS;
+            desktop keeps its existing full-width row, untouched). This
+            is what removes the mic-cam bar's z-index collision with the
+            feeds strip underneath it (the actual switch-tap bug) by
+            construction: the two groups no longer occupy the same
+            screen space at all, on any axis. --collapsed hides it
+            (mobile only) in favor of stage-controls-reveal-tab below;
+            the collapse arrow itself only renders/shows on mobile (CSS),
+            same convention as .deck-collapse-btn/.comments-collapse-btn. */}
+        <div className={`stage-mic-cam ${controlsCollapsed ? 'stage-mic-cam--collapsed' : ''}`}>
           <button type="button" className={`control-btn ${!micOn ? 'off' : ''}`} onClick={toggleMic}>
             {micOn ? <Microphone size={16} weight="bold" /> : <MicrophoneSlash size={16} weight="bold" />}
             {micOn ? 'MIC ON' : 'MIC MUTED'}
@@ -211,7 +228,26 @@ export default function BroadcastStage({
             <PhoneDisconnect size={16} weight="bold" />
             LEAVE
           </button>
+          <button
+            type="button"
+            className="stage-controls-collapse-btn"
+            onClick={onToggleControlsCollapsed}
+            aria-label="hide controls"
+          >
+            <CaretRight size={14} weight="bold" />
+          </button>
         </div>
+
+        {controlsCollapsed && (
+          <button
+            type="button"
+            className="stage-controls-reveal-tab"
+            onClick={onToggleControlsCollapsed}
+            aria-label="show controls"
+          >
+            <CaretLeft size={16} weight="bold" />
+          </button>
+        )}
 
         {/* Down/up arrow -- collapses/restores the deck below, independent
             of the drag-resize divider (which stays desktop-only and is

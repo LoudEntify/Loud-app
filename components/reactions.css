@@ -1152,7 +1152,8 @@ button {
 .stage-side-panel .comment-row,
 .stage-side-panel .comment-input-row,
 .stage-side-panel .composing-context,
-.stage-side-panel .comment-action-menu {
+.stage-side-panel .comment-action-menu,
+.stage-side-panel .stage-side-panel-header {
   pointer-events: auto;
 }
 
@@ -1393,8 +1394,166 @@ button {
      width; object-fit:cover in ShotTransformFrame handles the rest,
      same mechanism the viewer already relies on. */
 
+  /* Mobile declutter fix (post-Stage-5, MULTI_PERFORMER_SPEC.md) -- root
+     cause of the switch-tap-on-mobile bug, confirmed via
+     elementsFromPoint before writing this, not guessed: .stage-mic-cam
+     (fixed, z-index:10, full width, bottom:0) and .spotlight-thumbnail-
+     row (bottom:0, z-index:2, also full width) occupied the SAME
+     bottom band -- every tap on a tile in that shared region hit the
+     mic-cam bar's hit-box first. Fix is spatial, not a z-index bump:
+     one shared bottom band, split left/right, so the two groups never
+     share screen space at all. CONTROLS_ZONE_WIDTH (140px) and
+     BAND_HEIGHT (72px) are the two numbers that tie this block and the
+     .spotlight-thumbnail-row overrides below together -- change one,
+     change both. Deliberately NOT dynamic (feeds strip doesn't expand
+     into the controls zone when controls collapse, or vice versa) --
+     fixed zones are simpler and safer under time pressure than a second
+     layer of reflow logic; revisit post-pilot if it reads as cramped. */
   .stage-mic-cam {
-    gap: 10px 14px;
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    width: 140px;
+    height: 72px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  /* Icon-only on mobile -- "MIC ON"/"CAM ON"/"FRONT"/"LEAVE" text
+     doesn't fit a 4-up grid in 140px. Icons alone are still
+     unambiguous (mic/camera/rotate/phone-hang-up are all standard,
+     recognizable glyphs) -- confirmed by this exact same reasoning the
+     desktop button already uses in the LEAVE label. */
+  .stage-mic-cam .control-btn,
+  .stage-mic-cam .leave-btn-inline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .stage-mic-cam .control-btn svg,
+  .stage-mic-cam .leave-btn-inline svg {
+    margin: 0;
+  }
+
+  /* Only rendered/relevant on mobile (BroadcastStage.jsx always renders
+     it, but it's visually meaningless on desktop's full-width row where
+     nothing needs collapsing to make room) -- hidden outside this query. */
+  .stage-controls-collapse-btn {
+    position: absolute;
+    top: -20px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    color: #2ec4b6;
+  }
+
+  .stage-mic-cam--collapsed {
+    display: none;
+  }
+
+  /* Bottom-right corner -- deliberately NOT top:50% like
+     .comments-reveal-tab (same right edge, but that tab already owns
+     the vertical center; this one lives in the bottom band it actually
+     collapsed from, so the two can never occupy the same spot). */
+  .stage-controls-reveal-tab {
+    position: fixed;
+    right: 0;
+    bottom: 8px;
+    z-index: 20;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+    color: #2ec4b6;
+    filter: var(--icon-halo);
+  }
+
+  /* Feeds strip: same shared bottom band, left of the 140px controls
+     zone. Overrides the desktop/default .spotlight-thumbnail-row rule
+     (bottom:0, full-width, height:96px) -- position:fixed here instead
+     of position:absolute, since this needs to sit relative to the
+     VIEWPORT, matching .stage-mic-cam, not just this component's own
+     stage-video-area box (same box in practice, but fixed is the
+     correct, explicit positioning context for "shares the mic-cam
+     row's band").
+     Scoped to .stage-root--performer specifically -- SpotlightStage is
+     shared with ViewerStage, which has no mic-cam controls at all, so
+     reserving 140px of dead space on a viewer's screen for controls
+     that don't exist there would be a real, self-inflicted bug, not
+     just an unnecessary override. */
+  .stage-root--performer .spotlight-thumbnail-row {
+    position: fixed;
+    left: 0;
+    right: 140px;
+    bottom: 0;
+    height: 72px;
+    z-index: 2;
+  }
+
+  .stage-root--performer .spotlight-thumbnail-row--collapsed {
+    display: none;
+  }
+
+  .spotlight-feeds-collapse-btn {
+    position: absolute;
+    top: -20px;
+    left: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    color: #2ec4b6;
+    z-index: 1;
+  }
+
+  /* Bottom-left corner -- deliberately NOT top:50% like
+     .sidebar-reveal-tab--collapse, same reasoning as the controls tab
+     above: that tab owns the vertical center of the left edge, this one
+     owns the bottom band it actually collapsed from. */
+  .spotlight-feeds-reveal-tab {
+    position: fixed;
+    left: 0;
+    bottom: 8px;
+    z-index: 20;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+    color: #2ec4b6;
+    filter: var(--icon-halo);
   }
 
   /* Drag-to-resize is a desktop-only interaction for now -- dragging a

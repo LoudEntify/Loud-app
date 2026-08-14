@@ -905,6 +905,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     });
   }, []);
 
+  // Mobile declutter (post-Stage-5 fix, MULTI_PERFORMER_SPEC.md) -- the
+  // feeds strip and device controls collapse INDEPENDENTLY of each
+  // other and of the deck/comments/QR group above: they occupy a
+  // completely separate screen region (the shared bottom band split
+  // left/right, mobile only), so there's no footprint competition to
+  // coordinate. Both default open.
+  const [feedsCollapsed, setFeedsCollapsed] = useState(false);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const toggleFeedsCollapsed = useCallback(() => setFeedsCollapsed((v) => !v), []);
+  const toggleControlsCollapsed = useCallback(() => setControlsCollapsed((v) => !v), []);
+
   // Matching half of the outer LiveDemo's own sidebar-collapse effect --
   // entering fullscreen declutters these three too, once, on the
   // FALSE->TRUE transition only.
@@ -1762,6 +1773,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
+          feedsCollapsed={feedsCollapsed}
+          onToggleFeedsCollapsed={toggleFeedsCollapsed}
+          controlsCollapsed={controlsCollapsed}
+          onToggleControlsCollapsed={toggleControlsCollapsed}
         />
       ) : displayShowState === 'ended' ? (
         <EndedCard />
