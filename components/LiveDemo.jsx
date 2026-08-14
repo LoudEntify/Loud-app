@@ -1266,9 +1266,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const activePerformerSlot = show?.active_performer_slot || 'a';
   const [switchingPerformer, setSwitchingPerformer] = useState(false);
 
-  // Only ever meaningfully callable from slot 'a' -- ActivePerformerSwitcher
-  // itself is only rendered for role 'a' (BroadcastStage), but the real
-  // authorization is server-side regardless (section 5 of the spec):
+  // Only ever meaningfully callable from slot 'a' -- SpotlightStage's
+  // thumbnail strip is only interactive for role 'a' (BroadcastStage
+  // passes onSwitch only there), but the real authorization is
+  // server-side regardless (section 5 of the spec):
   // a stale/foreign sessionToken is rejected by the route itself.
   const handleSwitchActivePerformer = useCallback(async (targetSlot) => {
     if (!show?.id || !sessionToken) return;

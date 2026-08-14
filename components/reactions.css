@@ -76,32 +76,34 @@ button {
   flex-direction: row;
 }
 
-/* Stage 5 (MULTI_PERFORMER_SPEC.md), generalized for N performer slots
-   -- active performer large on top, every OTHER present slot in a
-   horizontal scrollable strip along the bottom. Same layout on every
-   viewport (per the actual sketch -- the first draft guessed a
-   desktop side-column placement instead; corrected here), so there's
-   no orientation-variant CSS at all, unlike .versus-stage. Own class,
-   own flex ratios -- deliberately NOT reusing .versus-stage's rules
-   (that's the untouched 50/50 draggable split, a different layout
-   concept). Same height:100%-through-flex-stretch mechanism
-   .versus-stage already proved out, so .spotlight-active/.spotlight-
-   thumbnail-tile's children (ShotVideo's own width:100%;height:100%
-   chain) resolve correctly. */
+/* Stage 5 (MULTI_PERFORMER_SPEC.md), generalized for N performer slots,
+   then corrected against real feedback: active performer full-bleed,
+   every OTHER present slot in a horizontal scrollable strip FLOATING
+   over the bottom of that video -- same layout on every viewport (per
+   the actual sketch). First draft used a flex-column split (active
+   pane + a separate row below it), which left a solid Ink band showing
+   through the row's own padding/gaps -- exactly the "blue banner" this
+   fixes. .spotlight-active is now position:absolute;inset:0 (still
+   resolves ShotVideo's own width:100%;height:100% chain correctly --
+   inset:0 gives it a definite box directly from its positioned
+   ancestor, same guarantee .versus-stage's flex-stretch mechanism
+   provided, just via a different CSS mechanism), and the thumbnail row
+   sits on top of it with a fully transparent background -- floating,
+   like every other overlay in this app (TopBar, comments, the deck),
+   never an opaque band. Own class, own layout -- deliberately NOT
+   reusing .versus-stage's rules (that's the untouched 50/50 draggable
+   split, a different layout concept). */
 .spotlight-stage {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   width: 100%;
   height: 100%;
-  gap: 0;
 }
 
 .spotlight-active {
-  position: relative;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   background: transparent;
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .spotlight-reconnecting {
@@ -116,21 +118,43 @@ button {
 }
 
 .spotlight-thumbnail-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   flex-direction: row;
-  flex: 0 0 96px;
+  height: 96px;
   overflow-x: auto;
   gap: 8px;
   padding: 8px;
+  background: transparent;
 }
 
+/* Thin border only -- no per-tile fill either. A solid tile background
+   is the same "opaque band" mistake at a smaller scale; the border
+   alone (plus each tile's own SHOT/LIVE label text, already legible
+   against any video via its text-shadow) is what "subtle, not a band"
+   means here. */
 .spotlight-thumbnail-tile {
   position: relative;
   overflow: hidden;
-  background: #2C2C2A;
+  background: transparent;
+  border: 1px solid rgba(253, 255, 252, 0.35);
   border-radius: 8px;
   flex: 0 0 128px;
   height: 100%;
+}
+
+.spotlight-thumbnail-tile--interactive {
+  padding: 0;
+  cursor: pointer;
+}
+
+.spotlight-thumbnail-tile--interactive:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Phase 1 (build 3c redesign) -- this was the actual source of the blue
@@ -421,6 +445,26 @@ button {
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* Post-Stage-5 fix (MULTI_PERFORMER_SPEC.md) -- lives directly below
+   the comment input, inside the same always-mounted panel, so it
+   inherits that panel's own collapse/reveal/position behavior with no
+   separate state of its own. Transparent background -- whatever
+   .comments-panel already provides behind it is enough. Smaller than
+   the comment textarea's 13px, per spec. */
+.presence-counter {
+  padding: 0 8px 6px;
+  font-size: 11px;
+  background: transparent;
+}
+
+.presence-performers {
+  color: #2ec4b6;
+}
+
+.presence-viewers {
+  color: #fdfffc;
 }
 
 .emoji-toggle {

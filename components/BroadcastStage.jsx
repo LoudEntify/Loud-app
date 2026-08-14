@@ -10,7 +10,6 @@ import SwipePages from './SwipePages';
 import DirectorShotPanel from './DirectorShotPanel';
 import AudioDeckPanel from './AudioDeckPanel';
 import VideoDeckPanel from './VideoDeckPanel';
-import ActivePerformerSwitcher from './ActivePerformerSwitcher';
 
 // Sizing constants for the deck drag-resize / bottom-overlay offset math.
 // MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
@@ -162,6 +161,8 @@ export default function BroadcastStage({
             activeSlot={activePerformerSlot}
             slots={presentSlots}
             renderSlot={renderSlot}
+            onSwitch={role === 'a' ? onSwitchActivePerformer : undefined}
+            switching={switchingPerformer}
           />
         ) : (
           <VersusSplit
@@ -300,26 +301,11 @@ export default function BroadcastStage({
                   />
                 ),
               },
-              // Stage 4 (MULTI_PERFORMER_SPEC.md) -- only slot 'a' (the
-              // broadcast controller) ever sees this tab, and only in a
-              // versus show (nothing to switch between in solo). This is
-              // a UI convenience, not the security boundary -- the real
-              // check is server-side in /api/show/active-performer.
-              ...(role === 'a' && performanceMode === 'versus'
-                ? [{
-                    key: 'switch',
-                    label: 'SWITCH',
-                    content: (
-                      <ActivePerformerSwitcher
-                        slots={presentSlots}
-                        tracksForSlot={tracksForSlot}
-                        activePerformerSlot={activePerformerSlot}
-                        onSwitch={onSwitchActivePerformer}
-                        switching={switchingPerformer}
-                      />
-                    ),
-                  }]
-                : []),
+              // Stage 4's SWITCH tab (ActivePerformerSwitcher) is retired --
+              // superseded by SpotlightStage's own interactive thumbnail
+              // strip (floating on the video itself), which now IS the
+              // switch control for slot 'a'. One row, one meaning, no
+              // duplicate thumbnails between a deck tab and the layout.
             ]}
           />
         </div>

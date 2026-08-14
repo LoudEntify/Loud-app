@@ -1,31 +1,23 @@
 'use client';
 
-// Stage 5 of MULTI_PERFORMER_SPEC.md, generalized for N performer slots
-// (originally built two-slot-shaped, corrected before Stage 6 so egress
-// wouldn't inherit the same limitation). Active performer large on top;
-// every OTHER present slot renders into a horizontal scrollable
-// thumbnail strip along the bottom -- same layout on every viewport,
-// desktop and mobile, per the actual sketch (the first draft guessed a
-// side-column placement on desktop; wrong, corrected here). No
-// orientation detection at all as a result -- unlike VersusSplit (and
-// this component's own first draft), there's nothing left that needs
-// to know landscape vs portrait, so there's no equivalent of today's
-// earlier pointer:coarse-headless bug possible here.
+// Stage 5 of MULTI_PERFORMER_SPEC.md, generalized for N performer slots,
+// then corrected twice more against real feedback: (1) the thumbnail
+// row now floats as a transparent absolute overlay on the full-bleed
+// active video -- matching this app's own established "every live-
+// screen panel is a floating overlay directly on the video" convention
+// (BroadcastStage.jsx's own header comment) -- rather than the first
+// draft's flex-column layout, which left a solid Ink band showing
+// through wherever the row's own padding/gaps weren't covered by a
+// tile. (2) the strip IS the switch control now -- one row, one
+// meaning -- rather than duplicating the same thumbnails in a separate
+// SwipePages tab.
 //
-// `slots` is the live "present" list (LiveDemo.jsx's presentSlots,
-// derived from actual published camera tracks, not from show_slots'
-// seeded list) -- `renderSlot` is the generic per-letter closure each
-// caller already owns, called fresh per slot here rather than
-// pre-invoked into renderA/renderB (the original two-slot-shaped
-// prop contract).
-//
-// Disconnect handling (explicit product decision, not a default):
-// if `activeSlot` itself isn't in `slots` right now (that performer
-// dropped), this does NOT auto-switch to someone else -- the active
-// pane shows a "Reconnecting" placeholder and activePerformerSlot in
-// the shows table is left exactly as it was. Only a deliberate switch
-// (the session-token-guarded route) ever changes who's active.
-export default function SpotlightStage({ activeSlot, slots, renderSlot }) {
+// `onSwitch` is only ever passed by the caller for slot 'a''s own
+// render (BroadcastStage) -- everyone else gets a display-only strip.
+// That's a UI convenience, same as always: the real authorization is
+// server-side in /api/show/active-performer, checked against a session
+// token regardless of what this component renders.
+export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching }) {
   const activePresent = slots.includes(activeSlot);
   const others = slots.filter((s) => s !== activeSlot);
 
@@ -42,11 +34,25 @@ export default function SpotlightStage({ activeSlot, slots, renderSlot }) {
       </div>
       {others.length > 0 && (
         <div className="spotlight-thumbnail-row">
-          {others.map((slot) => (
-            <div key={slot} className="spotlight-thumbnail-tile">
-              {renderSlot(slot)()}
-            </div>
-          ))}
+          {others.map((slot) => {
+            const tile = (
+              <div className="spotlight-thumbnail-tile" key={slot}>
+                {renderSlot(slot)()}
+              </div>
+            );
+            if (!onSwitch) return tile;
+            return (
+              <button
+                key={slot}
+                type="button"
+                className="spotlight-thumbnail-tile spotlight-thumbnail-tile--interactive"
+                onClick={() => onSwitch(slot)}
+                disabled={switching}
+              >
+                {renderSlot(slot)()}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
