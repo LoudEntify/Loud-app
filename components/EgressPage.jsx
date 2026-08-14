@@ -5,23 +5,30 @@
 // Stage 4 -- headless template for LiveKit Room Composite Egress
 // (customBaseUrl), replacing the stock grid layout. Renders the SAME
 // directed view a real viewer sees -- solo's single directed shot, or
-// versus's even split -- with NO UI chrome (no menu, deck, comments,
-// badges), so the recorded file is a clean capture of just the
-// performance.
+// versus's spotlight layout -- with NO UI chrome (no menu, deck,
+// comments, badges), so the recorded file is a clean capture of just
+// the performance.
+//
+// Stage 6 (MULTI_PERFORMER_SPEC.md) -- versus now routes through
+// SpotlightStage (built already-generalized, deliberately, so this
+// stage wouldn't need to be rewritten two-slot-shaped and then
+// corrected again): egress joins like any other viewer, reads
+// shows.active_performer_slot the same way LiveDemo.jsx's RoomInner
+// does, and reconciles on the same ACTIVE_PERFORMER_SWITCH poke --
+// never trusting the raw data-channel payload directly, same security
+// model as everywhere else this exists. Solo stays on VersusSplit,
+// untouched, exactly as before.
 //
 // Reuses the live app's own rendering almost entirely, deliberately:
 // ShotVideo/ShotFadeLayer/ShotTransformFrame (components/
-// ShotRendering.jsx) and VersusSplit are the EXACT same components a
-// real viewer's screen renders through -- same crop/cut/reveal logic,
-// same portrait-crop-aware output, same "no active shot yet -> fall
-// back to the performer's own untransformed camera" default (confirmed
-// directly in ShotTransformFrame: command=null/undefined short-circuits
-// before any transform is ever applied, so a fresh render with nothing
-// chosen yet already shows the raw feed, not black -- no special-casing
-// needed here for that). What's new is small: this page shell, and a
-// minimal SHOT_COMMAND replay (the one data-channel message type that
-// matters here; none of the mic/lifecycle/audio-processing machinery
-// RoomInner also owns).
+// ShotRendering.jsx), VersusSplit, and now SpotlightStage are the EXACT
+// same components a real viewer's screen renders through -- same
+// crop/cut/reveal logic, same portrait-crop-aware output, same "no
+// active shot yet -> fall back to the performer's own untransformed
+// camera" default (confirmed directly in ShotTransformFrame:
+// command=null/undefined short-circuits before any transform is ever
+// applied, so a fresh render with nothing chosen yet already shows the
+// raw feed, not black -- no special-casing needed here for that).
 //
 // LiveKit's Egress service launches a headless Chrome and navigates it
 // to `${customBaseUrl}?url=...&token=...&layout=...` -- `url`/`token`
@@ -36,13 +43,14 @@
 // query param.
 // ─────────────────────────────────────────────────────────────
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { LiveKitRoom, RoomAudioRenderer, useTracks, useDataChannel } from '@livekit/components-react';
+import { LiveKitRoom, RoomAudioRenderer, useTracks, useDataChannel, useRoomContext } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
 import './reactions.css';
 import VersusSplit from './VersusSplit';
+import SpotlightStage from './SpotlightStage';
 import { ShotVideo } from './ShotRendering';
 
 // Plain Ink fill, no text -- the live viewer's own placeholder shows
@@ -92,16 +100,48 @@ function tracksForSlot(tracks, letter) {
 // call pattern (LiveDemo.jsx) as closely as possible, minus everything
 // that isn't the video layer itself.
 function EgressStage({ layout }) {
+  const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   const [activeShot, setActiveShot] = useState({});
   const signaledRef = useRef(false);
+
+  // Stage 6 -- same shows-row read LiveDemo.jsx's RoomInner does (anon
+  // client, RLS already allows open read on `shows`), keyed off the
+  // room egress actually connected to (room.name) rather than a second
+  // hardcoded ROOM_NAME constant that could drift from LiveDemo.jsx's
+  // own. Fetched once on mount and again on every ACTIVE_PERFORMER_
+  // SWITCH poke below -- never on a timer, egress has no lifecycle
+  // banners/lifecycle machinery to justify LiveDemo.jsx's own 15s poll.
+  const [show, setShow] = useState(null);
+  const fetchShow = useCallback(async () => {
+    if (!room?.name) return;
+    try {
+      const { getSupabase } = await import('../lib/supabaseClient');
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('shows')
+        .select('*')
+        .eq('room_name', room.name)
+        .maybeSingle();
+      if (!error) setShow(data);
+    } catch (e) {
+      console.warn('[egress] show fetch failed', e);
+    }
+  }, [room?.name]);
+
+  useEffect(() => {
+    fetchShow();
+  }, [fetchShow]);
 
   // The one data-channel message type this page needs -- the artist
   // device already broadcasts SHOT_COMMANDs to every participant in the
   // room in real time (lib/shotCommands.js's broadcastShotCommand); this
   // headless browser just needs to be another listener, same as any
   // real viewer, for the recording to follow the exact same directed
-  // cuts in sync.
+  // cuts in sync. ACTIVE_PERFORMER_SWITCH (Stage 6) is handled exactly
+  // as LiveDemo.jsx's RoomInner does: never applied directly, only a
+  // signal to re-fetch shows.active_performer_slot, the actual source
+  // of truth (MULTI_PERFORMER_SPEC.md section 5).
   useDataChannel((msg) => {
     let payload;
     try {
@@ -111,6 +151,9 @@ function EgressStage({ layout }) {
     }
     if (payload.type === 'SHOT_COMMAND') {
       setActiveShot((prev) => ({ ...prev, [payload.slot]: payload }));
+    }
+    if (payload.type === 'ACTIVE_PERFORMER_SWITCH') {
+      fetchShow();
     }
   });
 
@@ -173,14 +216,41 @@ function EgressStage({ layout }) {
     );
   };
 
+  // Stage 6 -- same live-track derivation as LiveDemo.jsx's presentSlots
+  // (not filtered on isMuted, same reasoning: muting isn't a disconnect).
+  // Duplicated rather than imported -- presentSlots lives inside
+  // RoomInner's closure in LiveDemo.jsx, not exported, and this is a
+  // handful of lines, not worth restructuring that file to share.
+  const presentSlots = useMemo(() => {
+    const set = new Set();
+    tracks.forEach((t) => {
+      const identity = t.participant.identity;
+      if (identity.startsWith('contestant-')) {
+        const slot = identity.split('-')[1];
+        if (slot) set.add(slot);
+      }
+    });
+    return Array.from(set).sort();
+  }, [tracks]);
+
+  const activePerformerSlot = show?.active_performer_slot || 'a';
+
   return (
     <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', background: '#011627', overflow: 'hidden' }}>
-      <VersusSplit
-        mode={layout === 'versus' ? 'versus' : 'solo'}
-        forceOrientation="portrait"
-        renderA={renderSlot('a')}
-        renderB={renderSlot('b')}
-      />
+      {layout === 'versus' ? (
+        <SpotlightStage
+          activeSlot={activePerformerSlot}
+          slots={presentSlots}
+          renderSlot={renderSlot}
+        />
+      ) : (
+        <VersusSplit
+          mode="solo"
+          forceOrientation="portrait"
+          renderA={renderSlot('a')}
+          renderB={renderSlot('b')}
+        />
+      )}
     </div>
   );
 }
