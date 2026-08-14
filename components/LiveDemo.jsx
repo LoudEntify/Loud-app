@@ -25,6 +25,7 @@ import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/sho
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
+import { logTap } from '../lib/tapDebug';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
@@ -1272,15 +1273,21 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // server-side regardless (section 5 of the spec):
   // a stale/foreign sessionToken is rejected by the route itself.
   const handleSwitchActivePerformer = useCallback(async (targetSlot) => {
-    if (!show?.id || !sessionToken) return;
+    logTap(`handleSwitchActivePerformer(${targetSlot}) called, showId=${show?.id ? 'present' : 'MISSING'} sessionToken=${sessionToken ? 'present' : 'MISSING'}`);
+    if (!show?.id || !sessionToken) {
+      logTap('BAILED OUT: missing show.id or sessionToken -- silent no-op, this is likely the bug if you see this line');
+      return;
+    }
     setSwitchingPerformer(true);
     try {
+      logTap(`fetch /api/show/active-performer targetSlot=${targetSlot} starting`);
       const res = await fetch('/api/show/active-performer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ show_id: show.id, sessionToken, targetSlot }),
       });
       const data = await res.json();
+      logTap(`fetch response status=${res.status} ok=${res.ok} activePerformerSlot=${data.activePerformerSlot} error=${data.error || 'none'}`);
       if (!res.ok) throw new Error(data.error || 'Switch failed');
       console.log('[active-performer] switched ->', data.activePerformerSlot);
       onShowUpdate((prev) => (prev ? { ...prev, active_performer_slot: data.activePerformerSlot } : prev));
@@ -1293,6 +1300,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         { reliable: true }
       );
     } catch (e) {
+      logTap(`fetch threw: ${e.message}`);
       console.error('[active-performer] switch failed:', e);
     } finally {
       setSwitchingPerformer(false);

@@ -1,5 +1,7 @@
 'use client';
 
+import { logTap } from '../lib/tapDebug';
+
 // Stage 5 of MULTI_PERFORMER_SPEC.md, generalized for N performer slots,
 // then corrected twice more against real feedback: (1) the thumbnail
 // row now floats as a transparent absolute overlay on the full-bleed
@@ -46,8 +48,16 @@ export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch
                 key={slot}
                 type="button"
                 className="spotlight-thumbnail-tile spotlight-thumbnail-tile--interactive"
-                onClick={() => onSwitch(slot)}
                 disabled={switching}
+                onTouchStart={() => logTap(`[${slot}] touchstart (disabled=${switching})`)}
+                onTouchMove={() => logTap(`[${slot}] touchmove (movement detected -- may cancel the click as a scroll gesture)`)}
+                onTouchEnd={() => logTap(`[${slot}] touchend`)}
+                onPointerDown={() => logTap(`[${slot}] pointerdown`)}
+                onPointerUp={() => logTap(`[${slot}] pointerup`)}
+                onClick={() => {
+                  logTap(`[${slot}] CLICK FIRED -> calling onSwitch`);
+                  onSwitch(slot);
+                }}
               >
                 {renderSlot(slot)()}
               </button>

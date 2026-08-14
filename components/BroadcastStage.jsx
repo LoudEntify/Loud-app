@@ -10,6 +10,7 @@ import SwipePages from './SwipePages';
 import DirectorShotPanel from './DirectorShotPanel';
 import AudioDeckPanel from './AudioDeckPanel';
 import VideoDeckPanel from './VideoDeckPanel';
+import TapDebugOverlay from './TapDebugOverlay';
 
 // Sizing constants for the deck drag-resize / bottom-overlay offset math.
 // MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
@@ -152,6 +153,10 @@ export default function BroadcastStage({
 
   return (
     <div className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`} ref={stageRef}>
+      {/* TEMPORARY -- switch-tap-on-mobile bug investigation
+          (MULTI_PERFORMER_SPEC.md). Remove this line + TapDebugOverlay.jsx
+          + lib/tapDebug.js once the real cause is confirmed and fixed. */}
+      <TapDebugOverlay />
       {/* stage-video-area--versus modifier retired in Phase 2 (redesign) --
           it existed only to widen/reshape the phone-box for versus mode,
           which no longer exists (video is always full-bleed now). */}
