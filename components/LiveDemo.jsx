@@ -172,7 +172,17 @@ function triggerEgress(action, room, performanceMode) {
 // this scales the same way the rest of the room does.
 
 export default function LiveDemo() {
-  const [step, setStep] = useState('mode');
+  const [step, setStep] = useState('gate');
+  // Entry gate (MULTI_PERFORMER_SPEC.md section 3) -- the one screen
+  // every joiner (performer or viewer) hits before the existing
+  // mode/role flow below. participantId is kept so a later slot-code
+  // claim (Stage 3) can UPDATE this same row instead of inserting a
+  // second one.
+  const [email, setEmail] = useState('');
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [gateError, setGateError] = useState('');
+  const [gateSubmitting, setGateSubmitting] = useState(false);
+  const [participantId, setParticipantId] = useState(null);
   const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
   const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' | 'camfeed-a' | 'camfeed-b'
@@ -424,6 +434,71 @@ export default function LiveDemo() {
       });
     }
     handleJoin();
+  }
+
+  async function handleGateSubmit() {
+    setGateError('');
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setGateError('Enter your email to continue.');
+      return;
+    }
+    if (!show?.id) {
+      setGateError("Couldn't reach the show yet -- try again in a moment.");
+      return;
+    }
+    setGateSubmitting(true);
+    try {
+      const res = await fetch('/api/participants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_id: show.id, email: trimmed, consent: marketingConsent }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not continue');
+      setParticipantId(data.participantId);
+      setStep('mode');
+    } catch (e) {
+      setGateError(e.message);
+    } finally {
+      setGateSubmitting(false);
+    }
+  }
+
+  if (step === 'gate') {
+    return (
+      <PageShell active="live">
+        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2>Pilot show</h2>
+          <input
+            type="email"
+            placeholder="your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={fieldStyle}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'rgba(253, 255, 252, 0.7)' }}>
+            <input
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(e) => setMarketingConsent(e.target.checked)}
+            />
+            Send me updates about Loudentify shows
+          </label>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 12 }}>
+            We&apos;ll use your email to send you updates about this show and Loudentify.
+          </p>
+          <button
+            onClick={handleGateSubmit}
+            disabled={gateSubmitting}
+            style={{ ...primaryBtnStyle, opacity: gateSubmitting ? 0.6 : 1 }}
+          >
+            {gateSubmitting ? 'Continuing…' : 'Continue'}
+          </button>
+          {gateError && <p style={{ color: '#e71d36' }}>{gateError}</p>}
+        </div>
+      </PageShell>
+    );
   }
 
   if (step === 'mode') {
