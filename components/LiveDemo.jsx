@@ -185,7 +185,16 @@ export default function LiveDemo() {
   const [participantId, setParticipantId] = useState(null);
   const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
-  const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' | 'camfeed-a' | 'camfeed-b'
+  // 'performer' is a selection-screen-only sentinel (MULTI_PERFORMER_
+  // SPEC.md Stage 3) -- the code determines the real slot, so nothing
+  // ever sets role to 'a'/'b' directly anymore. handleClaimAndGoLive
+  // overwrites role with whatever slot the server's code check
+  // resolves, once a claim actually succeeds.
+  const [role, setRole] = useState('viewer'); // 'viewer' | 'performer' | 'a' | 'b' (post-claim only) | 'camfeed-a' | 'camfeed-b'
+  const [performerCode, setPerformerCode] = useState('');
+  // Held for Stage 4's active-performer switch control -- only ever
+  // non-null on the device that most recently claimed slot 'a'.
+  const [sessionToken, setSessionToken] = useState(null);
   const [camRole, setCamRole] = useState('wide'); // camera position for camfeed devices: 'wide' | 'close' | 'side'
   const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
@@ -405,7 +414,11 @@ export default function LiveDemo() {
   // state -- viewers/camfeed devices join exactly as before, ungated.
   // canGoLive() isn't null-safe (throws on show.slated_at if show is
   // null), so it's only ever called behind the `show &&` guard here.
-  const isContestantRole = role === 'a' || role === 'b';
+  // 'performer' here means "on the role-selection screen, about to
+  // claim a code" (MULTI_PERFORMER_SPEC.md Stage 3) -- role only ever
+  // becomes the real 'a'/'b' after a successful claim, by which point
+  // this screen is no longer rendered.
+  const isContestantRole = role === 'performer';
   const goLiveDisabledReason = !isContestantRole
     ? null
     : showState === 'ended'
@@ -434,6 +447,52 @@ export default function LiveDemo() {
       });
     }
     handleJoin();
+  }
+
+  // Stage 3 (MULTI_PERFORMER_SPEC.md) -- replaces handleJoin for the
+  // performer path entirely. Deliberately does NOT call /api/token:
+  // /api/performer/claim-slot mints its own LiveKit AccessToken, gated
+  // on the code rather than the client asserting a slot letter. Reuses
+  // handleGoLive's optimistic soundcheck write since a performer join
+  // is still a "go live" action either way.
+  async function handleClaimAndGoLive() {
+    setError('');
+    setNotice('');
+    if (goLiveDisabledReason) return;
+    if (!performerCode.trim()) {
+      setError('Enter your performer code.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/performer/claim-slot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          show_id: show?.id,
+          code: performerCode.trim(),
+          email,
+          participantId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Code not recognized');
+      if (data.warning) setNotice(data.warning);
+
+      if (show && show.state === 'scheduled') {
+        setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
+        setShowWriteError(null);
+        updateShowStateWithRetry('soundcheck').then((ok) => {
+          setShowWriteError(ok ? null : 'soundcheck');
+        });
+      }
+
+      setRole(data.slot); // 'a' | 'b' -- everything downstream (isMainPerformer, BroadcastStage, renderSlot) now just works unchanged
+      setSessionToken(data.sessionToken);
+      setConn({ token: data.livekitToken, url: data.url, assignedRole: data.slot, name: name || 'guest' });
+      setStep('joined');
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function handleGateSubmit() {
@@ -527,11 +586,18 @@ export default function LiveDemo() {
           />
           <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
             <option value="viewer">Viewer</option>
-            <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
-            {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
+            <option value="performer">Performer (code required)</option>
             <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
             {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
           </select>
+          {role === 'performer' && (
+            <input
+              placeholder="performer code"
+              value={performerCode}
+              onChange={(e) => setPerformerCode(e.target.value)}
+              style={fieldStyle}
+            />
+          )}
           {role.startsWith('camfeed-') && (
             <div style={{ display: 'flex', gap: 8 }}>
               {[
@@ -560,7 +626,7 @@ export default function LiveDemo() {
           {isContestantRole ? (
             <>
               <button
-                onClick={handleGoLive}
+                onClick={handleClaimAndGoLive}
                 disabled={!!goLiveDisabledReason}
                 style={{
                   ...primaryBtnStyle,
@@ -568,7 +634,7 @@ export default function LiveDemo() {
                   cursor: goLiveDisabledReason ? 'not-allowed' : 'pointer',
                 }}
               >
-                Go Live
+                Claim &amp; Go Live
               </button>
               {goLiveDisabledReason && (
                 <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>{goLiveDisabledReason}</p>

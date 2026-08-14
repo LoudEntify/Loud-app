@@ -55,6 +55,11 @@ export async function GET(request) {
     // as "contestant A" over an existing performer.
     let slotTaken = false;
     if (requestedContestant === 'a' || requestedContestant === 'b') {
+      // MULTI_PERFORMER_SPEC.md: performer slots are meant to be claimed
+      // via /api/performer/claim-slot's code check now -- this direct
+      // path still works unmodified (accepted-not-solved bypass, not
+      // fixed here), so at least log any real use of it.
+      console.warn('[token] contestant= claim via unguarded bypass path', { room, requestedContestant, identity });
       try {
         const svc = new RoomServiceClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
         const participants = await svc.listParticipants(room);
