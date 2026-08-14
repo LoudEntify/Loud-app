@@ -15,6 +15,7 @@ export default function ViewerStage({
   performanceMode,
   renderSlot,
   activePerformerSlot,
+  presentSlots,
   comments,
   sendComment,
   commentsExpanded,
@@ -34,8 +35,8 @@ export default function ViewerStage({
         {isVersus ? (
           <SpotlightStage
             activeSlot={activePerformerSlot}
-            renderA={renderSlot('a')}
-            renderB={renderSlot('b')}
+            slots={presentSlots}
+            renderSlot={renderSlot}
           />
         ) : (
           <VersusSplit

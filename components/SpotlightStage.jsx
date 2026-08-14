@@ -1,50 +1,54 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-
-// Deliberately duplicated from VersusSplit.jsx's own useOrientation(),
-// not imported/exported from it -- MULTI_PERFORMER_SPEC.md's locked
-// decision keeps VersusSplit untouched. Same pointer:coarse-gated
-// detection, same reason a `forceOrientation` override exists below
-// (see EgressPage.jsx's own use of the equivalent VersusSplit prop):
-// a headless/fine-pointer browser (LiveKit's Egress renderer) always
-// resolves 'landscape' here regardless of the real canvas shape.
-function useOrientation() {
-  const getOrientation = () => {
-    if (typeof window === 'undefined') return 'landscape';
-    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
-    if (!isCoarsePointer) return 'landscape';
-    return window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape';
-  };
-  const [orientation, setOrientation] = useState(getOrientation);
-  useEffect(() => {
-    const update = () => setOrientation(getOrientation());
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-  return orientation;
-}
-
-// Stage 5 of MULTI_PERFORMER_SPEC.md -- active performer large, the
-// other as a ~quarter-screen thumbnail. Desktop: side-by-side (flex
-// row, large:small ~3:1). Mobile: stacked, with the other performer as
-// a compact fixed-height strip rather than a proportional split -- a
-// tiny row reads as "thumbnail"; a scaled-down full pane doesn't.
+// Stage 5 of MULTI_PERFORMER_SPEC.md, generalized for N performer slots
+// (originally built two-slot-shaped, corrected before Stage 6 so egress
+// wouldn't inherit the same limitation). Active performer large on top;
+// every OTHER present slot renders into a horizontal scrollable
+// thumbnail strip along the bottom -- same layout on every viewport,
+// desktop and mobile, per the actual sketch (the first draft guessed a
+// side-column placement on desktop; wrong, corrected here). No
+// orientation detection at all as a result -- unlike VersusSplit (and
+// this component's own first draft), there's nothing left that needs
+// to know landscape vs portrait, so there's no equivalent of today's
+// earlier pointer:coarse-headless bug possible here.
 //
-// Reuses renderA/renderB (each caller's own renderSlot(letter)
-// closure) completely unmodified -- same director/shot-cut pipeline
-// underneath (ShotVideo/ShotFadeLayer), this component only decides
-// which slot gets the big box, never how that slot's own video renders.
-export default function SpotlightStage({ activeSlot, renderA, renderB, forceOrientation }) {
-  const detectedOrientation = useOrientation();
-  const orientation = forceOrientation || detectedOrientation;
-  const renderActive = activeSlot === 'b' ? renderB : renderA;
-  const renderOther = activeSlot === 'b' ? renderA : renderB;
+// `slots` is the live "present" list (LiveDemo.jsx's presentSlots,
+// derived from actual published camera tracks, not from show_slots'
+// seeded list) -- `renderSlot` is the generic per-letter closure each
+// caller already owns, called fresh per slot here rather than
+// pre-invoked into renderA/renderB (the original two-slot-shaped
+// prop contract).
+//
+// Disconnect handling (explicit product decision, not a default):
+// if `activeSlot` itself isn't in `slots` right now (that performer
+// dropped), this does NOT auto-switch to someone else -- the active
+// pane shows a "Reconnecting" placeholder and activePerformerSlot in
+// the shows table is left exactly as it was. Only a deliberate switch
+// (the session-token-guarded route) ever changes who's active.
+export default function SpotlightStage({ activeSlot, slots, renderSlot }) {
+  const activePresent = slots.includes(activeSlot);
+  const others = slots.filter((s) => s !== activeSlot);
 
   return (
-    <div className={`spotlight-stage ${orientation}`}>
-      <div className="spotlight-active">{renderActive()}</div>
-      <div className="spotlight-thumbnail">{renderOther()}</div>
+    <div className="spotlight-stage">
+      <div className="spotlight-active">
+        {activePresent ? (
+          renderSlot(activeSlot)()
+        ) : (
+          <div className="spotlight-reconnecting">
+            <span>Reconnecting {activeSlot ? `performer ${activeSlot.toUpperCase()}` : ''}…</span>
+          </div>
+        )}
+      </div>
+      {others.length > 0 && (
+        <div className="spotlight-thumbnail-row">
+          {others.map((slot) => (
+            <div key={slot} className="spotlight-thumbnail-tile">
+              {renderSlot(slot)()}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

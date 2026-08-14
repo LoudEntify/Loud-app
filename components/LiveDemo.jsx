@@ -650,7 +650,12 @@ export default function LiveDemo() {
   }
 
   const isCamFeedRole = conn.assignedRole?.startsWith('camfeed-');
-  const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
+  // Generalized off the a/b whitelist (found during the slot-c bug
+  // triage, MULTI_PERFORMER_SPEC.md's generalization pass) -- any
+  // claimed slot letter publishes video; only the known non-performer
+  // sentinels ('viewer', camfeed-prefixed handled separately above)
+  // don't.
+  const publishesVideo = conn.assignedRole !== 'viewer';
   // Camfeed phones are propped to film the artist -- rear by default.
   // The artist's own device defaults to front so they can see themselves.
   const defaultFacingMode = isCamFeedRole ? 'environment' : 'user';
@@ -818,7 +823,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [left, setLeft] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
-  const [activeCamera, setActiveCamera] = useState({ a: null, b: null }); // slot -> identity of the live feed
+  const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
   const [audioNodes, setAudioNodes] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
@@ -912,7 +917,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     prevMaximizedForPanelsRef.current = maximized;
   }, [maximized]);
 
-  const isMainPerformer = role === 'a' || role === 'b';
+  // Generalized off the a/b whitelist (MULTI_PERFORMER_SPEC.md's
+  // generalization pass) -- this was the actual root cause of the
+  // slot-c-falls-through-to-viewer bug: a successful claim sets role to
+  // whatever slot letter the server resolved (Stage 3's
+  // handleClaimAndGoLive), but this check only ever recognized 'a'/'b'.
+  // `role` only ever holds a raw slot letter AFTER a successful claim;
+  // before that (or for viewers/camfeed) it's one of the three known
+  // sentinels below.
+  const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
   // Stage 1 of the portrait capture work -- what the local camera is
@@ -1168,6 +1181,28 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
       !t.publication?.isMuted
     ), [tracks]);
+
+  // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
+  // performer slots CURRENTLY PRESENT (a published camera track exists
+  // for them right now), derived live from `tracks`, not from
+  // show_slots (which only tells you what's SEEDED, not who's actually
+  // connected -- a seeded-but-unclaimed slot shouldn't get a thumbnail).
+  // Deliberately NOT filtered on isMuted, unlike tracksForSlot above --
+  // muting mid-show is a normal live action, not a disconnect, and
+  // shouldn't make a performer vanish from the spotlight/switcher.
+  // Sorted for a stable, deterministic render order (SpotlightStage's
+  // thumbnail row and the switcher both key off array order).
+  const presentSlots = useMemo(() => {
+    const set = new Set();
+    tracks.forEach((t) => {
+      const identity = t.participant.identity;
+      if (identity.startsWith('contestant-')) {
+        const slot = identity.split('-')[1];
+        if (slot) set.add(slot);
+      }
+    });
+    return Array.from(set).sort();
+  }, [tracks]);
 
   // Which camera roles ('main' | camRole values like 'wide'/'close'/'side')
   // are actually publishing -- AND unmuted -- for a slot right now --
@@ -1630,6 +1665,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     performanceMode,
     renderSlot,
     activePerformerSlot,
+    presentSlots,
     maximized,
     onToggleMaximize,
     sidebarCollapsed,

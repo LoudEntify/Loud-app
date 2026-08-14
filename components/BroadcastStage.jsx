@@ -67,6 +67,7 @@ export default function BroadcastStage({
   activeCamera,
   setActiveForSlot,
   activePerformerSlot,
+  presentSlots,
   switchingPerformer,
   onSwitchActivePerformer,
   audioNodes,
@@ -159,8 +160,8 @@ export default function BroadcastStage({
         {performanceMode === 'versus' ? (
           <SpotlightStage
             activeSlot={activePerformerSlot}
-            renderA={renderSlot('a')}
-            renderB={renderSlot('b')}
+            slots={presentSlots}
+            renderSlot={renderSlot}
           />
         ) : (
           <VersusSplit
@@ -310,7 +311,7 @@ export default function BroadcastStage({
                     label: 'SWITCH',
                     content: (
                       <ActivePerformerSwitcher
-                        slots={['a', 'b']}
+                        slots={presentSlots}
                         tracksForSlot={tracksForSlot}
                         activePerformerSlot={activePerformerSlot}
                         onSwitch={onSwitchActivePerformer}

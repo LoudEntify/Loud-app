@@ -13,9 +13,9 @@ import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 export async function POST(request) {
   try {
     const { show_id: showId, sessionToken, targetSlot } = await request.json();
-    if (!showId || !sessionToken || (targetSlot !== 'a' && targetSlot !== 'b')) {
+    if (!showId || !sessionToken || !targetSlot) {
       return NextResponse.json(
-        { error: 'show_id, sessionToken, and a valid targetSlot are required' },
+        { error: 'show_id, sessionToken, and targetSlot are required' },
         { status: 400 }
       );
     }
@@ -23,7 +23,9 @@ export async function POST(request) {
     const admin = getSupabaseAdmin();
 
     // Only slot 'a' -- the broadcast controller -- may ever drive this,
-    // per the locked "slot a = broadcast controller" decision. Checked
+    // per the locked "slot a = broadcast controller" decision (this
+    // stays a literal 'a' check deliberately -- it's a fixed rule about
+    // WHO controls the switch, not a slot-count assumption). Checked
     // against the CURRENT session_token, which rotates on every claim
     // (Stage 3) -- a stale token from an earlier claim of slot 'a' is
     // rejected here even if the device holding it never got a UI cue
@@ -37,6 +39,23 @@ export async function POST(request) {
 
     if (slotErr || !slotA || !slotA.session_token || slotA.session_token !== sessionToken) {
       return NextResponse.json({ error: 'Not authorized to switch the active performer' }, { status: 403 });
+    }
+
+    // MULTI_PERFORMER_SPEC.md's generalization pass -- targetSlot is no
+    // longer checked against a hardcoded a/b whitelist. It must be a
+    // slot that genuinely exists in show_slots for this show; this is
+    // strictly stronger than the old check (a whitelist would still
+    // accept 'a'/'b' for a show that never seeded either), not just a
+    // different shape of the same check.
+    const { data: targetRow, error: targetErr } = await admin
+      .from('show_slots')
+      .select('slot')
+      .eq('show_id', showId)
+      .eq('slot', targetSlot)
+      .maybeSingle();
+
+    if (targetErr || !targetRow) {
+      return NextResponse.json({ error: 'targetSlot does not exist for this show' }, { status: 400 });
     }
 
     const { data, error } = await admin

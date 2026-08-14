@@ -76,52 +76,61 @@ button {
   flex-direction: row;
 }
 
-/* Stage 5 (MULTI_PERFORMER_SPEC.md) -- active performer large, other as
-   a ~quarter-screen thumbnail. Deliberately NOT reusing .versus-stage's
-   own rules (that's the untouched 50/50 draggable split, a different
-   layout concept) -- own class, own flex ratios, same
-   height:100%-through-flex-stretch mechanism .versus-stage already
-   proved out, so .spotlight-active/.spotlight-thumbnail's children
-   (ShotVideo's own width:100%;height:100% chain) resolve correctly. */
+/* Stage 5 (MULTI_PERFORMER_SPEC.md), generalized for N performer slots
+   -- active performer large on top, every OTHER present slot in a
+   horizontal scrollable strip along the bottom. Same layout on every
+   viewport (per the actual sketch -- the first draft guessed a
+   desktop side-column placement instead; corrected here), so there's
+   no orientation-variant CSS at all, unlike .versus-stage. Own class,
+   own flex ratios -- deliberately NOT reusing .versus-stage's rules
+   (that's the untouched 50/50 draggable split, a different layout
+   concept). Same height:100%-through-flex-stretch mechanism
+   .versus-stage already proved out, so .spotlight-active/.spotlight-
+   thumbnail-tile's children (ShotVideo's own width:100%;height:100%
+   chain) resolve correctly. */
 .spotlight-stage {
   display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   gap: 0;
 }
 
-.spotlight-stage.landscape {
-  flex-direction: row;
-}
-
-.spotlight-stage.portrait {
-  flex-direction: column;
-}
-
-.spotlight-active,
-.spotlight-thumbnail {
+.spotlight-active {
   position: relative;
   overflow: hidden;
   background: transparent;
-}
-
-.spotlight-stage.landscape .spotlight-active {
-  flex: 3 1 0%;
-}
-
-.spotlight-stage.landscape .spotlight-thumbnail {
-  flex: 1 1 0%;
-  min-width: 120px;
-  max-width: 320px;
-}
-
-.spotlight-stage.portrait .spotlight-active {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.spotlight-stage.portrait .spotlight-thumbnail {
+.spotlight-reconnecting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #011627;
+  color: rgba(253, 255, 252, 0.55);
+  font-size: 14px;
+}
+
+.spotlight-thumbnail-row {
+  display: flex;
+  flex-direction: row;
   flex: 0 0 96px;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 8px;
+}
+
+.spotlight-thumbnail-tile {
+  position: relative;
+  overflow: hidden;
+  background: #2C2C2A;
+  border-radius: 8px;
+  flex: 0 0 128px;
+  height: 100%;
 }
 
 /* Phase 1 (build 3c redesign) -- this was the actual source of the blue
