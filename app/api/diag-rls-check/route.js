@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
-import { getSupabase } from '../../../../lib/supabaseClient';
+import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
+import { getSupabase } from '../../../lib/supabaseClient';
 
 // TEMPORARY -- Stage 1 verification only for MULTI_PERFORMER_SPEC.md.
 // Proves (a) the admin (service-role) client can actually reach the new
