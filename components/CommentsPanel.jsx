@@ -3,13 +3,14 @@
 import { useRef, useState } from 'react';
 import EmojiPicker, { Theme, EmojiStyle } from 'emoji-picker-react';
 import { SmileyIcon as SmileyFallback } from '@phosphor-icons/react';
+import PresenceCounter from './PresenceCounter';
 
 // Full emoji library (emoji-picker-react, MIT licensed, actively
 // maintained) replaces the earlier hand-picked 24-emoji grid -- this is
 // the "full library of emojis / open-source reactions that messaging apps
 // use" piece, standing in until custom Loudentify stickers are designed.
 
-export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse }) {
+export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse, presentSlots }) {
   const [text, setText] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [actionMenuFor, setActionMenuFor] = useState(null);
@@ -122,6 +123,12 @@ export default function CommentsPanel({ comments, onSend, expanded, onExpand, on
           </div>
         )}
       </div>
+
+      {/* Directly below the comment box, inside the same always-mounted
+          panel -- inherits its collapse/reveal/position behavior for
+          free (MULTI_PERFORMER_SPEC.md follow-up fix): no separate
+          state, no separate positioning logic. */}
+      <PresenceCounter presentSlots={presentSlots} />
     </div>
   );
 }

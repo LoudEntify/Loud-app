@@ -172,10 +172,29 @@ function triggerEgress(action, room, performanceMode) {
 // this scales the same way the rest of the room does.
 
 export default function LiveDemo() {
-  const [step, setStep] = useState('mode');
+  const [step, setStep] = useState('gate');
+  // Entry gate (MULTI_PERFORMER_SPEC.md section 3) -- the one screen
+  // every joiner (performer or viewer) hits before the existing
+  // mode/role flow below. participantId is kept so a later slot-code
+  // claim (Stage 3) can UPDATE this same row instead of inserting a
+  // second one.
+  const [email, setEmail] = useState('');
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [gateError, setGateError] = useState('');
+  const [gateSubmitting, setGateSubmitting] = useState(false);
+  const [participantId, setParticipantId] = useState(null);
   const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
-  const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' | 'camfeed-a' | 'camfeed-b'
+  // 'performer' is a selection-screen-only sentinel (MULTI_PERFORMER_
+  // SPEC.md Stage 3) -- the code determines the real slot, so nothing
+  // ever sets role to 'a'/'b' directly anymore. handleClaimAndGoLive
+  // overwrites role with whatever slot the server's code check
+  // resolves, once a claim actually succeeds.
+  const [role, setRole] = useState('viewer'); // 'viewer' | 'performer' | 'a' | 'b' (post-claim only) | 'camfeed-a' | 'camfeed-b'
+  const [performerCode, setPerformerCode] = useState('');
+  // Held for Stage 4's active-performer switch control -- only ever
+  // non-null on the device that most recently claimed slot 'a'.
+  const [sessionToken, setSessionToken] = useState(null);
   const [camRole, setCamRole] = useState('wide'); // camera position for camfeed devices: 'wide' | 'close' | 'side'
   const [conn, setConn] = useState(null);
   const [error, setError] = useState('');
@@ -395,7 +414,11 @@ export default function LiveDemo() {
   // state -- viewers/camfeed devices join exactly as before, ungated.
   // canGoLive() isn't null-safe (throws on show.slated_at if show is
   // null), so it's only ever called behind the `show &&` guard here.
-  const isContestantRole = role === 'a' || role === 'b';
+  // 'performer' here means "on the role-selection screen, about to
+  // claim a code" (MULTI_PERFORMER_SPEC.md Stage 3) -- role only ever
+  // becomes the real 'a'/'b' after a successful claim, by which point
+  // this screen is no longer rendered.
+  const isContestantRole = role === 'performer';
   const goLiveDisabledReason = !isContestantRole
     ? null
     : showState === 'ended'
@@ -426,6 +449,117 @@ export default function LiveDemo() {
     handleJoin();
   }
 
+  // Stage 3 (MULTI_PERFORMER_SPEC.md) -- replaces handleJoin for the
+  // performer path entirely. Deliberately does NOT call /api/token:
+  // /api/performer/claim-slot mints its own LiveKit AccessToken, gated
+  // on the code rather than the client asserting a slot letter. Reuses
+  // handleGoLive's optimistic soundcheck write since a performer join
+  // is still a "go live" action either way.
+  async function handleClaimAndGoLive() {
+    setError('');
+    setNotice('');
+    if (goLiveDisabledReason) return;
+    if (!performerCode.trim()) {
+      setError('Enter your performer code.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/performer/claim-slot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          show_id: show?.id,
+          code: performerCode.trim(),
+          email,
+          participantId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Code not recognized');
+      if (data.warning) setNotice(data.warning);
+
+      if (show && show.state === 'scheduled') {
+        setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
+        setShowWriteError(null);
+        updateShowStateWithRetry('soundcheck').then((ok) => {
+          setShowWriteError(ok ? null : 'soundcheck');
+        });
+      }
+
+      setRole(data.slot); // 'a' | 'b' -- everything downstream (isMainPerformer, BroadcastStage, renderSlot) now just works unchanged
+      setSessionToken(data.sessionToken);
+      setConn({ token: data.livekitToken, url: data.url, assignedRole: data.slot, name: name || 'guest' });
+      setStep('joined');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function handleGateSubmit() {
+    setGateError('');
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setGateError('Enter your email to continue.');
+      return;
+    }
+    if (!show?.id) {
+      setGateError("Couldn't reach the show yet -- try again in a moment.");
+      return;
+    }
+    setGateSubmitting(true);
+    try {
+      const res = await fetch('/api/participants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_id: show.id, email: trimmed, consent: marketingConsent }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not continue');
+      setParticipantId(data.participantId);
+      setStep('mode');
+    } catch (e) {
+      setGateError(e.message);
+    } finally {
+      setGateSubmitting(false);
+    }
+  }
+
+  if (step === 'gate') {
+    return (
+      <PageShell active="live">
+        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2>Pilot show</h2>
+          <input
+            type="email"
+            placeholder="your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={fieldStyle}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'rgba(253, 255, 252, 0.7)' }}>
+            <input
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(e) => setMarketingConsent(e.target.checked)}
+            />
+            Send me updates about Loudentify shows
+          </label>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 12 }}>
+            We&apos;ll use your email to send you updates about this show and Loudentify.
+          </p>
+          <button
+            onClick={handleGateSubmit}
+            disabled={gateSubmitting}
+            style={{ ...primaryBtnStyle, opacity: gateSubmitting ? 0.6 : 1 }}
+          >
+            {gateSubmitting ? 'Continuing…' : 'Continue'}
+          </button>
+          {gateError && <p style={{ color: '#e71d36' }}>{gateError}</p>}
+        </div>
+      </PageShell>
+    );
+  }
+
   if (step === 'mode') {
     return (
       <PageShell active="live">
@@ -452,11 +586,18 @@ export default function LiveDemo() {
           />
           <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
             <option value="viewer">Viewer</option>
-            <option value="a">{performanceMode === 'solo' ? 'Performer (main phone)' : 'Performer A (main phone)'}</option>
-            {performanceMode === 'versus' && <option value="b">Performer B (main phone)</option>}
+            <option value="performer">Performer (code required)</option>
             <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
             {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
           </select>
+          {role === 'performer' && (
+            <input
+              placeholder="performer code"
+              value={performerCode}
+              onChange={(e) => setPerformerCode(e.target.value)}
+              style={fieldStyle}
+            />
+          )}
           {role.startsWith('camfeed-') && (
             <div style={{ display: 'flex', gap: 8 }}>
               {[
@@ -485,7 +626,7 @@ export default function LiveDemo() {
           {isContestantRole ? (
             <>
               <button
-                onClick={handleGoLive}
+                onClick={handleClaimAndGoLive}
                 disabled={!!goLiveDisabledReason}
                 style={{
                   ...primaryBtnStyle,
@@ -493,7 +634,7 @@ export default function LiveDemo() {
                   cursor: goLiveDisabledReason ? 'not-allowed' : 'pointer',
                 }}
               >
-                Go Live
+                Claim &amp; Go Live
               </button>
               {goLiveDisabledReason && (
                 <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>{goLiveDisabledReason}</p>
@@ -509,7 +650,12 @@ export default function LiveDemo() {
   }
 
   const isCamFeedRole = conn.assignedRole?.startsWith('camfeed-');
-  const publishesVideo = conn.assignedRole === 'a' || conn.assignedRole === 'b' || isCamFeedRole;
+  // Generalized off the a/b whitelist (found during the slot-c bug
+  // triage, MULTI_PERFORMER_SPEC.md's generalization pass) -- any
+  // claimed slot letter publishes video; only the known non-performer
+  // sentinels ('viewer', camfeed-prefixed handled separately above)
+  // don't.
+  const publishesVideo = conn.assignedRole !== 'viewer';
   // Camfeed phones are propped to film the artist -- rear by default.
   // The artist's own device defaults to front so they can see themselves.
   const defaultFacingMode = isCamFeedRole ? 'environment' : 'user';
@@ -560,6 +706,7 @@ export default function LiveDemo() {
             onRefetchShow={fetchShow}
             showWriteError={showWriteError}
             onShowWriteErrorChange={setShowWriteError}
+            sessionToken={sessionToken}
           />
         </LiveKitRoom>
       </div>
@@ -645,7 +792,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
+function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
@@ -676,7 +823,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [left, setLeft] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
-  const [activeCamera, setActiveCamera] = useState({ a: null, b: null }); // slot -> identity of the live feed
+  const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
   const [audioNodes, setAudioNodes] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
@@ -757,6 +904,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     });
   }, []);
 
+  // Mobile declutter (post-Stage-5 fix, MULTI_PERFORMER_SPEC.md) -- the
+  // feeds strip and device controls collapse INDEPENDENTLY of each
+  // other and of the deck/comments/QR group above: they occupy a
+  // completely separate screen region (the shared bottom band split
+  // left/right, mobile only), so there's no footprint competition to
+  // coordinate. Both default open.
+  const [feedsCollapsed, setFeedsCollapsed] = useState(false);
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const toggleFeedsCollapsed = useCallback(() => setFeedsCollapsed((v) => !v), []);
+  const toggleControlsCollapsed = useCallback(() => setControlsCollapsed((v) => !v), []);
+
   // Matching half of the outer LiveDemo's own sidebar-collapse effect --
   // entering fullscreen declutters these three too, once, on the
   // FALSE->TRUE transition only.
@@ -770,7 +928,15 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     prevMaximizedForPanelsRef.current = maximized;
   }, [maximized]);
 
-  const isMainPerformer = role === 'a' || role === 'b';
+  // Generalized off the a/b whitelist (MULTI_PERFORMER_SPEC.md's
+  // generalization pass) -- this was the actual root cause of the
+  // slot-c-falls-through-to-viewer bug: a successful claim sets role to
+  // whatever slot letter the server resolved (Stage 3's
+  // handleClaimAndGoLive), but this check only ever recognized 'a'/'b'.
+  // `role` only ever holds a raw slot letter AFTER a successful claim;
+  // before that (or for viewers/camfeed) it's one of the three known
+  // sentinels below.
+  const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
   // Stage 1 of the portrait capture work -- what the local camera is
@@ -920,6 +1086,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     if (payload.type === 'SHOW_ENDED') {
       setReceivedShowEnded(true);
     }
+    if (payload.type === 'ACTIVE_PERFORMER_SWITCH') {
+      // Stage 4 (MULTI_PERFORMER_SPEC.md section 5) -- this message is
+      // NEVER applied directly. shows.active_performer_slot (written
+      // only by the session-token-checked server route) is the sole
+      // source of truth; this is just a low-latency nudge to re-fetch
+      // it now instead of waiting for the next poll. A forged broadcast
+      // (still possible -- canPublishData is unchanged) triggers a
+      // harmless re-fetch of the real value, nothing more.
+      console.log('[active-performer] poke received, refetching');
+      onRefetchShow?.();
+    }
   });
 
   // effectiveState can only derive 'live' from a cached 'soundcheck' row,
@@ -1016,6 +1193,28 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       !t.publication?.isMuted
     ), [tracks]);
 
+  // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
+  // performer slots CURRENTLY PRESENT (a published camera track exists
+  // for them right now), derived live from `tracks`, not from
+  // show_slots (which only tells you what's SEEDED, not who's actually
+  // connected -- a seeded-but-unclaimed slot shouldn't get a thumbnail).
+  // Deliberately NOT filtered on isMuted, unlike tracksForSlot above --
+  // muting mid-show is a normal live action, not a disconnect, and
+  // shouldn't make a performer vanish from the spotlight/switcher.
+  // Sorted for a stable, deterministic render order (SpotlightStage's
+  // thumbnail row and the switcher both key off array order).
+  const presentSlots = useMemo(() => {
+    const set = new Set();
+    tracks.forEach((t) => {
+      const identity = t.participant.identity;
+      if (identity.startsWith('contestant-')) {
+        const slot = identity.split('-')[1];
+        if (slot) set.add(slot);
+      }
+    });
+    return Array.from(set).sort();
+  }, [tracks]);
+
   // Which camera roles ('main' | camRole values like 'wide'/'close'/'side')
   // are actually publishing -- AND unmuted -- for a slot right now --
   // drives which shots the director panel and auto-director can legally
@@ -1068,6 +1267,48 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     setActiveShot((prev) => ({ ...prev, [letter]: command }));
     broadcastShotCommand(room, command);
   }, [room, activeShot, showPhase]);
+
+  // Stage 4 (MULTI_PERFORMER_SPEC.md) -- which performer slot is
+  // "on stage." Derived directly from `show`, never separate state:
+  // show.active_performer_slot is the sole source of truth, kept fresh
+  // by the existing lifecycle poll plus the ACTIVE_PERFORMER_SWITCH
+  // poke above. Defaults to 'a' before the column has ever been read
+  // (matches the column's own DB default).
+  const activePerformerSlot = show?.active_performer_slot || 'a';
+  const [switchingPerformer, setSwitchingPerformer] = useState(false);
+
+  // Only ever meaningfully callable from slot 'a' -- SpotlightStage's
+  // thumbnail strip is only interactive for role 'a' (BroadcastStage
+  // passes onSwitch only there), but the real authorization is
+  // server-side regardless (section 5 of the spec):
+  // a stale/foreign sessionToken is rejected by the route itself.
+  const handleSwitchActivePerformer = useCallback(async (targetSlot) => {
+    if (!show?.id || !sessionToken) return;
+    setSwitchingPerformer(true);
+    try {
+      const res = await fetch('/api/show/active-performer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_id: show.id, sessionToken, targetSlot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Switch failed');
+      console.log('[active-performer] switched ->', data.activePerformerSlot);
+      onShowUpdate((prev) => (prev ? { ...prev, active_performer_slot: data.activePerformerSlot } : prev));
+      // Low-latency nudge only -- every receiver (including this
+      // device's own other tabs, if any) re-fetches the real row rather
+      // than trusting this payload; see the ACTIVE_PERFORMER_SWITCH
+      // handler above.
+      room?.localParticipant?.publishData(
+        new TextEncoder().encode(JSON.stringify({ type: 'ACTIVE_PERFORMER_SWITCH' })),
+        { reliable: true }
+      );
+    } catch (e) {
+      console.error('[active-performer] switch failed:', e);
+    } finally {
+      setSwitchingPerformer(false);
+    }
+  }, [show?.id, sessionToken, room, onShowUpdate]);
 
   // Per-slot memory of whether the LAST render was showing the "be right
   // back" interstitial -- lets renderSlot force a hard cut specifically
@@ -1435,6 +1676,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const stageProps = {
     performanceMode,
     renderSlot,
+    activePerformerSlot,
+    presentSlots,
     maximized,
     onToggleMaximize,
     sidebarCollapsed,
@@ -1505,6 +1748,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           tracksForSlot={tracksForSlot}
           activeCamera={activeCamera}
           setActiveForSlot={setActiveForSlot}
+          switchingPerformer={switchingPerformer}
+          onSwitchActivePerformer={handleSwitchActivePerformer}
           audioNodes={audioNodes}
           audioContext={audioContext}
           showEnded={displayShowState === 'ended'}
@@ -1520,6 +1765,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
+          feedsCollapsed={feedsCollapsed}
+          onToggleFeedsCollapsed={toggleFeedsCollapsed}
+          controlsCollapsed={controlsCollapsed}
+          onToggleControlsCollapsed={toggleControlsCollapsed}
         />
       ) : displayShowState === 'ended' ? (
         <EndedCard />
