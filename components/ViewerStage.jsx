@@ -83,6 +83,7 @@ export default function ViewerStage({
             expanded={commentsExpanded}
             onExpand={onCommentsExpand}
             onCollapse={onCommentsCollapse}
+            presentSlots={presentSlots}
           />
         </div>
       </div>

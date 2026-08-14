@@ -10,7 +10,7 @@ import PresenceCounter from './PresenceCounter';
 // the "full library of emojis / open-source reactions that messaging apps
 // use" piece, standing in until custom Loudentify stickers are designed.
 
-export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse }) {
+export default function CommentsPanel({ comments, onSend, expanded, onExpand, onCollapse, presentSlots }) {
   const [text, setText] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [actionMenuFor, setActionMenuFor] = useState(null);
@@ -128,7 +128,7 @@ export default function CommentsPanel({ comments, onSend, expanded, onExpand, on
           panel -- inherits its collapse/reveal/position behavior for
           free (MULTI_PERFORMER_SPEC.md follow-up fix): no separate
           state, no separate positioning logic. */}
-      <PresenceCounter />
+      <PresenceCounter presentSlots={presentSlots} />
     </div>
   );
 }

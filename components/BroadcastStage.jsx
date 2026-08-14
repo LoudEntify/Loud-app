@@ -349,6 +349,7 @@ export default function BroadcastStage({
             expanded={commentsExpanded}
             onExpand={onCommentsExpand}
             onCollapse={onCommentsCollapse}
+            presentSlots={presentSlots}
           />
         </div>
       </div>
