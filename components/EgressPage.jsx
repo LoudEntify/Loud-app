@@ -41,6 +41,7 @@ import { useSearchParams } from 'next/navigation';
 import { LiveKitRoom, RoomAudioRenderer, useTracks, useDataChannel } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
+import './reactions.css';
 import VersusSplit from './VersusSplit';
 import { ShotVideo } from './ShotRendering';
 
@@ -176,6 +177,7 @@ function EgressStage({ layout }) {
     <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', background: '#011627', overflow: 'hidden' }}>
       <VersusSplit
         mode={layout === 'versus' ? 'versus' : 'solo'}
+        forceOrientation="portrait"
         renderA={renderSlot('a')}
         renderB={renderSlot('b')}
       />
