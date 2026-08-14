@@ -701,6 +701,7 @@ export default function LiveDemo() {
             onRefetchShow={fetchShow}
             showWriteError={showWriteError}
             onShowWriteErrorChange={setShowWriteError}
+            sessionToken={sessionToken}
           />
         </LiveKitRoom>
       </div>
@@ -786,7 +787,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange }) {
+function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
@@ -1061,6 +1062,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     if (payload.type === 'SHOW_ENDED') {
       setReceivedShowEnded(true);
     }
+    if (payload.type === 'ACTIVE_PERFORMER_SWITCH') {
+      // Stage 4 (MULTI_PERFORMER_SPEC.md section 5) -- this message is
+      // NEVER applied directly. shows.active_performer_slot (written
+      // only by the session-token-checked server route) is the sole
+      // source of truth; this is just a low-latency nudge to re-fetch
+      // it now instead of waiting for the next poll. A forged broadcast
+      // (still possible -- canPublishData is unchanged) triggers a
+      // harmless re-fetch of the real value, nothing more.
+      console.log('[active-performer] poke received, refetching');
+      onRefetchShow?.();
+    }
   });
 
   // effectiveState can only derive 'live' from a cached 'soundcheck' row,
@@ -1209,6 +1221,47 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     setActiveShot((prev) => ({ ...prev, [letter]: command }));
     broadcastShotCommand(room, command);
   }, [room, activeShot, showPhase]);
+
+  // Stage 4 (MULTI_PERFORMER_SPEC.md) -- which performer slot is
+  // "on stage." Derived directly from `show`, never separate state:
+  // show.active_performer_slot is the sole source of truth, kept fresh
+  // by the existing lifecycle poll plus the ACTIVE_PERFORMER_SWITCH
+  // poke above. Defaults to 'a' before the column has ever been read
+  // (matches the column's own DB default).
+  const activePerformerSlot = show?.active_performer_slot || 'a';
+  const [switchingPerformer, setSwitchingPerformer] = useState(false);
+
+  // Only ever meaningfully callable from slot 'a' -- ActivePerformerSwitcher
+  // itself is only rendered for role 'a' (BroadcastStage), but the real
+  // authorization is server-side regardless (section 5 of the spec):
+  // a stale/foreign sessionToken is rejected by the route itself.
+  const handleSwitchActivePerformer = useCallback(async (targetSlot) => {
+    if (!show?.id || !sessionToken) return;
+    setSwitchingPerformer(true);
+    try {
+      const res = await fetch('/api/show/active-performer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ show_id: show.id, sessionToken, targetSlot }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Switch failed');
+      console.log('[active-performer] switched ->', data.activePerformerSlot);
+      onShowUpdate((prev) => (prev ? { ...prev, active_performer_slot: data.activePerformerSlot } : prev));
+      // Low-latency nudge only -- every receiver (including this
+      // device's own other tabs, if any) re-fetches the real row rather
+      // than trusting this payload; see the ACTIVE_PERFORMER_SWITCH
+      // handler above.
+      room?.localParticipant?.publishData(
+        new TextEncoder().encode(JSON.stringify({ type: 'ACTIVE_PERFORMER_SWITCH' })),
+        { reliable: true }
+      );
+    } catch (e) {
+      console.error('[active-performer] switch failed:', e);
+    } finally {
+      setSwitchingPerformer(false);
+    }
+  }, [show?.id, sessionToken, room, onShowUpdate]);
 
   // Per-slot memory of whether the LAST render was showing the "be right
   // back" interstitial -- lets renderSlot force a hard cut specifically
@@ -1646,6 +1699,9 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           tracksForSlot={tracksForSlot}
           activeCamera={activeCamera}
           setActiveForSlot={setActiveForSlot}
+          activePerformerSlot={activePerformerSlot}
+          switchingPerformer={switchingPerformer}
+          onSwitchActivePerformer={handleSwitchActivePerformer}
           audioNodes={audioNodes}
           audioContext={audioContext}
           showEnded={displayShowState === 'ended'}
