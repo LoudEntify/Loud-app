@@ -1629,6 +1629,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const stageProps = {
     performanceMode,
     renderSlot,
+    activePerformerSlot,
     maximized,
     onToggleMaximize,
     sidebarCollapsed,
@@ -1699,7 +1700,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           tracksForSlot={tracksForSlot}
           activeCamera={activeCamera}
           setActiveForSlot={setActiveForSlot}
-          activePerformerSlot={activePerformerSlot}
           switchingPerformer={switchingPerformer}
           onSwitchActivePerformer={handleSwitchActivePerformer}
           audioNodes={audioNodes}

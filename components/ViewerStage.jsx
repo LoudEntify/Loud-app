@@ -2,15 +2,19 @@
 
 import { CaretDown, CaretLeft } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
+import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
 
-// Desktop fan view -- matches Fan Viewer.dc.html. Versus shows the split
-// stage with a drag divider between contestants; solo drops the split
-// entirely. Every handler is passed straight through from RoomInner.
+// Desktop fan view -- matches Fan Viewer.dc.html. Solo drops any split
+// entirely. Versus routes to SpotlightStage (Stage 5, MULTI_PERFORMER_
+// SPEC.md) -- VersusSplit's own 50/50 draggable mode is untouched but
+// no longer used by the live-show path, per that spec's locked
+// decision. Every handler is passed straight through from RoomInner.
 export default function ViewerStage({
   performanceMode,
   renderSlot,
+  activePerformerSlot,
   comments,
   sendComment,
   commentsExpanded,
@@ -27,11 +31,19 @@ export default function ViewerStage({
   return (
     <div className="stage-root">
       <div className="stage-video-area" onClick={onStageClick}>
-        <VersusSplit
-          mode={performanceMode}
-          renderA={renderSlot('a')}
-          renderB={renderSlot('b')}
-        />
+        {isVersus ? (
+          <SpotlightStage
+            activeSlot={activePerformerSlot}
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+          />
+        ) : (
+          <VersusSplit
+            mode={performanceMode}
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+          />
+        )}
 
         <TopBar
           label={isVersus ? 'LIVE · VERSUS' : 'LIVE'}

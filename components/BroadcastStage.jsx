@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback } from 'react';
 import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp, CaretLeft } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
+import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
 import CommentsPanel from './CommentsPanel';
 import SwipePages from './SwipePages';
@@ -155,11 +156,19 @@ export default function BroadcastStage({
           it existed only to widen/reshape the phone-box for versus mode,
           which no longer exists (video is always full-bleed now). */}
       <div className="stage-video-area" onClick={onStageClick}>
-        <VersusSplit
-          mode={performanceMode}
-          renderA={renderSlot(role)}
-          renderB={renderSlot(otherSlot)}
-        />
+        {performanceMode === 'versus' ? (
+          <SpotlightStage
+            activeSlot={activePerformerSlot}
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+          />
+        ) : (
+          <VersusSplit
+            mode={performanceMode}
+            renderA={renderSlot(role)}
+            renderB={renderSlot(otherSlot)}
+          />
+        )}
 
         <TopBar label="YOU'RE LIVE" maximized={maximized} onToggleMaximize={onToggleMaximize} />
       </div>
