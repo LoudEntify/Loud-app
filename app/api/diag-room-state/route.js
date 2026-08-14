@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 
 // TEMPORARY -- Stage 6 real-recording-test prep. Delete once done.
+export const dynamic = 'force-dynamic';
+
 function toHttpUrl(wsUrl) {
   return wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
 }
