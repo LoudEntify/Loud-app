@@ -19,7 +19,7 @@ import ViewerStage from './ViewerStage';
 import CameraQRPanel from './CameraQRPanel';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
-import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
+import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
@@ -967,8 +967,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // device change that lands on a different-shaped source re-decides.
   // implausibleAspect: this source's raw dims claimed portrait but
   // matched no real camera aspect ratio -- see useNativeIsLandscape's
-  // own comment. Threaded into createPortraitProcessor below so it
-  // un-stretches the squeeze instead of just cropping it in place.
+  // own comment. Drives the acquisition-side re-request effect below
+  // (landscapeNativeCaptureOptions), not the crop processor -- a
+  // downstream resample was tried and overcorrected on real hardware
+  // (Sony via capture card: faces went from narrow to stretched wide).
   const { isLandscape, implausibleAspect } = useNativeIsLandscape(myCameraPublication);
   const myCameraTrackSid = myCameraPublication?.trackSid;
   const autoPortraitTrackSidRef = useRef(null);
@@ -982,7 +984,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       const videoTrack = myCameraPublication?.videoTrack;
       if (!videoTrack) return;
       try {
-        const processor = createPortraitProcessor(0, { unsqueeze: implausibleAspect });
+        const processor = createPortraitProcessor(0);
         await videoTrack.setProcessor(processor, true);
       } catch (e) {
         // Confirmed against the compiled SDK source (same as CamPage's
@@ -1003,6 +1005,26 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     // useTrackAspect/useNativeIsLandscape key their own effects on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLandscape, myCameraTrackSid]);
+
+  // Acquisition-side fix for a squeezed source -- see the matching
+  // effect + comment in CamPage.jsx for the real-hardware reasoning
+  // (Sony via capture card) this avoids re-litigating here. Same latch
+  // pattern as autoPortraitTrackSidRef above: one re-acquire attempt per
+  // trackSid, not a retry loop.
+  const reacquiredForSqueezeRef = useRef(null);
+  useEffect(() => {
+    if (!implausibleAspect) return;
+    const trackSid = myCameraTrackSid;
+    if (!trackSid || reacquiredForSqueezeRef.current === trackSid) return;
+    reacquiredForSqueezeRef.current = trackSid;
+    const videoTrack = myCameraPublication?.videoTrack;
+    const mst = videoTrack?.mediaStreamTrack;
+    if (!videoTrack || !mst) return;
+    videoTrack.restartTrack(landscapeNativeCaptureOptions(mst)).catch((e) => {
+      console.error('[portrait] landscape re-acquire failed', e);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [implausibleAspect, myCameraTrackSid]);
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
