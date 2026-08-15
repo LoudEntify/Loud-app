@@ -297,7 +297,11 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
   // why that distinction matters), used below to auto-attach the crop
   // processor for a landscape source and to gate the 0deg rotation
   // button's meaning (see applyRotation).
-  const isLandscape = useNativeIsLandscape(myCameraPublication);
+  // implausibleAspect: this source's raw dims claimed portrait but
+  // matched no real camera aspect ratio -- see useNativeIsLandscape's
+  // own comment. Threaded into createPortraitProcessor below so it
+  // un-stretches the squeeze instead of just cropping it in place.
+  const { isLandscape, implausibleAspect } = useNativeIsLandscape(myCameraPublication);
 
   // DEBUG -- single unified timeline. Defined up here (not down by the
   // lifecycle effect that also uses it) so every acquisition/mute/
@@ -364,7 +368,12 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
         }
         rotationProcessorRef.current = null;
       } else {
-        const processor = createPortraitProcessor(degrees);
+        // unsqueeze: implausibleAspect -- this source's raw dims didn't
+        // just fail the landscape/portrait test, they matched no real
+        // camera shape at all, so the buffer itself is squeezed and
+        // needs un-stretching, not just cropping (see
+        // rotationProcessor.js's own comment on this option).
+        const processor = createPortraitProcessor(degrees, { unsqueeze: implausibleAspect });
         // showProcessedStreamLocally: true -- the operator's own preview
         // shows the corrected result too, so they can pick the right
         // rotation by eye rather than guessing blind (and so a
@@ -387,7 +396,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
       setRotationError('Rotation/crop failed -- feed is still publishing normally.');
       logEvent(`applyRotation(${degrees}) FAILED: ${e?.name}: ${e?.message}`);
     }
-  }, [room, logEvent, isLandscape]);
+  }, [room, logEvent, isLandscape, implausibleAspect]);
 
   // Auto-attach: the first time a given track's RAW orientation resolves
   // to landscape, apply the crop processor automatically at whatever
