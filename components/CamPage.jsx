@@ -62,7 +62,20 @@ const TEAL = '#2ec4b6';
 // never on bare/ideal values. What actually gets delivered is read back
 // afterwards via useSourceDimensions (lib/useSourceDimensions.js),
 // never assumed from this request or from which device was picked.
-const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1080, height: 1920 }, frameRate: { ideal: 30 } };
+//
+// aspectRatio + a single dimension (height), NOT width+height as two
+// independent ideals -- confirmed on real hardware (Sony via capture
+// card) that the old {width:1080, height:1920} pair invites a driver
+// with continuous/software resolution scaling to hit both axes exactly
+// by non-uniformly stretching a native 16:9 sensor frame into a
+// 1080x1920 buffer (an anamorphic squeeze baked into the delivered
+// pixels -- observed live as getSettings() reporting 1080x1200 for what
+// was actually a 1920x1080 source). aspectRatio expresses "keep this
+// shape" rather than handing the solver two unrelated free axes, so a
+// landscape-only source is no longer asked for a literal portrait (w,h)
+// pair that isn't one of its real modes. A phone already delivering
+// ~9:16 content sees no behavior change from this.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { height: 1920, aspectRatio: 9 / 16 }, frameRate: { ideal: 30 } };
 
 const ROLE_OPTIONS = [
   { value: 'wide', label: 'Wide' },
@@ -459,7 +472,18 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
       const settings = mst?.getSettings?.();
       const videoEl = videoElRef.current;
       const srcObject = videoEl?.srcObject;
-      setChainSnapshot({
+      // Aspect-ratio squeeze diagnostic (Sony/capture-card horizontal-
+      // squeeze bug): distinguishes a CSS problem (rendered box's aspect
+      // doesn't match the decoded frame's aspect, or object-fit isn't
+      // 'cover') from a pipeline problem (getSettings()/videoWidth
+      // already report a squeezed shape, so no CSS fix downstream can
+      // recover it -- the distortion is baked into the delivered pixels
+      // before this element ever sees them). Logged to console (not just
+      // the on-screen panel) so a Sony-feed session and a phone-feed
+      // session can be captured side by side and diffed directly.
+      const computedObjectFit = videoEl ? getComputedStyle(videoEl).objectFit : null;
+      const rect = videoEl ? videoEl.getBoundingClientRect() : null;
+      const snapshot = {
         publicationFound: !!pub,
         videoTrackFound: !!videoTrack,
         mstFound: !!mst,
@@ -475,6 +499,16 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
         videoWidth: videoEl ? videoEl.videoWidth : null,
         videoHeight: videoEl ? videoEl.videoHeight : null,
         currentTime: videoEl ? videoEl.currentTime : null,
+        computedObjectFit,
+        renderedBoxWidth: rect ? Math.round(rect.width) : null,
+        renderedBoxHeight: rect ? Math.round(rect.height) : null,
+      };
+      setChainSnapshot(snapshot);
+      console.log('[cam-diag]', {
+        settings: settings ? { width: settings.width, height: settings.height } : null,
+        decodedFrame: videoEl ? { videoWidth: videoEl.videoWidth, videoHeight: videoEl.videoHeight } : null,
+        renderedBox: rect ? { width: Math.round(rect.width), height: Math.round(rect.height) } : null,
+        computedObjectFit,
       });
     }, 400);
     return () => clearInterval(interval);
@@ -714,6 +748,9 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
               : sourceDims?.status === 'failed'
                 ? `FAILED after ${sourceDims.attempts} tries`
                 : `detecting...${sourceDims?.attempts ? ` (retry ${sourceDims.attempts})` : ''}`}
+          </div>
+          <div>
+            11. render box: {chainSnapshot?.renderedBoxWidth}x{chainSnapshot?.renderedBoxHeight} (object-fit: {chainSnapshot?.computedObjectFit ?? '--'}) -- decoded frame {chainSnapshot?.videoWidth}x{chainSnapshot?.videoHeight}
           </div>
           {endedInfo && (
             <div style={{ marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.25)', paddingTop: 4 }}>
