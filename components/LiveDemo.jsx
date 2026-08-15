@@ -965,7 +965,11 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // true, so this effect is a no-op for it -- zero processor, zero cost.
   // Keyed on trackSid (not a single latch) so a facingMode toggle or
   // device change that lands on a different-shaped source re-decides.
-  const isLandscape = useNativeIsLandscape(myCameraPublication);
+  // implausibleAspect: this source's raw dims claimed portrait but
+  // matched no real camera aspect ratio -- see useNativeIsLandscape's
+  // own comment. Threaded into createPortraitProcessor below so it
+  // un-stretches the squeeze instead of just cropping it in place.
+  const { isLandscape, implausibleAspect } = useNativeIsLandscape(myCameraPublication);
   const myCameraTrackSid = myCameraPublication?.trackSid;
   const autoPortraitTrackSidRef = useRef(null);
   useEffect(() => {
@@ -978,7 +982,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       const videoTrack = myCameraPublication?.videoTrack;
       if (!videoTrack) return;
       try {
-        const processor = createPortraitProcessor(0);
+        const processor = createPortraitProcessor(0, { unsqueeze: implausibleAspect });
         await videoTrack.setProcessor(processor, true);
       } catch (e) {
         // Confirmed against the compiled SDK source (same as CamPage's
