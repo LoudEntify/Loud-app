@@ -40,7 +40,15 @@ const ROOM_NAME = 'pilot-room';
 // min/max constraints, never on bare/ideal values. What actually gets
 // delivered is read back afterwards via useSourceDimensions
 // (lib/useSourceDimensions.js), never assumed from this request.
-const HIGH_RES_VIDEO_CAPTURE = { resolution: { width: 1080, height: 1920 }, frameRate: { ideal: 30 } };
+//
+// aspectRatio + a single dimension (height), NOT width+height as two
+// independent ideals -- see the matching comment in CamPage.jsx for the
+// real-hardware failure (Sony via capture card) this avoids: two free
+// axes invite a driver to hit both by non-uniformly stretching a
+// landscape sensor frame into a portrait buffer, which is a squeeze
+// baked into the delivered pixels, not something object-fit downstream
+// can undo. A phone already delivering ~9:16 content is unaffected.
+const HIGH_RES_VIDEO_CAPTURE = { resolution: { height: 1920, aspectRatio: 9 / 16 }, frameRate: { ideal: 30 } };
 
 // DEBUG -- surfaces what useSourceDimensions actually detected, for
 // verifying the portrait capture work on real hardware. Safe to delete

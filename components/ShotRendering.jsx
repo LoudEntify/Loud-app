@@ -419,7 +419,23 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
       // layer first becomes capable of being shown.
       const videoEl = videoRef.current;
       const domTransform = transformElRef.current?.style?.transform || '(none)';
-      logCutDebug(`[${shortLayerTag(trackRef)}] READY: detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} domTransform=${domTransform}`);
+      // DEBUG (aspect-squeeze diagnostic) -- raw getSettings() straight
+      // off the MediaStreamTrack (bypassing useTrackAspect's processor
+      // preference, so this is what the source itself delivered), plus
+      // the actual rendered <video> box + its computed object-fit.
+      // Comparing all four numbers on this one line answers "CSS or
+      // pipeline": if rawSettings is already squeezed (doesn't match
+      // decodedFrame's aspect... they're always equal, so really: if
+      // rawSettings/decodedFrame show a narrower-than-16:9 shape for a
+      // known-16:9 source), the distortion is baked in before this
+      // component ever runs -- no object-fit change downstream can fix
+      // it. If rawSettings/decodedFrame look correct but renderBox's
+      // aspect or objectFit is off, it's a CSS/layout bug here instead.
+      const rawMst = trackRef?.publication?.track?.mediaStreamTrack;
+      const rawSettings = rawMst?.getSettings?.();
+      const renderRect = videoEl?.getBoundingClientRect?.();
+      const computedObjectFit = videoEl ? getComputedStyle(videoEl).objectFit : null;
+      logCutDebug(`[${shortLayerTag(trackRef)}] READY: detectedIsPortrait=${aspectRef.current.isPortraitSource} detected=${aspectRef.current.width || '?'}x${aspectRef.current.height || '?'} actualVideoWxH=${videoEl?.videoWidth || '?'}x${videoEl?.videoHeight || '?'} rawSettings=${rawSettings?.width || '?'}x${rawSettings?.height || '?'} renderBox=${renderRect ? `${Math.round(renderRect.width)}x${Math.round(renderRect.height)}` : '?'} objectFit=${computedObjectFit || '?'} domTransform=${domTransform}`);
       setReady(true);
     }
     tryRevealRef.current = attemptReady;
