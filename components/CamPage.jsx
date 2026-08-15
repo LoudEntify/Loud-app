@@ -44,7 +44,7 @@ import {
 } from '@livekit/components-react';
 import { Track, TrackEvent, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
-import { useSourceDimensions, useNativeIsLandscape } from '../lib/useSourceDimensions';
+import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
 
 const INK = '#011627';
@@ -299,8 +299,10 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
   // button's meaning (see applyRotation).
   // implausibleAspect: this source's raw dims claimed portrait but
   // matched no real camera aspect ratio -- see useNativeIsLandscape's
-  // own comment. Threaded into createPortraitProcessor below so it
-  // un-stretches the squeeze instead of just cropping it in place.
+  // own comment. Drives the acquisition-side re-request effect below
+  // (landscapeNativeCaptureOptions), not the crop processor -- a
+  // downstream resample was tried and overcorrected on real hardware
+  // (Sony via capture card: faces went from narrow to stretched wide).
   const { isLandscape, implausibleAspect } = useNativeIsLandscape(myCameraPublication);
 
   // DEBUG -- single unified timeline. Defined up here (not down by the
@@ -368,12 +370,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
         }
         rotationProcessorRef.current = null;
       } else {
-        // unsqueeze: implausibleAspect -- this source's raw dims didn't
-        // just fail the landscape/portrait test, they matched no real
-        // camera shape at all, so the buffer itself is squeezed and
-        // needs un-stretching, not just cropping (see
-        // rotationProcessor.js's own comment on this option).
-        const processor = createPortraitProcessor(degrees, { unsqueeze: implausibleAspect });
+        const processor = createPortraitProcessor(degrees);
         // showProcessedStreamLocally: true -- the operator's own preview
         // shows the corrected result too, so they can pick the right
         // rotation by eye rather than guessing blind (and so a
@@ -396,7 +393,7 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
       setRotationError('Rotation/crop failed -- feed is still publishing normally.');
       logEvent(`applyRotation(${degrees}) FAILED: ${e?.name}: ${e?.message}`);
     }
-  }, [room, logEvent, isLandscape, implausibleAspect]);
+  }, [room, logEvent, isLandscape]);
 
   // Auto-attach: the first time a given track's RAW orientation resolves
   // to landscape, apply the crop processor automatically at whatever
@@ -423,6 +420,39 @@ function CamPublisher({ onDeviceIdChange, role, liveKitRoomError, debugMode }) {
     // which is exactly the manual-picker path, not this auto one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLandscape, myCameraTrackSid]);
+
+  // Acquisition-side fix for a squeezed source: implausibleAspect means
+  // the driver anamorphically distorted the buffer trying to satisfy the
+  // portrait ideal every source is normally requested with (see
+  // HIGH_RES_VIDEO_CAPTURE, above) -- confirmed on real hardware (Sony
+  // via capture card) that correcting this downstream, in the crop
+  // processor, overcorrects (the resample factor doesn't match the
+  // driver's actual distortion). The real fix is not asking a
+  // landscape-only device for a shape it has to fake in the first place:
+  // re-acquire the SAME device (landscapeNativeCaptureOptions reads its
+  // deviceId off the current track) with its native landscape capability
+  // instead, so the buffer arrives already correct and the existing
+  // crop -- already proven on genuine landscape sources -- has nothing
+  // left to correct for. Latched per trackSid (one attempt, not a
+  // retry loop) -- same pattern as autoAppliedTrackSidRef above; if the
+  // re-acquired track is STILL implausible, useNativeIsLandscape's
+  // TrackEvent.Restarted rebind will report that and this won't fire
+  // again for the same track, just stays flagged and cropped.
+  const reacquiredForSqueezeRef = useRef(null);
+  useEffect(() => {
+    if (!implausibleAspect) return;
+    if (!myCameraTrackSid || reacquiredForSqueezeRef.current === myCameraTrackSid) return;
+    reacquiredForSqueezeRef.current = myCameraTrackSid;
+    const videoTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+    const mst = videoTrack?.mediaStreamTrack;
+    if (!videoTrack || !mst) return;
+    const constraints = landscapeNativeCaptureOptions(mst);
+    logEvent(`squeeze detected -- re-acquiring native landscape: ${JSON.stringify(constraints)}`);
+    videoTrack.restartTrack(constraints).catch((e) => {
+      console.error('[cam] landscape re-acquire failed', e);
+      logEvent(`landscape re-acquire FAILED: ${e?.name}: ${e?.message}`);
+    });
+  }, [implausibleAspect, myCameraTrackSid, room, logEvent]);
 
   // Acquisition itself now happens declaratively via LiveKitRoom's video
   // prop (see CamPage, above) -- there's no manual setCameraEnabled call
