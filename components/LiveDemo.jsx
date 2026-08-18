@@ -22,7 +22,7 @@ import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
-import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome } from '../lib/shotCommands';
+import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
@@ -874,6 +874,99 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // Reconnected may already have fired before this component mounted.
   const [roomConnectionState, setRoomConnectionState] = useState(() => room.state);
 
+  // Hoisted from their previous position further down this component
+  // (audio-reconnect round) -- ensureAudioPublished below needs them,
+  // and it in turn needs to be callable from the room+track lifecycle
+  // effect's onReconnected handler just below, which is declared earlier
+  // than where these used to live. Pure state/ref declarations with no
+  // dependencies of their own, so hoisting is safe.
+  const [micOn, setMicOn] = useState(true);
+  const [audioNodes, setAudioNodes] = useState(null);
+  const [audioContext, setAudioContext] = useState(null);
+  const audioHandleRef = useRef(null);
+  const detachAudioTrackHealthListenersRef = useRef(null);
+
+  // Fix (a)+(b) (audio-reconnect round) -- idempotent "make sure the
+  // processed audio track is published," used by every reconnect path:
+  // fix (c)'s recovery, RoomEvent.Reconnected (plain LiveKit-level
+  // reconnects, Phase 1's unverified case), and RoomEvent.SignalConnected
+  // (which is also where LiveKitRoom's own setMicrophoneEnabled(false)
+  // mutes an already-published track out from under us -- see the
+  // SignalConnected handler below for the other half of that fix).
+  // Deliberately NOT used by the initial mount-time publish further down
+  // (that path creates the Web Audio graph in the first place and
+  // already has its own tested attempt/success/failure logging,
+  // confirmed working in a real capture) -- this function only ever
+  // republishes a track that already exists via audioHandleRef.
+  //
+  // In-flight guard (not just a publication check) because
+  // SignalConnected and the recovery path can fire close together -- a
+  // reconnect's own SignalConnected can fire while attemptPublishRecovery's
+  // own call to this function is still awaiting publishTrack. Without
+  // it, two concurrent calls could both see "not published yet" and both
+  // publish, producing two audio track publications.
+  const audioPublishInFlightRef = useRef(false);
+  const ensureAudioPublished = useCallback(async (trigger) => {
+    if (audioPublishInFlightRef.current) {
+      logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_in_flight' });
+      return;
+    }
+    const handle = audioHandleRef.current;
+    if (!handle?.processedTrack) {
+      // Nothing to (re)publish yet -- either this device never runs the
+      // audio effect (not isMainPerformer) or a reconnect landed before
+      // the mount-time graph setup finished. Not an error: the mount
+      // effect's own publish runs once it's ready.
+      logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_no_handle' });
+      return;
+    }
+    audioPublishInFlightRef.current = true;
+    try {
+      const existingPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (existingPub?.track) {
+        logHealthEvent('ensure_audio_published', { trigger, action: 'already_published' });
+        return;
+      }
+      let trackToPublish = handle.processedTrack;
+      let action = 'republished';
+      if (trackToPublish.readyState === 'ended') {
+        // Defensive guard -- not observed in either real recovery test
+        // captured so far (no mst_ended anywhere), but a genuinely dead
+        // MediaStreamTrack can't be republished, only replaced. Rebuilds
+        // the whole Case 2 graph exactly like the mount effect does, and
+        // re-attaches the same health listeners to the new handle.
+        const freshHandle = await createPilotAudioTrack();
+        audioHandleRef.current = freshHandle;
+        setAudioNodes(freshHandle.nodes);
+        setAudioContext(freshHandle.audioContext);
+        detachAudioTrackHealthListenersRef.current?.();
+        detachAudioTrackHealthListenersRef.current = attachAudioTrackHealthListeners(
+          freshHandle.rawStream?.getAudioTracks?.()[0] ?? null,
+          freshHandle.processedTrack
+        );
+        freshHandle.audioContext.onstatechange = () => {
+          logHealthEvent('audiocontext_statechange', { state: freshHandle.audioContext.state });
+        };
+        trackToPublish = freshHandle.processedTrack;
+        action = 'track_ended_recreated';
+      }
+      // Sync the republished track to the current mic-toggle state --
+      // toggleMic sets .enabled directly on this same track object, so a
+      // same-object republish already carries the right value forward;
+      // this only matters for the track_ended_recreated branch, where a
+      // brand new track defaults to enabled=true regardless of micOn.
+      trackToPublish.enabled = micOn;
+      await room.localParticipant.publishTrack(trackToPublish, {
+        source: Track.Source.Microphone,
+      });
+      logHealthEvent('ensure_audio_published', { trigger, action });
+    } catch (err) {
+      logHealthEvent('ensure_audio_published', { trigger, action: 'failed', error: String(err?.message || err) });
+    } finally {
+      audioPublishInFlightRef.current = false;
+    }
+  }, [room, micOn]);
+
   // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
   // only. Second link in the chain, between "did the SHOT_COMMAND arrive"
   // (the data-channel log below) and "[renderSlot] matched=...": is a
@@ -912,7 +1005,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   useEffect(() => {
     function onConnected() { setRoomConnectionState(room.state); logHealthEvent('room_connected', { state: room.state }); }
     function onReconnecting() { setRoomConnectionState(room.state); logHealthEvent('room_reconnecting', { state: room.state }); }
-    function onReconnected() { setRoomConnectionState(room.state); logHealthEvent('room_reconnected', { state: room.state }); }
+    function onReconnected() {
+      setRoomConnectionState(room.state);
+      logHealthEvent('room_reconnected', { state: room.state });
+      // Fix (a) (audio-reconnect round) -- a plain LiveKit-level
+      // reconnect (RoomEvent.Reconnected, not fix (c)'s own explicit
+      // disconnect+connect) was Phase 1's unverified case for whether
+      // local track publications survive. Defensive either way:
+      // ensureAudioPublished no-ops if the track's still there
+      // (logged as 'already_published').
+      ensureAudioPublished('room_reconnected');
+    }
     function onDisconnected(reason) { setRoomConnectionState(room.state); logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null }); }
     function onConnectionStateChanged(state) { setRoomConnectionState(state); logHealthEvent('room_connection_state_changed', { state: String(state) }); }
 
@@ -967,9 +1070,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       room.off(RoomEvent.TrackMuted, onTrackMuted);
       room.off(RoomEvent.TrackUnmuted, onTrackUnmuted);
     };
-  }, [room]);
+  }, [room, ensureAudioPublished]);
 
-  const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
   const [facingMode, setFacingMode] = useState(isCamFeed ? 'environment' : 'user');
@@ -978,10 +1080,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
-  const [audioNodes, setAudioNodes] = useState(null);
-  const [audioContext, setAudioContext] = useState(null);
-  const audioHandleRef = useRef(null);
-  const detachAudioTrackHealthListenersRef = useRef(null);
 
   // Page lifecycle -> health_events (Phase 2). All roles -- a viewer's
   // dropout is as diagnostically useful as the performer's. audioContext
@@ -1167,6 +1265,13 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       await room.disconnect();
       await room.connect(connServerUrl, connToken);
       logHealthEvent('publish_recovery_outcome', { trigger, outcome: 'reconnected', connectionState: room.state });
+      // Fix (a) (audio-reconnect round) -- confirmed by a real capture
+      // that this disconnect()/connect() cycle unpublishes the processed
+      // audio track (track_local_unpublished, kind:"audio") and nothing
+      // else ever republishes it. Awaited, not fire-and-forget, so
+      // publish_recovery_outcome's timestamp reflects video+data+audio
+      // all being handled, not just the room connection.
+      await ensureAudioPublished(trigger === 'auto' ? 'recovery_auto' : 'recovery_manual');
       // Reset the counter so the NEXT publish attempt gets a clean read --
       // whether the recovery actually fixed things is confirmed by that
       // next shot_publish_success/failure, not assumed here.
@@ -1177,19 +1282,55 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     } finally {
       setRecoveringPublish(false);
     }
-  }, [room, connToken, connServerUrl]);
+  }, [room, connToken, connServerUrl, ensureAudioPublished]);
+
+  // Timing accelerant (audio-reconnect round) -- a real capture showed 3
+  // consecutive failures taking 53s wall-clock to accumulate, purely
+  // because the director's own cuts are spaced 9-18s apart
+  // (autoDirector.js's HOLD_RANGE_MS), not because of retries. During
+  // that whole window viewers see nothing and the performer isn't told.
+  // On the FIRST failure of an episode, schedules two small probe
+  // publishes (not real shots -- see publishHealthProbe) to reach the
+  // 3-failure threshold in ~4-6s instead. Capped at exactly two per
+  // episode; cancelled the instant a real publish succeeds (episode
+  // resolved on its own) or the threshold is reached (no longer needed).
+  const probeTimersRef = useRef([]);
 
   useEffect(() => {
     if (!isMainPerformer) return undefined;
+
+    function clearProbeTimers() {
+      probeTimersRef.current.forEach(clearTimeout);
+      probeTimersRef.current = [];
+    }
+
+    function scheduleProbes() {
+      clearProbeTimers(); // never stack multiple episodes
+      logHealthEvent('health_probe_episode_started', {});
+      [2000, 4000].forEach((delay) => {
+        const id = setTimeout(() => {
+          publishHealthProbe(room).catch(() => {}); // outcome already logged/notified inside publishHealthProbe -- swallow here so it never becomes an unhandled rejection
+        }, delay);
+        probeTimersRef.current.push(id);
+      });
+    }
+
     const unsubscribe = onPublishOutcome(({ success, connectionState }) => {
       const state = publishRecoveryStateRef.current;
       if (success) {
+        const hadFailures = state.consecutiveFailures > 0;
         state.consecutiveFailures = 0;
         setPublishWarning(false);
+        if (hadFailures) clearProbeTimers(); // real recovery happened on its own -- no need to probe
         return;
       }
+      const wasFirstFailure = state.consecutiveFailures === 0;
       state.consecutiveFailures += 1;
+      if (wasFirstFailure && connectionState === ConnectionState.Connected) {
+        scheduleProbes();
+      }
       if (state.consecutiveFailures < 3) return;
+      clearProbeTimers(); // threshold reached -- no more probes needed for this episode
       if (state.recoveryAttempted) {
         // Already used the one automatic attempt -- per spec, no further
         // automatic retries. Surface the persistent warning instead.
@@ -1200,8 +1341,11 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       state.recoveryAttempted = true;
       attemptPublishRecovery('auto');
     });
-    return unsubscribe;
-  }, [isMainPerformer, attemptPublishRecovery]);
+    return () => {
+      unsubscribe();
+      clearProbeTimers();
+    };
+  }, [isMainPerformer, attemptPublishRecovery, room]);
 
   // Phase 2 diagnostic instrumentation -- OS/browser-level audio input
   // device changes (e.g. a Bluetooth headset connecting/disconnecting, or
@@ -1373,23 +1517,37 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [implausibleAspect, myCameraTrackSid]);
 
-  // Phase 2 diagnostic instrumentation (SHOW-1 diagnosis round, Part 3) --
-  // counts RoomEvent.SignalConnected occurrences. Log-only; helps a future
-  // capture show directly whether SignalConnected fires more than once
-  // within a single mount (it fires on every reconnect, not just the
-  // initial connect -- see the audio={false}-vs-manual-publish conflict
-  // noted in the fix (c) recovery effect above) rather than inferring it
-  // from the absence of a downstream event.
+  // Counts RoomEvent.SignalConnected occurrences (Part 3) and, per fix
+  // (b), re-asserts our desired audio state on every occurrence --
+  // confirmed against the compiled @livekit/components-react source that
+  // LiveKitRoom's own SignalConnected handler calls
+  // localParticipant.setMicrophoneEnabled(false) here (audio={false} is
+  // passed unconditionally), which mutes an already-published track it
+  // doesn't know is ours. Rather than fight LiveKitRoom to stop calling
+  // that (not controllable without dropping audio={false}, which would
+  // make it try to acquire its OWN raw mic track instead -- not what we
+  // want given the Case 2 processing chain), this listener runs after
+  // LiveKitRoom's (registered earlier, in the parent component) and
+  // simply re-asserts: republish if missing (ensureAudioPublished), then
+  // unmute if muted and the performer's own toggle says it should be on.
+  // The unmute itself isn't separately logged here -- it fires
+  // RoomEvent.TrackUnmuted, already captured generically by the room+
+  // track lifecycle effect's onTrackUnmuted above.
   const signalConnectedCountRef = useRef(0);
   useEffect(() => {
     if (!isMainPerformer) return undefined;
-    function onSignalConnected() {
+    async function onSignalConnected() {
       signalConnectedCountRef.current += 1;
       logHealthEvent('signal_connected', { occurrence: signalConnectedCountRef.current });
+      await ensureAudioPublished('signal_connected');
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (pub?.isMuted && micOn) {
+        pub.unmute();
+      }
     }
     room.on(RoomEvent.SignalConnected, onSignalConnected);
     return () => room.off(RoomEvent.SignalConnected, onSignalConnected);
-  }, [isMainPerformer, room]);
+  }, [isMainPerformer, room, ensureAudioPublished, micOn]);
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
