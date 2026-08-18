@@ -1840,6 +1840,25 @@ button {
   text-shadow: var(--text-halo), 0 0 8px rgba(255, 159, 28, 0.5);
 }
 
+/* Fix (c) (SHOW-1 diagnosis round) -- manual reconnect action, appended
+   to the live banner alongside .lifecycle-warning above. Orange-tinted
+   to match that warning's accent rather than .end-show-btn's red, which
+   is reserved for the destructive end-of-show action. */
+.reconnect-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  background: rgba(255, 159, 28, 0.15);
+  color: #fdfffc;
+  border: 1px solid rgba(255, 159, 28, 0.5);
+  text-shadow: var(--text-halo);
+}
+
+.reconnect-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Add-camera QR panel (SHOW_LIFECYCLE_SPEC.md section 4) -- top-right,
    below .stage-topbar. Phase 4 -- was top:12px, which put its own toggle
    button's box (roughly top:12-50px) directly inside the maximize
