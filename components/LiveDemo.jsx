@@ -969,89 +969,6 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     };
   }, [room]);
 
-  // Fix (c) (SHOW-1 diagnosis round) -- publish-failure recovery.
-  // Root cause (confirmed against the compiled livekit-client source):
-  // RTCEngine.ensurePublisherConnected() memoizes its connection-
-  // establishment promise in this.publisherConnectionPromise on first
-  // call and never resets it except via a transport onStateChange
-  // callback that never gets attached if the very first call failed
-  // because pcManager wasn't constructed yet. Once poisoned, EVERY
-  // subsequent publishData call on that engine replays the same cached
-  // rejection forever, regardless of room.state genuinely reading
-  // 'connected' -- confirmed against a real health_events capture from
-  // the main-performer-refresh test (shot_publish_failure with
-  // connectionState:"connected" repeating for 2+ minutes, including
-  // decisionSource:"human" taps).
-  //
-  // The only way to clear it is a fresh RTCEngine -- confirmed via
-  // Room.maybeCreateEngine()/recreateEngine() in the SDK source: a
-  // proper room.disconnect() followed by room.connect() on this SAME
-  // Room object (not a new React-level LiveKitRoom mount) creates a
-  // genuinely new engine with a fresh, unpoisoned
-  // publisherConnectionPromise. Staying on the same Room/RoomInner
-  // instance is also what makes "preserve show/session state" free --
-  // role, sessionToken, activeShot, audioNodes/audioContext (soundcheck
-  // tuning) all live in this component's own state, untouched by a
-  // reconnect on the room object underneath it.
-  //
-  // Known, accepted side effect this round (audio fix explicitly
-  // deferred -- see the Part 3 finding): a reconnect re-fires
-  // RoomEvent.SignalConnected, which LiveKitRoom's own internal handler
-  // uses to call setMicrophoneEnabled(audio prop) -- audio={false} here
-  // means an already-published processed audio track gets muted again,
-  // and nothing re-publishes it (same gap Phase 1 found for a plain
-  // network-blip reconnect). A recovery here can therefore interrupt
-  // audio as a side effect of fixing video-shot delivery. Not fixed in
-  // this round by design; flagged so it isn't mistaken for a new bug
-  // when observed during testing.
-  const publishRecoveryStateRef = useRef({ consecutiveFailures: 0, recoveryAttempted: false });
-  const [publishWarning, setPublishWarning] = useState(false);
-  const [recoveringPublish, setRecoveringPublish] = useState(false);
-
-  const attemptPublishRecovery = useCallback(async (trigger) => {
-    if (!connToken || !connServerUrl) return; // shouldn't happen once joined, but never throw into a click handler
-    setRecoveringPublish(true);
-    logHealthEvent('publish_recovery_attempt', { trigger, connectionState: room.state });
-    try {
-      await room.disconnect();
-      await room.connect(connServerUrl, connToken);
-      logHealthEvent('publish_recovery_outcome', { trigger, outcome: 'reconnected', connectionState: room.state });
-      // Reset the counter so the NEXT publish attempt gets a clean read --
-      // whether the recovery actually fixed things is confirmed by that
-      // next shot_publish_success/failure, not assumed here.
-      publishRecoveryStateRef.current.consecutiveFailures = 0;
-    } catch (err) {
-      logHealthEvent('publish_recovery_outcome', { trigger, outcome: 'failed', error: String(err?.message || err) });
-      setPublishWarning(true);
-    } finally {
-      setRecoveringPublish(false);
-    }
-  }, [room, connToken, connServerUrl]);
-
-  useEffect(() => {
-    if (!isMainPerformer) return undefined;
-    const unsubscribe = onPublishOutcome(({ success, connectionState }) => {
-      const state = publishRecoveryStateRef.current;
-      if (success) {
-        state.consecutiveFailures = 0;
-        setPublishWarning(false);
-        return;
-      }
-      state.consecutiveFailures += 1;
-      if (state.consecutiveFailures < 3) return;
-      if (state.recoveryAttempted) {
-        // Already used the one automatic attempt -- per spec, no further
-        // automatic retries. Surface the persistent warning instead.
-        setPublishWarning(true);
-        return;
-      }
-      if (connectionState !== ConnectionState.Connected) return; // trigger is scoped to "connected but failing", not a visible disconnect
-      state.recoveryAttempted = true;
-      attemptPublishRecovery('auto');
-    });
-    return unsubscribe;
-  }, [isMainPerformer, attemptPublishRecovery]);
-
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
@@ -1202,6 +1119,89 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // sentinels below.
   const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
+
+  // Fix (c) (SHOW-1 diagnosis round) -- publish-failure recovery.
+  // Root cause (confirmed against the compiled livekit-client source):
+  // RTCEngine.ensurePublisherConnected() memoizes its connection-
+  // establishment promise in this.publisherConnectionPromise on first
+  // call and never resets it except via a transport onStateChange
+  // callback that never gets attached if the very first call failed
+  // because pcManager wasn't constructed yet. Once poisoned, EVERY
+  // subsequent publishData call on that engine replays the same cached
+  // rejection forever, regardless of room.state genuinely reading
+  // 'connected' -- confirmed against a real health_events capture from
+  // the main-performer-refresh test (shot_publish_failure with
+  // connectionState:"connected" repeating for 2+ minutes, including
+  // decisionSource:"human" taps).
+  //
+  // The only way to clear it is a fresh RTCEngine -- confirmed via
+  // Room.maybeCreateEngine()/recreateEngine() in the SDK source: a
+  // proper room.disconnect() followed by room.connect() on this SAME
+  // Room object (not a new React-level LiveKitRoom mount) creates a
+  // genuinely new engine with a fresh, unpoisoned
+  // publisherConnectionPromise. Staying on the same Room/RoomInner
+  // instance is also what makes "preserve show/session state" free --
+  // role, sessionToken, activeShot, audioNodes/audioContext (soundcheck
+  // tuning) all live in this component's own state, untouched by a
+  // reconnect on the room object underneath it.
+  //
+  // Known, accepted side effect this round (audio fix explicitly
+  // deferred -- see the Part 3 finding): a reconnect re-fires
+  // RoomEvent.SignalConnected, which LiveKitRoom's own internal handler
+  // uses to call setMicrophoneEnabled(audio prop) -- audio={false} here
+  // means an already-published processed audio track gets muted again,
+  // and nothing re-publishes it (same gap Phase 1 found for a plain
+  // network-blip reconnect). A recovery here can therefore interrupt
+  // audio as a side effect of fixing video-shot delivery. Not fixed in
+  // this round by design; flagged so it isn't mistaken for a new bug
+  // when observed during testing.
+  const publishRecoveryStateRef = useRef({ consecutiveFailures: 0, recoveryAttempted: false });
+  const [publishWarning, setPublishWarning] = useState(false);
+  const [recoveringPublish, setRecoveringPublish] = useState(false);
+
+  const attemptPublishRecovery = useCallback(async (trigger) => {
+    if (!connToken || !connServerUrl) return; // shouldn't happen once joined, but never throw into a click handler
+    setRecoveringPublish(true);
+    logHealthEvent('publish_recovery_attempt', { trigger, connectionState: room.state });
+    try {
+      await room.disconnect();
+      await room.connect(connServerUrl, connToken);
+      logHealthEvent('publish_recovery_outcome', { trigger, outcome: 'reconnected', connectionState: room.state });
+      // Reset the counter so the NEXT publish attempt gets a clean read --
+      // whether the recovery actually fixed things is confirmed by that
+      // next shot_publish_success/failure, not assumed here.
+      publishRecoveryStateRef.current.consecutiveFailures = 0;
+    } catch (err) {
+      logHealthEvent('publish_recovery_outcome', { trigger, outcome: 'failed', error: String(err?.message || err) });
+      setPublishWarning(true);
+    } finally {
+      setRecoveringPublish(false);
+    }
+  }, [room, connToken, connServerUrl]);
+
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    const unsubscribe = onPublishOutcome(({ success, connectionState }) => {
+      const state = publishRecoveryStateRef.current;
+      if (success) {
+        state.consecutiveFailures = 0;
+        setPublishWarning(false);
+        return;
+      }
+      state.consecutiveFailures += 1;
+      if (state.consecutiveFailures < 3) return;
+      if (state.recoveryAttempted) {
+        // Already used the one automatic attempt -- per spec, no further
+        // automatic retries. Surface the persistent warning instead.
+        setPublishWarning(true);
+        return;
+      }
+      if (connectionState !== ConnectionState.Connected) return; // trigger is scoped to "connected but failing", not a visible disconnect
+      state.recoveryAttempted = true;
+      attemptPublishRecovery('auto');
+    });
+    return unsubscribe;
+  }, [isMainPerformer, attemptPublishRecovery]);
 
   // Phase 2 diagnostic instrumentation -- OS/browser-level audio input
   // device changes (e.g. a Bluetooth headset connecting/disconnecting, or
