@@ -9,7 +9,7 @@ import {
   useDataChannel,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, RoomEvent } from 'livekit-client';
 import { VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
@@ -25,6 +25,7 @@ import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/sho
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
+import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
@@ -172,6 +173,57 @@ function triggerEgress(action, room, performanceMode) {
 // components/ShotRendering.jsx (Stage 4, directed portrait egress) --
 // imported above, reused as-is by both this file and the new egress
 // template.
+
+// Phase 2 diagnostic instrumentation -- log-only 'ended'/'mute'/'unmute'
+// taps on the raw capture track and the published track (see lib/
+// audioProcessing.js's createPilotAudioTrack). 'raw' vs 'published' lets
+// the health-event timeline distinguish a browser/OS-level device event
+// (e.g. a Bluetooth input disappearing -- only ever touches the raw
+// track directly) from the Web Audio graph's own output going quiet
+// while the raw track stays fine. Never touches .enabled or calls
+// .stop() on either track -- observation only, exactly like the existing
+// metering taps in audioProcessing.js this instrumentation sits beside.
+function attachAudioTrackHealthListeners(rawTrack, publishedTrack) {
+  const detachers = [];
+  function attach(track, which) {
+    if (!track) return;
+    const onEnded = () => logHealthEvent('mst_ended', { which, trackId: track.id });
+    const onMute = () => logHealthEvent('mst_muted', { which, trackId: track.id });
+    const onUnmute = () => logHealthEvent('mst_unmuted', { which, trackId: track.id });
+    track.addEventListener('ended', onEnded);
+    track.addEventListener('mute', onMute);
+    track.addEventListener('unmute', onUnmute);
+    detachers.push(() => {
+      track.removeEventListener('ended', onEnded);
+      track.removeEventListener('mute', onMute);
+      track.removeEventListener('unmute', onUnmute);
+    });
+  }
+  attach(rawTrack, 'raw');
+  attach(publishedTrack, 'published');
+  return () => detachers.forEach((fn) => fn());
+}
+
+// Phase 2 diagnostic instrumentation -- classifies WHY the director loop
+// is starting, purely for the health-event log. sessionStorage (survives
+// a same-tab refresh, cleared on tab close) is used ONLY to label the
+// reason; it does not restore any session state -- Phase 1 confirmed
+// nothing does. Distinguishes "first time this tab observed this show
+// live" (mount) from "this tab previously ran the director for this
+// show and is starting again" (recovery -- the signature of a mid-show
+// refresh). The 'transition' case (soundcheck -> live while already
+// mounted and watching) is detected separately at the call site, since
+// it doesn't need sessionStorage at all.
+function classifyDirectorStartReason(showId, role) {
+  try {
+    const key = `healthlog:director-started:${showId}:${role}`;
+    const seen = sessionStorage.getItem(key);
+    sessionStorage.setItem(key, '1');
+    return seen ? 'recovery' : 'mount';
+  } catch {
+    return 'mount'; // storage unavailable -- best-effort label, never throws
+  }
+}
 
 // --- Join flow: performance mode first, then role -----------------------
 // PRD ref: Multi-Camera & Production (Artist, Should/Phase 2).
@@ -824,6 +876,81 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     logCutDebug(`[tracks] camera tracks now: ${tracks.length === 0 ? '(none)' : tracks.map((t) => `${t.participant.identity}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`).join(', ')}`);
   }, [tracks, role]);
 
+  // Phase 2 diagnostic instrumentation -- initialized as soon as this
+  // device's own identity/role are known. Safe to call again if role
+  // changes (e.g. this device just claimed a performer slot mid-session);
+  // initHealthLog only updates context, never resets the queue.
+  useEffect(() => {
+    initHealthLog({
+      showId: ROOM_NAME,
+      participantIdentity: room.localParticipant.identity,
+      role,
+    });
+  }, [room, role]);
+
+  // Room + track lifecycle -> health_events (Phase 2). Log-only: never
+  // reacts to any of these by changing show behavior. Attached once per
+  // room instance (room is stable for the life of this connection).
+  useEffect(() => {
+    function onConnected() { logHealthEvent('room_connected', { state: room.state }); }
+    function onReconnecting() { logHealthEvent('room_reconnecting', { state: room.state }); }
+    function onReconnected() { logHealthEvent('room_reconnected', { state: room.state }); }
+    function onDisconnected(reason) { logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null }); }
+    function onConnectionStateChanged(state) { logHealthEvent('room_connection_state_changed', { state: String(state) }); }
+
+    function trackDetail(pubOrTrack, participant) {
+      return {
+        participantIdentity: participant?.identity ?? null,
+        source: pubOrTrack?.source ?? null,
+        kind: pubOrTrack?.kind ?? null,
+        trackSid: pubOrTrack?.trackSid ?? pubOrTrack?.sid ?? null,
+      };
+    }
+    function onLocalTrackPublished(pub, participant) { logHealthEvent('track_local_published', trackDetail(pub, participant)); }
+    function onLocalTrackUnpublished(pub, participant) { logHealthEvent('track_local_unpublished', trackDetail(pub, participant)); }
+    function onTrackPublished(pub, participant) { logHealthEvent('track_published', trackDetail(pub, participant)); }
+    function onTrackUnpublished(pub, participant) { logHealthEvent('track_unpublished', trackDetail(pub, participant)); }
+    function onTrackSubscribed(track, pub, participant) { logHealthEvent('track_subscribed', trackDetail(pub, participant)); }
+    function onTrackUnsubscribed(track, pub, participant) { logHealthEvent('track_unsubscribed', trackDetail(pub, participant)); }
+    function onTrackMuted(pub, participant) { logHealthEvent('track_muted', trackDetail(pub, participant)); }
+    function onTrackUnmuted(pub, participant) { logHealthEvent('track_unmuted', trackDetail(pub, participant)); }
+
+    room.on(RoomEvent.Connected, onConnected);
+    room.on(RoomEvent.Reconnecting, onReconnecting);
+    room.on(RoomEvent.Reconnected, onReconnected);
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    room.on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    room.on(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
+    room.on(RoomEvent.LocalTrackUnpublished, onLocalTrackUnpublished);
+    room.on(RoomEvent.TrackPublished, onTrackPublished);
+    room.on(RoomEvent.TrackUnpublished, onTrackUnpublished);
+    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+    room.on(RoomEvent.TrackMuted, onTrackMuted);
+    room.on(RoomEvent.TrackUnmuted, onTrackUnmuted);
+
+    // Anchor point: this device's room state as observed at the moment
+    // this listener attached (mount), so a rejoin's very first data point
+    // doesn't depend on catching a live transition after the fact.
+    logHealthEvent('room_state_at_mount', { state: room.state });
+
+    return () => {
+      room.off(RoomEvent.Connected, onConnected);
+      room.off(RoomEvent.Reconnecting, onReconnecting);
+      room.off(RoomEvent.Reconnected, onReconnected);
+      room.off(RoomEvent.Disconnected, onDisconnected);
+      room.off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+      room.off(RoomEvent.LocalTrackPublished, onLocalTrackPublished);
+      room.off(RoomEvent.LocalTrackUnpublished, onLocalTrackUnpublished);
+      room.off(RoomEvent.TrackPublished, onTrackPublished);
+      room.off(RoomEvent.TrackUnpublished, onTrackUnpublished);
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+      room.off(RoomEvent.TrackMuted, onTrackMuted);
+      room.off(RoomEvent.TrackUnmuted, onTrackUnmuted);
+    };
+  }, [room]);
+
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
@@ -836,6 +963,34 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const [audioNodes, setAudioNodes] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
   const audioHandleRef = useRef(null);
+  const detachAudioTrackHealthListenersRef = useRef(null);
+
+  // Page lifecycle -> health_events (Phase 2). All roles -- a viewer's
+  // dropout is as diagnostically useful as the performer's. audioContext
+  // state (performer only, null otherwise) rides along on visibility
+  // changes specifically because that's the documented moment mobile
+  // Safari/Chrome suspend/resume an AudioContext.
+  useEffect(() => {
+    function onVisibilityChange() {
+      logHealthEvent(document.visibilityState === 'hidden' ? 'visibility_hidden' : 'visibility_visible', {
+        audioContextState: audioHandleRef.current?.audioContext?.state ?? null,
+      });
+    }
+    function onPageHide() { logHealthEvent('page_hide', {}); }
+    function onFocus() { logHealthEvent('window_focus', {}); }
+    function onBlur() { logHealthEvent('window_blur', {}); }
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   // Phase 4 (redesign) -- mutual exclusivity between the three floating
   // content panels (SHOTS/AUDIO/VIDEO tech panel, comments, ADD CAMERA):
@@ -947,6 +1102,97 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
+  // Phase 2 diagnostic instrumentation -- OS/browser-level audio input
+  // device changes (e.g. a Bluetooth headset connecting/disconnecting, or
+  // the OS default input switching). 'devicechange' itself doesn't say
+  // WHICH device changed or what's currently active -- that's why the mic
+  // level sampler below also logs the active deviceId/label on every
+  // sample; this event's job is just "something changed, here is the
+  // device list at that moment" for correlation against a silence window.
+  useEffect(() => {
+    if (!isMainPerformer || typeof navigator === 'undefined' || !navigator.mediaDevices) return undefined;
+    async function onDeviceChange() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices
+          .filter((d) => d.kind === 'audioinput')
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || null }));
+        logHealthEvent('audio_devicechange', { audioInputs });
+      } catch {
+        logHealthEvent('audio_devicechange', { audioInputs: null });
+      }
+    }
+    navigator.mediaDevices.addEventListener('devicechange', onDeviceChange);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange);
+  }, [isMainPerformer]);
+
+  // Phase 2 diagnostic instrumentation -- mic-level sampling. Reads
+  // outputAnalyser/inputAnalyser (lib/audioProcessing.js's own metering
+  // taps, already wired in parallel to the signal path -- see that
+  // file's comments) so this never adds a new tap to the graph, only
+  // reads existing ones. Output RMS is what's actually published
+  // (destination.stream, i.e. what a viewer would hear); input RMS is
+  // the pre-processing raw mic level, logged alongside it so a silent
+  // OUTPUT with a live INPUT points at the processing chain, not capture.
+  const micSilenceStateRef = useRef({ silentSince: null, loggedSilent: false });
+  useEffect(() => {
+    if (!isMainPerformer || !audioNodes) return undefined;
+    const SILENCE_RMS_THRESHOLD = 0.001;
+    const SILENCE_LOG_AFTER_MS = 10_000;
+    const outputBuf = new Float32Array(audioNodes.outputAnalyser.fftSize);
+    const inputBuf = new Float32Array(audioNodes.inputAnalyser.fftSize);
+
+    function rms(analyser, buf) {
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    }
+
+    const id = setInterval(() => {
+      const outputRms = rms(audioNodes.outputAnalyser, outputBuf);
+      const inputRms = rms(audioNodes.inputAnalyser, inputBuf);
+      const rawTrack = audioHandleRef.current?.rawStream?.getAudioTracks?.()[0] ?? null;
+      const settings = rawTrack?.getSettings?.() ?? {};
+      const audioContextState = audioHandleRef.current?.audioContext?.state ?? null;
+
+      logHealthEvent('mic_level_sample', {
+        outputRms,
+        inputRms,
+        audioContextState,
+        deviceId: settings.deviceId ?? null,
+        deviceLabel: rawTrack?.label ?? null,
+      });
+
+      const state = micSilenceStateRef.current;
+      if (outputRms < SILENCE_RMS_THRESHOLD) {
+        if (state.silentSince == null) state.silentSince = Date.now();
+        if (!state.loggedSilent && Date.now() - state.silentSince >= SILENCE_LOG_AFTER_MS) {
+          state.loggedSilent = true;
+          logHealthEvent('mic_silent', {
+            outputRms,
+            inputRms,
+            audioContextState,
+            silentSinceMs: state.silentSince,
+          });
+        }
+      } else if (state.silentSince != null) {
+        if (state.loggedSilent) {
+          logHealthEvent('mic_recovered', {
+            outputRms,
+            inputRms,
+            audioContextState,
+            silentDurationMs: Date.now() - state.silentSince,
+          });
+        }
+        state.silentSince = null;
+        state.loggedSilent = false;
+      }
+    }, 5000);
+
+    return () => clearInterval(id);
+  }, [isMainPerformer, audioNodes]);
+
   // Stage 1 of the portrait capture work -- what the local camera is
   // ACTUALLY delivering right now, read live off the real track, never
   // assumed from role/device. Debug-only surface for verifying capture
@@ -1042,12 +1288,29 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       // into the same graph.
       setAudioNodes(handle.nodes);
       setAudioContext(handle.audioContext);
+
+      // Phase 2 diagnostic instrumentation (log-only, see
+      // attachAudioTrackHealthListeners above) -- taps both the raw
+      // capture track and the published track for 'ended'/'mute'/'unmute',
+      // and the AudioContext for state transitions. None of this changes
+      // what's captured, processed, or published.
+      detachAudioTrackHealthListenersRef.current = attachAudioTrackHealthListeners(
+        handle.rawStream?.getAudioTracks?.()[0] ?? null,
+        handle.processedTrack
+      );
+      handle.audioContext.onstatechange = () => {
+        logHealthEvent('audiocontext_statechange', { state: handle.audioContext.state });
+      };
+
       await room.localParticipant.publishTrack(handle.processedTrack, {
         source: Track.Source.Microphone,
       });
     })();
     return () => {
+      detachAudioTrackHealthListenersRef.current?.();
+      detachAudioTrackHealthListenersRef.current = null;
       if (audioHandleRef.current) {
+        if (audioHandleRef.current.audioContext) audioHandleRef.current.audioContext.onstatechange = null;
         room.localParticipant.unpublishTrack(audioHandleRef.current.processedTrack);
       }
     };
@@ -1555,6 +1818,19 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     });
     broadcastShotCommand(room, command);
     setActiveShot((prev) => ({ ...prev, [command.slot]: command }));
+    // Phase 2 diagnostic instrumentation -- every command the director
+    // loop itself emits (scheduled cuts + the L6-2 forced failover both
+    // route through here). Human taps from DirectorShotPanel are a
+    // separate path and deliberately not logged under this event --
+    // this one specifically answers "is the director loop still
+    // producing commands."
+    logHealthEvent('director_shot_emitted', {
+      shot: command.shot,
+      slot: command.slot,
+      decisionSource: command.decisionSource,
+      targetIdentity: command.targetIdentity,
+      sourceRole: command.sourceRole,
+    });
   }, [room, role]);
 
   const getAutoAvailableShots = useCallback(() => {
@@ -1601,7 +1877,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // real unmount (or the rare case room/role itself changes) -- a stale
   // timer firing from an object nothing references anymore would be a
   // leak. Mirrors the sequencer's own cleanup in DirectorShotPanel.
-  useEffect(() => () => auto?.stop(), [auto]);
+  useEffect(() => () => {
+    auto?.stop();
+    // Phase 2 diagnostic instrumentation -- this cleanup path fires on
+    // genuine unmount (e.g. a refresh) as well as the rare room/role
+    // change; the 'ended' path below logs its own, more specific reason,
+    // so a healthy show produces both a 'show_ended' stop and this
+    // 'unmount' stop back to back -- an 'unmount' stop with NO preceding
+    // 'show_ended' stop is the signature this instrumentation exists to
+    // catch (Phase 1 hypothesis 1).
+    if (auto) logHealthEvent('director_loop_stopped', { reason: 'unmount' });
+  }, [auto]);
 
   // Single intended entry points for auto's lifecycle -- nothing else
   // should call auto.start()/auto.stop() directly. Wired below (L4).
@@ -1612,6 +1898,20 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   function stopAuto() {
     auto?.stop();
   }
+
+  // Phase 2 diagnostic instrumentation -- proof-of-life heartbeat,
+  // independent of whether a cut actually fires (auto's hold times run
+  // up to ~18s, and the human-override cooldown is 45s -- long enough
+  // that "no shot_command for a while" is ambiguous between "loop is
+  // dead" and "loop is alive and just holding/cooling down" without
+  // this).
+  useEffect(() => {
+    if (!auto) return undefined;
+    const id = setInterval(() => {
+      logHealthEvent('director_heartbeat', { state: auto.state });
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [auto]);
 
   // Re-keys auto's start trigger from "first video appears" (Edit 6's
   // original plan) to the show lifecycle (SHOW_LIFECYCLE_SPEC.md 3d):
@@ -1626,17 +1926,34 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // useEffect above this one (auto's own cleanup); this effect only
   // needs to cover the 'ended' transition, a normal state change, not a
   // teardown.
+  //
+  // Phase 2 diagnostic instrumentation -- directorEffectHasRunRef marks
+  // whether THIS invocation is the first time this effect has run since
+  // mount, which is what lets classifyDirectorStartReason distinguish a
+  // start observed on the very first run (this tab's first look at the
+  // show -- 'mount', or 'recovery' if sessionStorage shows this tab
+  // already ran the director for this show before, i.e. a same-tab
+  // refresh) from a start observed on a later run (displayShowState
+  // genuinely flipped to 'live' while already mounted and watching --
+  // unambiguously 'transition', no sessionStorage needed).
   const autoStartedRef = useRef(false);
+  const directorEffectHasRunRef = useRef(false);
   useEffect(() => {
+    const isFirstRun = !directorEffectHasRunRef.current;
+    directorEffectHasRunRef.current = true;
+
     if (!isMainPerformer) return;
     if (displayShowState === 'live' && !autoStartedRef.current) {
       autoStartedRef.current = true;
+      const reason = isFirstRun ? classifyDirectorStartReason(ROOM_NAME, role) : 'transition';
       startAutoIfDirector();
+      logHealthEvent('director_loop_started', { reason });
     }
     if (displayShowState === 'ended') {
       stopAuto();
+      logHealthEvent('director_loop_stopped', { reason: 'show_ended' });
     }
-  }, [isMainPerformer, displayShowState]);
+  }, [isMainPerformer, displayShowState, role]);
 
   // The SHOW_LIVE send side, deferred here from L2/L3 (3a: "the director
   // device also broadcasts... at the moment soundcheck->live flips").
@@ -1792,11 +2109,20 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
           showId={ROOM_NAME}
           availableRoles={directorAvailableRoles}
           tracks={tracks}
-          onExclusiveMode={(on) => (on ? auto?.suspend() : auto?.resume())}
+          onExclusiveMode={(on) => {
+            // Phase 2 diagnostic instrumentation -- log-only, call
+            // unchanged from before.
+            logHealthEvent(on ? 'director_suspend' : 'director_resume', {});
+            if (on) auto?.suspend(); else auto?.resume();
+          }}
           onHumanCommand={() => auto?.notifyHumanCommand()}
           onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
           autoState={autoState}
-          onToggleAuto={() => (autoState === 'off' ? auto?.enable() : auto?.disable())}
+          onToggleAuto={() => {
+            const turningOn = autoState === 'off';
+            logHealthEvent(turningOn ? 'director_enable' : 'director_disable', {});
+            if (turningOn) auto?.enable(); else auto?.disable();
+          }}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
           feedsCollapsed={feedsCollapsed}
