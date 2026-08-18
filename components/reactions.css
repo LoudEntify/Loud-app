@@ -1138,15 +1138,30 @@ button {
    that topbar/chrome offsets could throw off.
    Left at inset:0 (mobile default) if the variable isn't set yet on
    first paint -- aspect-ratio alone is a safe, harmless fallback shape
-   even before the JS measurement lands. */
+   even before the JS measurement lands.
+   Bug fix (live device test, feature/desktop-portrait-stage): centering
+   via `transform: translateX(-50%)` was wrong -- a `transform` on an
+   ancestor makes it the containing block for `position: fixed`
+   descendants (CSS spec behavior), and .desktop-side-column below is
+   position:fixed. That silently redirected the side columns' left/
+   right/width (meant to resolve against the real viewport) to resolve
+   against THIS narrow ~500px box instead, landing both columns
+   overlapping/inside the centered stage rather than beside it --
+   confirmed via a standalone repro harness loading this exact
+   stylesheet (getBoundingClientRect showed .desktop-side-column--left
+   at the same x-range as .stage-root itself). Centering via
+   `margin: 0 auto` instead achieves the same visual result (a box with
+   left:0/right:0 and an explicit width auto-centers via its margins)
+   without introducing a transform, so .desktop-side-column's
+   position:fixed correctly resolves against the viewport again. */
 @media (min-width: 1025px) {
   .stage-root {
     position: absolute;
-    inset: 0 auto 0 50%;
+    inset: 0;
     height: 100%;
     width: var(--portrait-stage-width, auto);
     aspect-ratio: 9 / 16;
-    transform: translateX(-50%);
+    margin: 0 auto;
   }
 }
 
@@ -1915,6 +1930,34 @@ button {
   max-width: 90vw;
   background: transparent;
   text-shadow: var(--text-halo);
+}
+
+/* Desktop portrait stage -- .lifecycle-banner is a sibling of .stage-root
+   in the DOM (rendered directly by RoomInner, LiveDemo.jsx), not scoped
+   inside it, and stays position:fixed/centered on the real viewport at
+   this breakpoint too. At mobile widths .stage-topbar sits inside a
+   full-bleed .stage-root so there's no collision, but on desktop
+   .stage-root narrows to a centered ~500px column while this banner
+   stays viewport-centered -- both end up horizontally centered on the
+   same spot, so top:12px collides with .stage-topbar's "YOU'RE LIVE"
+   label directly above it (confirmed via a repro harness: same x-range,
+   overlapping y-range). Pushed below the topbar's own zone at this
+   breakpoint only. 96px (matching .desktop-side-column's own top
+   offset) cleared the topbar but the repro harness showed it still
+   colliding with .stage-side-panel--broadcast's (COMMENTS) header --
+   comments starts at top:112px (pre-existing, unrelated value) plus its
+   own ~26px header, and the banner is viewport-centered while comments
+   sits right:24px against the now-narrow, roughly-centered stage-root,
+   so their horizontal ranges overlap almost fully on desktop. 152px
+   clears both with margin.
+   Declared AFTER the base rule above so it wins the cascade at equal
+   specificity (one class each) -- a media-scoped override placed BEFORE
+   its base rule loses to it despite matching, a real mistake caught by
+   re-checking source order, not just assuming the @media block wins. */
+@media (min-width: 1025px) {
+  .lifecycle-banner {
+    top: 152px;
+  }
 }
 
 .soundcheck-reminder {
