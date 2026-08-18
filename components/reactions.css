@@ -1224,6 +1224,23 @@ button {
   .desktop-side-column--right {
     right: 24px;
   }
+
+  /* Mic/cam/flip/leave controls are NOT relocated to a side column (not
+     named in the spec's panel list) -- they stay in the portrait stage,
+     same as mobile. But .stage-bottom-overlay is position:fixed
+     (viewport-relative) everywhere else, so left:0;right:0 would span
+     the FULL desktop viewport -- including the blur-fill either side --
+     rather than staying within the now-narrower .stage-root box.
+     Switching to position:absolute here makes left:0/right:0/bottom:0
+     resolve against .stage-root instead (the nearest positioned
+     ancestor, since .stage-root is itself position:absolute) --
+     BroadcastStage.jsx's own JSX/props are completely unchanged, this
+     is a pure positioning-scheme swap. .stage-side-panel (comments)
+     needs no equivalent override -- it's already position:absolute, so
+     it already resolves against the narrowed box automatically. */
+  .stage-bottom-overlay {
+    position: absolute;
+  }
 }
 
 /* The panel's own box is a sibling of .stage-video-area with a higher

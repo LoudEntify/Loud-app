@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate, CaretDown, CaretUp, CaretLeft, CaretRight } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
@@ -10,6 +10,7 @@ import SwipePages from './SwipePages';
 import DirectorShotPanel from './DirectorShotPanel';
 import AudioDeckPanel from './AudioDeckPanel';
 import VideoDeckPanel from './VideoDeckPanel';
+import { useIsDesktopViewport } from '../lib/useIsDesktopViewport';
 
 // Sizing constants for the deck drag-resize / bottom-overlay offset math.
 // MIC_CAM_HEIGHT is a measured estimate of the mic/cam row's rendered
@@ -107,6 +108,28 @@ export default function BroadcastStage({
   const draggingRef = useRef(false);
   const [deckHeight, setDeckHeight] = useState(DEFAULT_DECK_HEIGHT);
 
+  // Desktop portrait stage (display-only) -- isDesktop picks which
+  // wrapper structure holds the SAME DirectorShotPanel/AudioDeckPanel/
+  // VideoDeckPanel instances (see the render below); portraitStageWidth
+  // is fed to reactions.css as --portrait-stage-width so the side
+  // columns can size themselves off the stage's actual rendered width
+  // rather than a naive 100vh-based calc. ResizeObserver (not a resize
+  // listener) since .stage-root's own width can change from things
+  // other than a window resize -- e.g. the sidebar collapsing/expanding
+  // shifts how much space PageShell hands this component.
+  const isDesktop = useIsDesktopViewport();
+  const [portraitStageWidth, setPortraitStageWidth] = useState(null);
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect?.width;
+      if (width) setPortraitStageWidth(width);
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+
   // deckCollapsed/onToggleDeckCollapsed (Phase 4) moved up to RoomInner
   // (LiveDemo.jsx) -- it now needs to coordinate with commentsCollapsed
   // and the QR panel's own open state (mutual exclusivity: opening one
@@ -155,7 +178,11 @@ export default function BroadcastStage({
   };
 
   return (
-    <div className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`} ref={stageRef}>
+    <div
+      className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`}
+      ref={stageRef}
+      style={portraitStageWidth ? { '--portrait-stage-width': `${portraitStageWidth}px` } : undefined}
+    >
       {/* stage-video-area--versus modifier retired in Phase 2 (redesign) --
           it existed only to widen/reshape the phone-box for versus mode,
           which no longer exists (video is always full-bleed now). */}
@@ -251,101 +278,165 @@ export default function BroadcastStage({
             folded into .deck-divider so it works identically on mobile,
             where the divider itself is hidden. onToggleDeckCollapsed
             (Phase 4) now lives in RoomInner, coordinated with comments/QR
-            mutual exclusivity -- see LiveDemo.jsx. */}
-        <div className="deck-toggle-row">
-          <button
-            type="button"
-            className="deck-collapse-btn"
-            onClick={onToggleDeckCollapsed}
-            aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
-          >
-            {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
-          </button>
-        </div>
-
-        {!deckCollapsed && (
-          <div
-            className="deck-divider"
-            onPointerDown={onDividerPointerDown}
-            onPointerMove={onDividerPointerMove}
-            onPointerUp={onDividerPointerUp}
-            onPointerCancel={onDividerPointerUp}
-            role="slider"
-            aria-label="resize control deck"
-            aria-valuemin={MIN_DECK_HEIGHT}
-            aria-valuemax={Math.round(clampDeckHeight(Infinity))}
-            aria-valuenow={Math.round(deckHeight)}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
-              if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
-            }}
-          >
-            <div className="drag-handle portrait">
-              <span className="drag-dot" />
-              <span className="drag-dot" />
-              <span className="drag-dot" />
+            mutual exclusivity -- see LiveDemo.jsx.
+            Desktop portrait stage -- this whole SwipePages deck (SHOTS/
+            AUDIO/VIDEO tabs) only renders here on MOBILE now; on desktop
+            the exact same DirectorShotPanel/AudioDeckPanel/VideoDeckPanel
+            instances render instead in the side columns below, docked as
+            separate floating panels instead of tabbed. isDesktop is a
+            single render branch (never both at once) specifically
+            because DirectorShotPanel/VideoDeckPanel can both act on the
+            live room (staccato sequencer, active-performer switch) --
+            see lib/useIsDesktopViewport.js for why this is JS-branched
+            rather than a pure CSS show/hide of two mounted copies. */}
+        {!isDesktop && (
+          <>
+            <div className="deck-toggle-row">
+              <button
+                type="button"
+                className="deck-collapse-btn"
+                onClick={onToggleDeckCollapsed}
+                aria-label={deckCollapsed ? 'show panel' : 'hide panel'}
+              >
+                {deckCollapsed ? <CaretUp size={14} weight="bold" /> : <CaretDown size={14} weight="bold" />}
+              </button>
             </div>
-          </div>
-        )}
 
-        <div
-          className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
-          style={{ '--deck-height': `${deckHeight}px` }}
-        >
-          <SwipePages
-            pages={[
-              {
-                key: 'shots',
-                label: 'SHOTS',
-                content: (
-                  <DirectorShotPanel
-                    room={room}
-                    showId={showId}
-                    slot={role}
-                    availableRoles={availableRoles}
-                    tracks={tracks}
-                    showPhase={showPhase}
-                    onExclusiveMode={onExclusiveMode}
-                    onHumanCommand={onHumanCommand}
-                    onCommand={onCommand}
-                    autoState={autoState}
-                    onToggleAuto={onToggleAuto}
-                  />
-                ),
-              },
-              {
-                key: 'audio',
-                label: 'AUDIO',
-                content: (
-                  <AudioDeckPanel
-                    nodes={audioNodes}
-                    audioContext={audioContext}
-                    showEnded={showEnded}
-                    showPhase={showPhase}
-                  />
-                ),
-              },
-              {
-                key: 'video',
-                label: 'VIDEO',
-                content: (
-                  <VideoDeckPanel
-                    candidates={candidates}
-                    activeIdentity={activeCamera[role]}
-                    onPick={(identity) => setActiveForSlot(role, identity)}
-                  />
-                ),
-              },
-              // Stage 4's SWITCH tab (ActivePerformerSwitcher) is retired --
-              // superseded by SpotlightStage's own interactive thumbnail
-              // strip (floating on the video itself), which now IS the
-              // switch control for slot 'a'. One row, one meaning, no
-              // duplicate thumbnails between a deck tab and the layout.
-            ]}
-          />
-        </div>
+            {!deckCollapsed && (
+              <div
+                className="deck-divider"
+                onPointerDown={onDividerPointerDown}
+                onPointerMove={onDividerPointerMove}
+                onPointerUp={onDividerPointerUp}
+                onPointerCancel={onDividerPointerUp}
+                role="slider"
+                aria-label="resize control deck"
+                aria-valuemin={MIN_DECK_HEIGHT}
+                aria-valuemax={Math.round(clampDeckHeight(Infinity))}
+                aria-valuenow={Math.round(deckHeight)}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') setDeckHeight((h) => clampDeckHeight(h + 12));
+                  if (e.key === 'ArrowDown') setDeckHeight((h) => clampDeckHeight(h - 12));
+                }}
+              >
+                <div className="drag-handle portrait">
+                  <span className="drag-dot" />
+                  <span className="drag-dot" />
+                  <span className="drag-dot" />
+                </div>
+              </div>
+            )}
+
+            <div
+              className={`deck-wrapper ${deckCollapsed ? 'deck-wrapper--collapsed' : ''}`}
+              style={{ '--deck-height': `${deckHeight}px` }}
+            >
+              <SwipePages
+                pages={[
+                  {
+                    key: 'shots',
+                    label: 'SHOTS',
+                    content: (
+                      <DirectorShotPanel
+                        room={room}
+                        showId={showId}
+                        slot={role}
+                        availableRoles={availableRoles}
+                        tracks={tracks}
+                        showPhase={showPhase}
+                        onExclusiveMode={onExclusiveMode}
+                        onHumanCommand={onHumanCommand}
+                        onCommand={onCommand}
+                        autoState={autoState}
+                        onToggleAuto={onToggleAuto}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'audio',
+                    label: 'AUDIO',
+                    content: (
+                      <AudioDeckPanel
+                        nodes={audioNodes}
+                        audioContext={audioContext}
+                        showEnded={showEnded}
+                        showPhase={showPhase}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'video',
+                    label: 'VIDEO',
+                    content: (
+                      <VideoDeckPanel
+                        candidates={candidates}
+                        activeIdentity={activeCamera[role]}
+                        onPick={(identity) => setActiveForSlot(role, identity)}
+                      />
+                    ),
+                  },
+                  // Stage 4's SWITCH tab (ActivePerformerSwitcher) is retired --
+                  // superseded by SpotlightStage's own interactive thumbnail
+                  // strip (floating on the video itself), which now IS the
+                  // switch control for slot 'a'. One row, one meaning, no
+                  // duplicate thumbnails between a deck tab and the layout.
+                ]}
+              />
+            </div>
+          </>
+        )}
       </div>
+
+      {/* Desktop portrait stage -- Shots+Audio docked left, camfeed picker
+          docked right, over the blur-fill (reactions.css's
+          .desktop-side-column). Same panel components as the mobile deck
+          above, same props, just not tabbed -- stacked as separate
+          floating panels per the spec, scrollable if content overflows
+          the column. Comments and mic/cam controls are NOT relocated
+          here (not named in the spec's panel list) -- they stay in their
+          existing positions, which now resolve relative to the narrowed
+          .stage-root box instead of the full viewport (reactions.css's
+          .stage-bottom-overlay desktop override).
+          Scope note: "other participating artists' feed thumbnails" in
+          Versus shows still render via SpotlightStage's own existing
+          thumbnail strip, nested inside the portrait box as it already
+          was -- NOT duplicated into this right column. Moving that strip
+          out would mean touching SpotlightStage's own internals, which
+          this pass deliberately doesn't (it's shared with ViewerStage/
+          EgressPage, reused as-is per the approved plan). */}
+      {isDesktop && (
+        <>
+          <div className="desktop-side-column desktop-side-column--left">
+            <DirectorShotPanel
+              room={room}
+              showId={showId}
+              slot={role}
+              availableRoles={availableRoles}
+              tracks={tracks}
+              showPhase={showPhase}
+              onExclusiveMode={onExclusiveMode}
+              onHumanCommand={onHumanCommand}
+              onCommand={onCommand}
+              autoState={autoState}
+              onToggleAuto={onToggleAuto}
+            />
+            <AudioDeckPanel
+              nodes={audioNodes}
+              audioContext={audioContext}
+              showEnded={showEnded}
+              showPhase={showPhase}
+            />
+          </div>
+          <div className="desktop-side-column desktop-side-column--right">
+            <VideoDeckPanel
+              candidates={candidates}
+              activeIdentity={activeCamera[role]}
+              onPick={(identity) => setActiveForSlot(role, identity)}
+            />
+          </div>
+        </>
+      )}
 
       {/* Comments gets its own minimize/restore arrow, same pattern as the
           deck's down/up toggle. CommentsPanel itself stays ALWAYS mounted
