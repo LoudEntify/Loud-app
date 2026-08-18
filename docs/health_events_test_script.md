@@ -10,6 +10,23 @@ video fine) from a real 2-device pilot-style test.
 1. Run `docs/health_events_migration.sql` in the Supabase SQL editor
    (not run automatically — this is the one step that needs to happen
    before any of this produces rows).
+
+   **Verify it actually landed before doing anything else** — a
+   fail-silent logger writing to a table that doesn't exist produces no
+   error anywhere visible, just silent data loss. Don't trust that the
+   migration ran cleanly just because the SQL editor didn't show a red
+   error; run this and confirm it returns exactly one row:
+
+   ```sql
+   select table_schema, table_name
+   from information_schema.tables
+   where table_name = 'health_events';
+   ```
+
+   Zero rows means the table isn't there — stop and re-run the
+   migration (check for an error you may have missed, wrong project/
+   schema selected, etc.) before proceeding.
+
 2. Confirm the preview deployment: `https://loud-app-git-main-korey-alashe.vercel.app`
    (this is a **Preview** deployment — production, currently served from
    `pilot-freeze-v3`, is untouched by this branch of work; see the
@@ -28,6 +45,22 @@ video fine) from a real 2-device pilot-style test.
    Claim & Go Live on Device A; join as viewer on Device B) and let auto
    run for at least 30s before starting Test 1, so you have a baseline
    `director_heartbeat` cadence to compare against.
+
+5. **Smoke-test the logger before running any deliberate test actions.**
+   With the show live and Device A/B both joined for at least 60s (so at
+   least one batch from each has had time to flush — `lib/healthLog.js`
+   flushes at most once/sec, well under a minute), run:
+
+   ```sql
+   select count(*) from health_events;
+   ```
+
+   This must be nonzero before you start Test 1. If it's still zero
+   after 60s of a joined live session, something in the write path is
+   broken (check the deployed function logs for `[health-events]`
+   warnings before assuming the test itself is the problem) — don't
+   spend time running the refresh/Bluetooth/wifi tests against a logger
+   that isn't writing.
 
 Every event type referenced below is exactly what's implemented in
 `lib/healthLog.js` / `components/LiveDemo.jsx` / `lib/shotCommands.js` —
