@@ -1258,6 +1258,90 @@ button {
   }
 }
 
+/* Live show discovery rail (LiveShowRail.jsx) -- skeleton this round,
+   viewer-only, docked in .desktop-side-column--right (the same column
+   BroadcastStage's VideoDeckPanel uses; viewer never has that column's
+   content, so no collision). Unlike the fully-transparent control
+   panels (DirectorShotPanel/AudioDeckPanel/VideoDeckPanel, which lean
+   entirely on text-halo for legibility over the blur), a scrollable
+   list of CLICKABLE cards needs a real card boundary for hit-target
+   affordance -- the one deliberate exception to this file's "video is
+   the only background" convention, still built from the same Ink/teal
+   tokens (rgba(1,22,39,...) + the existing teal border/glow) rather
+   than any new color or shape language. */
+.live-show-rail-header {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(253, 255, 252, 0.6);
+  text-shadow: var(--text-halo);
+  flex-shrink: 0;
+}
+
+.live-show-rail-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: rgba(1, 22, 39, 0.55);
+  border: 1px solid rgba(46, 196, 182, 0.3);
+  border-radius: 10px;
+  color: #fdfffc;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.live-show-rail-card:hover {
+  border-color: rgba(46, 196, 182, 0.6);
+  box-shadow: 0 0 10px rgba(46, 196, 182, 0.25);
+}
+
+.live-show-rail-poster {
+  position: relative;
+  width: 44px;
+  height: 78px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.live-show-rail-badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fdfffc;
+  background: rgba(1, 22, 39, 0.7);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.live-show-rail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.live-show-rail-artist {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-show-rail-title {
+  font-size: 11px;
+  color: rgba(253, 255, 252, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The panel's own box is a sibling of .stage-video-area with a higher
    z-index, so its full rectangle -- including empty space below a short
    comment list -- would otherwise intercept clicks meant for controls
@@ -1389,6 +1473,42 @@ button {
   filter: var(--icon-halo);
   cursor: pointer;
   z-index: 20;
+}
+
+/* Desktop portrait stage -- mobile's edge-hugging arrow tab (right:0 of
+   the real viewport, via position:fixed) would land either off in the
+   blur-fill gutter or colliding with .desktop-side-column--right
+   (VideoDeckPanel / the live-show rail) depending on gutter width --
+   neither is "a small unobtrusive button/tab" per the spec. Repositioned
+   to resolve against .stage-root instead (position:absolute, same
+   technique as .stage-bottom-overlay's own desktop override), tucked
+   inside the stage's own bottom-right corner -- inside the narrow box
+   means it never needs to know the gutter width or what's docked there.
+   CommentsDock.jsx swaps the tall CaretLeft arrow for a comment-icon +
+   count pill at this breakpoint (same element, same reactions.css-driven
+   position -- only the icon/content changes). */
+@media (min-width: 1025px) {
+  .comments-reveal-tab {
+    position: absolute;
+    top: auto;
+    right: 12px;
+    bottom: 24px;
+    transform: none;
+    width: auto;
+    height: auto;
+    padding: 8px 12px;
+    gap: 6px;
+    border-radius: 999px;
+    border-right: 1px solid rgba(46, 196, 182, 0.5);
+  }
+}
+
+.comments-reveal-tab-count {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fdfffc;
+  text-shadow: var(--text-halo);
 }
 
 /* Comments float directly over video in the side panel -- no background of

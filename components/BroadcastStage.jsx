@@ -5,7 +5,7 @@ import { Microphone, MicrophoneSlash, VideoCamera, VideoCameraSlash, PhoneDiscon
 import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
-import CommentsPanel from './CommentsPanel';
+import CommentsDock from './CommentsDock';
 import SwipePages from './SwipePages';
 import DirectorShotPanel from './DirectorShotPanel';
 import AudioDeckPanel from './AudioDeckPanel';
@@ -438,59 +438,26 @@ export default function BroadcastStage({
         </>
       )}
 
-      {/* Comments gets its own minimize/restore arrow, same pattern as the
-          deck's down/up toggle. CommentsPanel itself stays ALWAYS mounted
-          (never conditionally rendered) -- only VISIBILITY toggles via
-          CSS, so an in-progress typed comment survives a collapse/
-          restore cycle rather than being wiped by an unmount.
-          Fix: the header's own arrow used to be the ONLY way back once
-          collapsed, and lived INSIDE .stage-side-panel -- whose position
-          depends on deckHeight/MIC_CAM_HEIGHT math that can go stale
-          (the mic-cam row can now wrap to 2 lines on narrow widths,
-          Phase 4's 4th button), letting the deck's higher z-index
-          visually cover the whole panel, arrow included, with no way
-          back. Mirrors Sidebar.jsx's own two-element pattern exactly now:
-          the panel itself renders normally when open, and a SEPARATE,
-          independently position:fixed reveal tab (comments-reveal-tab,
-          z-index above the deck) renders ONLY when collapsed -- never
-          nested inside anything whose own sizing could hide it. */}
-      <div
-        className={`stage-side-panel stage-side-panel--broadcast ${commentsCollapsed ? 'stage-side-panel--collapsed' : ''}`}
+      {/* Comments dock (CommentsDock.jsx, shared with ViewerStage) -- see
+          that file for the collapse/reveal-tab pattern and why it's a
+          separate always-mounted panel + independently-positioned
+          reveal tab rather than one element that hides its own header.
+          bottom offset is BroadcastStage-specific (tracks deckHeight,
+          the one real difference from ViewerStage's call site), passed
+          via style/variant rather than duplicated inside the shared
+          component. */}
+      <CommentsDock
+        variant="broadcast"
         style={{ bottom: (deckCollapsed ? 0 : deckHeight) + MIC_CAM_HEIGHT + (deckCollapsed ? 0 : DECK_DIVIDER_HEIGHT) }}
-      >
-        <div className="stage-side-panel-header">
-          <span className="stage-comments-label">COMMENTS</span>
-          <button
-            type="button"
-            className="comments-collapse-btn"
-            onClick={onToggleCommentsCollapsed}
-            aria-label="hide comments"
-          >
-            <CaretDown size={14} weight="bold" />
-          </button>
-        </div>
-        <div className="stage-side-panel-body">
-          <CommentsPanel
-            comments={comments}
-            onSend={sendComment}
-            expanded={commentsExpanded}
-            onExpand={onCommentsExpand}
-            onCollapse={onCommentsCollapse}
-            presentSlots={presentSlots}
-          />
-        </div>
-      </div>
-
-      {commentsCollapsed && (
-        <button
-          type="button"
-          className="comments-reveal-tab"
-          onClick={onToggleCommentsCollapsed}
-          aria-label="show comments"
-        >
-          <CaretLeft size={16} weight="bold" />
-        </button>
-      )}
+        comments={comments}
+        sendComment={sendComment}
+        commentsExpanded={commentsExpanded}
+        onCommentsExpand={onCommentsExpand}
+        onCommentsCollapse={onCommentsCollapse}
+        commentsCollapsed={commentsCollapsed}
+        onToggleCommentsCollapsed={onToggleCommentsCollapsed}
+        presentSlots={presentSlots}
+      />
     </div>
   );
 }

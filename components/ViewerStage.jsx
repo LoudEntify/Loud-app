@@ -1,16 +1,27 @@
 'use client';
 
-import { CaretDown, CaretLeft } from '@phosphor-icons/react';
 import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
-import CommentsPanel from './CommentsPanel';
+import CommentsDock from './CommentsDock';
+import LiveShowRail from './LiveShowRail';
 
 // Desktop fan view -- matches Fan Viewer.dc.html. Solo drops any split
 // entirely. Versus routes to SpotlightStage (Stage 5, MULTI_PERFORMER_
 // SPEC.md) -- VersusSplit's own 50/50 draggable mode is untouched but
 // no longer used by the live-show path, per that spec's locked
 // decision. Every handler is passed straight through from RoomInner.
+//
+// Desktop portrait stage -- viewer shares the exact same .stage-root
+// (centred 9:16 box + BlurFillBackground sibling, both defined once at
+// the shared level: reactions.css's .stage-root override and
+// LiveDemo.jsx's role-agnostic <BlurFillBackground> mount) that
+// BroadcastStage uses -- neither needed duplicating here, the shape
+// treatment was never artist-only. What IS added here, viewer-only, is
+// LiveShowRail: the future "channel surf other live shows" rail docks
+// in the same right-hand gutter BroadcastStage's VideoDeckPanel column
+// occupies, since a viewer never has that column's content competing
+// for the space (no technical panels on this path, matching the spec).
 export default function ViewerStage({
   performanceMode,
   renderSlot,
@@ -53,51 +64,19 @@ export default function ViewerStage({
         />
       </div>
 
-      {/* Same minimize/restore arrow BroadcastStage's comments has, reusing
-          the exact same commentsCollapsed state/control (threaded via
-          stageProps from RoomInner) for a consistent declutter
-          affordance on both roles. Mirrors Sidebar.jsx's own two-element
-          pattern: the panel renders normally when open, and a SEPARATE,
-          independently position:fixed reveal tab renders only when
-          collapsed -- never nested inside anything whose own sizing
-          could hide it (same fix BroadcastStage's comments needed after
-          it got stuck un-reachable there). CommentsPanel itself stays
-          ALWAYS mounted -- only visibility toggles via CSS, so an
-          in-progress typed comment survives a collapse/restore cycle. */}
-      <div className={`stage-side-panel ${commentsCollapsed ? 'stage-side-panel--collapsed' : ''}`}>
-        <div className="stage-side-panel-header">
-          <span className="stage-comments-label">COMMENTS</span>
-          <button
-            type="button"
-            className="comments-collapse-btn"
-            onClick={onToggleCommentsCollapsed}
-            aria-label="hide comments"
-          >
-            <CaretDown size={14} weight="bold" />
-          </button>
-        </div>
-        <div className="stage-side-panel-body">
-          <CommentsPanel
-            comments={comments}
-            onSend={sendComment}
-            expanded={commentsExpanded}
-            onExpand={onCommentsExpand}
-            onCollapse={onCommentsCollapse}
-            presentSlots={presentSlots}
-          />
-        </div>
-      </div>
+      <LiveShowRail />
 
-      {commentsCollapsed && (
-        <button
-          type="button"
-          className="comments-reveal-tab"
-          onClick={onToggleCommentsCollapsed}
-          aria-label="show comments"
-        >
-          <CaretLeft size={16} weight="bold" />
-        </button>
-      )}
+      <CommentsDock
+        variant="viewer"
+        comments={comments}
+        sendComment={sendComment}
+        commentsExpanded={commentsExpanded}
+        onCommentsExpand={onCommentsExpand}
+        onCommentsCollapse={onCommentsCollapse}
+        commentsCollapsed={commentsCollapsed}
+        onToggleCommentsCollapsed={onToggleCommentsCollapsed}
+        presentSlots={presentSlots}
+      />
     </div>
   );
 }
