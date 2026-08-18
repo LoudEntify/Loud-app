@@ -68,40 +68,110 @@ nothing here is aspirational.
 
 ---
 
-## Test 1 — Refresh the performer tab mid-show
+## Test 1 — Refresh the performer tab mid-show (fixes (b)+(c) in place)
 
 **Action:** With the show live and at least one `director_heartbeat`
 already logged, hit refresh (Cmd+R / Ctrl+R) on Device A's tab. Wait
 ~10s, then manually redo the full rejoin flow (gate → mode → role →
 performer code → Claim & Go Live) as quickly as you reasonably would in
-a real show.
+a real show. **Watch Device B (viewer) throughout, not just Device A**
+— the whole point of this test is that Device A's own screen looked
+fine even when it was originally broken.
 
 **Expected rows, healthy system:**
-- `director_loop_stopped {reason: "unmount"}` — logged by the outgoing
-  tab in the instant before the connection drops.
-- `page_hide`, possibly `visibility_hidden` — the outgoing tab's last
-  gasp (delivered via `sendBeacon`, so these should still arrive even
-  though the tab is closing).
+- `director_loop_stopped {reason: "unmount"}`, then `page_hide` /
+  possibly `visibility_hidden` — the outgoing tab's last gasp (via
+  `sendBeacon`), same as before.
 - **A real gap**: zero `director_heartbeat` / `director_shot_emitted` /
-  `shot_publish_success` rows for this show for the entire time between
-  refresh and completing the manual rejoin. This gap is the actual
-  finding — its length is the production-impact number.
-- After rejoin completes: `room_state_at_mount` (new
-  `participant_identity`), `room_connected`, `track_local_published`
-  (audio + video), then **`director_loop_started {reason: "recovery"}`**
-  — this is the row that confirms the mount/transition/recovery
-  classification actually works: it should read `"recovery"`, not
-  `"mount"`, because this browser tab's `sessionStorage` remembers it
-  already ran the director for this show once before.
-- `director_heartbeat` resumes on its normal 10s cadence from the new
-  identity.
+  `shot_publish_success` rows for this show between refresh and
+  completing the manual rejoin. This gap is expected and not itself a
+  regression — it's the known session-loss gap (Phase 1, unchanged this
+  round); its length is the production-impact number.
+- After rejoin: `room_state_at_mount` (new `participant_identity`),
+  `room_connected`. **Fix (b) — this is the row that changed:**
+  `director_loop_started {reason: "recovery"}` should now appear *at or
+  after* `room_connected`'s timestamp, not before it (previously
+  confirmed firing ~280ms *before* `room_connected`). `track_local_published`
+  for video should follow shortly after.
+- `director_heartbeat` resumes on its normal 10s cadence, and
+  `shot_publish_success` rows should appear on the normal auto cadence
+  with **no `shot_publish_failure` rows at all** for the rest of the
+  session. This is the expected outcome now — fix (b) narrows the race
+  significantly for the common case where the rejoin's own connect
+  completes before the director's first scheduled cut (~1s after
+  start).
+- **On Device B:** the viewer should see cuts/zooms resume normally,
+  matching whatever's happening on Device A — this is the actual
+  regression test. Previously this was the broken half (director
+  visibly running locally, viewer stuck).
 
-**What would indicate something's actually broken (beyond the known
-Phase 1 gap):** `director_loop_started` reads `"mount"` instead of
-`"recovery"` on the rejoin (means the reason classification itself has a
-bug); or no `director_loop_started` row at all despite completing the
-rejoin (means auto never actually started — a real regression, not just
-the known session-loss gap).
+**If a `shot_publish_failure` still appears** (fix (b) narrows the race,
+it doesn't provably close it — see the caveat in the commit/code
+comment): expect exactly the fix (c) recovery sequence described in
+Test 1b below, ending in either normal `shot_publish_success` resuming
+or the visible warning banner. That's not a failure of this test by
+itself — it's fix (c) doing its job. What *would* indicate a real
+regression: `shot_publish_failure` rows with no `publish_recovery_attempt`
+following within a few seconds (means the 3-consecutive-failures
+detection isn't firing), or `director_loop_started` reading `"mount"`
+instead of `"recovery"` on the rejoin (means the reason classification
+broke), or no `director_loop_started` row at all despite completing the
+rejoin (means auto never started at all — a real regression, not the
+known session-loss gap).
+
+---
+
+## Test 1b — Forced-failure path (verify the recovery + warning UI)
+
+This exercises fix (c) directly rather than hoping Test 1 happens to hit
+the race. **Caveat up front:** the underlying SDK race (a publish
+landing in the split-second window before the engine's publisher
+transport is ready) is narrow and not deterministically reproducible by
+hand — treat this as "best effort, repeat if it doesn't trigger" rather
+than a guaranteed one-shot repro. The `health_events` rows are the
+authoritative confirmation either way, not what you see on screen.
+
+**Action:** Repeat Test 1's refresh + rejoin, but this time, the instant
+you tap "Claim & Go Live", open Chrome DevTools → Network tab → set
+throttling to **Offline** for ~1–2 seconds, then set it back to **No
+throttling**. The goal is to have the room's signaling connection
+complete (or appear to) while the underlying transport is still
+unsettled, timed around the director's first scheduled cut (~1s after
+`director_loop_started`). If nothing fails, try again — this may take a
+few attempts.
+
+**Expected rows if the race is hit:**
+- Three consecutive `shot_publish_failure` rows (`error: "PC manager is
+  closed"` or similar) with `connectionState: "connected"` each time.
+- `publish_recovery_attempt {trigger: "auto"}` immediately after the 3rd
+  failure, followed by `publish_recovery_outcome` with either
+  `outcome: "reconnected"` or `outcome: "failed"`.
+- **If `"reconnected"`:** the next real shot (auto or a manual tap)
+  should log `shot_publish_success`, and Device B should start receiving
+  cuts again. No warning banner should appear (or it should appear
+  briefly then clear — `publishWarning` clears on the next
+  `shot_publish_success`).
+- **If `"failed"`, or if failures continue after a `"reconnected"`
+  outcome:** the live banner on Device A should show **"⚠ Viewers can't
+  see your cuts — tap to reconnect"** with a **Reconnect** button.
+  Confirm it's actually visible on screen, not just in the data. Tap
+  **Reconnect** and confirm a `publish_recovery_attempt {trigger:
+  "manual"}` row appears, and that a manual tap is repeatable (tapping
+  again after another failure fires another `trigger: "manual"` attempt
+  — only the *automatic* path is limited to one attempt, per spec).
+- Confirm **no more than one** `publish_recovery_attempt {trigger:
+  "auto"}` appears per session — a second automatic attempt without a
+  manual tap in between would be a real bug (the "no infinite retry
+  loops" constraint).
+
+**Known side effect to expect, not a new bug:** if audio was already
+publishing successfully before this test, a reconnect (auto or manual)
+may mute it — `mst_muted {which: "published"}` and/or a gap in
+`mic_level_sample`'s `outputRms`. This is the audio={false}-vs-manual-
+publish conflict from Part 3, explicitly deferred this round; the audio
+publish/mute logging added this round (`audio_publish_attempt/success/
+failure`, `signal_connected`) is what will let us fix it properly next
+round, not something to chase down now.
 
 ---
 
