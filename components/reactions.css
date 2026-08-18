@@ -837,6 +837,23 @@ button {
   pointer-events: none;
 }
 
+/* Desktop portrait stage -- top-of-stage stack (this file's own comment
+   above .lifecycle-banner's desktop override explains the collision
+   history). This bar's own padding/icon size were sized for a
+   full-width stage; at the narrow desktop column they're the first
+   row of a tighter stack, so they're scaled down here -- mobile keeps
+   the original, untouched. */
+@media (min-width: 1025px) {
+  .stage-topbar {
+    padding: 10px 16px;
+  }
+
+  .stage-maximize-btn {
+    width: 26px;
+    height: 26px;
+  }
+}
+
 .stage-topbar-left {
   pointer-events: auto;
 }
@@ -861,6 +878,16 @@ button {
   letter-spacing: 0.12em;
   color: #fdfffc;
   text-shadow: var(--text-halo);
+}
+
+@media (min-width: 1025px) {
+  .stage-live-label {
+    font-size: 10px;
+  }
+
+  .stage-viewer-count {
+    font-size: 10px;
+  }
 }
 
 .stage-viewer-count {
@@ -1379,6 +1406,24 @@ button {
 .stage-side-panel .comment-action-menu,
 .stage-side-panel .stage-side-panel-header {
   pointer-events: auto;
+}
+
+/* Desktop portrait stage -- top:112px (base rule above) was tuned for
+   mobile's ADD CAMERA toggle, never for .lifecycle-banner. That banner
+   is artist-only (BroadcastStage's .stage-side-panel--broadcast), so
+   only that variant needs extra clearance -- ViewerStage's plain
+   .stage-side-panel has nothing above it to avoid and stays at the
+   base 112px even at desktop.
+   Measured worst case via a repro harness with the actual longest
+   content the banner ever renders (LIVE state + the publish-warning/
+   reconnect button): compact .stage-topbar bottoms at ~54px,
+   .lifecycle-banner starts at 48px and -- even at its widest, wrapping
+   only if it truly has to -- bottoms around ~84px. 132px clears that
+   with a real margin, not a just-barely fit. */
+@media (min-width: 1025px) {
+  .stage-side-panel--broadcast {
+    top: 132px;
+  }
 }
 
 /* bottom is set inline in BroadcastStage.jsx, computed from the same
@@ -2052,31 +2097,39 @@ button {
   text-shadow: var(--text-halo);
 }
 
-/* Desktop portrait stage -- .lifecycle-banner is a sibling of .stage-root
-   in the DOM (rendered directly by RoomInner, LiveDemo.jsx), not scoped
-   inside it, and stays position:fixed/centered on the real viewport at
-   this breakpoint too. At mobile widths .stage-topbar sits inside a
-   full-bleed .stage-root so there's no collision, but on desktop
-   .stage-root narrows to a centered ~500px column while this banner
-   stays viewport-centered -- both end up horizontally centered on the
-   same spot, so top:12px collides with .stage-topbar's "YOU'RE LIVE"
-   label directly above it (confirmed via a repro harness: same x-range,
-   overlapping y-range). Pushed below the topbar's own zone at this
-   breakpoint only. 96px (matching .desktop-side-column's own top
-   offset) cleared the topbar but the repro harness showed it still
-   colliding with .stage-side-panel--broadcast's (COMMENTS) header --
-   comments starts at top:112px (pre-existing, unrelated value) plus its
-   own ~26px header, and the banner is viewport-centered while comments
-   sits right:24px against the now-narrow, roughly-centered stage-root,
-   so their horizontal ranges overlap almost fully on desktop. 152px
-   clears both with margin.
-   Declared AFTER the base rule above so it wins the cascade at equal
-   specificity (one class each) -- a media-scoped override placed BEFORE
-   its base rule loses to it despite matching, a real mistake caught by
-   re-checking source order, not just assuming the @media block wins. */
+/* Desktop portrait stage -- top-of-stage stack, live device test round
+   2. .lifecycle-banner is a sibling of .stage-root in the DOM (rendered
+   by RoomInner, LiveDemo.jsx), stays position:fixed/centered on the
+   real viewport at this breakpoint too -- equivalent in practice to
+   being centered on .stage-root itself, since .page-shell--live
+   .page-shell-main is full viewport width at this breakpoint and
+   .stage-root centers within THAT via margin:0 auto (no transform, so
+   no containing-block surprises for this element's own centering).
+   Round 1 fix pushed this to a flat top:152px, sized for the topbar's
+   OLD full padding and the comments header's default top:112px. Round 2
+   live test showed it still colliding: the LIVE-state pill (with the
+   publish-warning/reconnect button, or just "* LIVE"/"END SHOW") and
+   the SOUNDCHECK pill (countdown + reminder) render at meaningfully
+   different widths/heights, and 152px wasn't enough clearance in every
+   case, plus it never accounted for .stage-topbar's own (now-reduced)
+   height changing.
+   Fixed properly this round: both this banner and .stage-topbar are
+   scaled down (padding/font, above) so worst-case wrapped height is
+   small and predictable, AND .stage-side-panel's desktop `top` (below)
+   is pushed down far enough to clear this banner's worst realistic
+   case with real margin, not tuned to a best-case single line -- see
+   that rule's own comment for the specific numbers checked. top:60px
+   here (not a rounder 48px/52px) because the repro harness measured
+   .stage-topbar's own real bottom edge at 54px with its new compact
+   padding -- 48px would have re-created a 6px overlap between the two
+   boxes, caught by re-measuring rather than assuming the compacted
+   topbar's height. */
 @media (min-width: 1025px) {
   .lifecycle-banner {
-    top: 152px;
+    top: 60px;
+    padding: 6px 12px;
+    font-size: 10px;
+    gap: 8px;
   }
 }
 
