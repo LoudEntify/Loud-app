@@ -9,7 +9,7 @@ import {
   useDataChannel,
   useRoomContext,
 } from '@livekit/components-react';
-import { Track, RoomEvent } from 'livekit-client';
+import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 import { VideoCamera, VideoCameraSlash, PhoneDisconnect, CameraRotate } from '@phosphor-icons/react';
 import '@livekit/components-styles';
 
@@ -856,6 +856,22 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
+  // Fix (b), SHOW-1 diagnosis round -- the director-start trigger below
+  // must gate on the ROOM actually being connected, not just on
+  // displayShowState reaching 'live'. Phase 1 audit + the health_events
+  // timeline from the main-performer-refresh test both confirmed
+  // director_loop_started can fire before RoomEvent.Connected (a
+  // rejoining client's displayShowState is often already 'live' the
+  // instant this component mounts, since it derives from a
+  // pre-fetched/cached show row, independent of the room's own connect
+  // handshake). Tracked as React state (not read via room.state
+  // directly in the effect below) so the effect re-evaluates the moment
+  // connection state changes, without needing room.state itself as a
+  // dependency (a fresh property read isn't a stable reference to depend
+  // on). Initialized from room.state directly since Connected/
+  // Reconnected may already have fired before this component mounted.
+  const [roomConnectionState, setRoomConnectionState] = useState(() => room.state);
+
   // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
   // only. Second link in the chain, between "did the SHOT_COMMAND arrive"
   // (the data-channel log below) and "[renderSlot] matched=...": is a
@@ -892,11 +908,11 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // reacts to any of these by changing show behavior. Attached once per
   // room instance (room is stable for the life of this connection).
   useEffect(() => {
-    function onConnected() { logHealthEvent('room_connected', { state: room.state }); }
-    function onReconnecting() { logHealthEvent('room_reconnecting', { state: room.state }); }
-    function onReconnected() { logHealthEvent('room_reconnected', { state: room.state }); }
-    function onDisconnected(reason) { logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null }); }
-    function onConnectionStateChanged(state) { logHealthEvent('room_connection_state_changed', { state: String(state) }); }
+    function onConnected() { setRoomConnectionState(room.state); logHealthEvent('room_connected', { state: room.state }); }
+    function onReconnecting() { setRoomConnectionState(room.state); logHealthEvent('room_reconnecting', { state: room.state }); }
+    function onReconnected() { setRoomConnectionState(room.state); logHealthEvent('room_reconnected', { state: room.state }); }
+    function onDisconnected(reason) { setRoomConnectionState(room.state); logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null }); }
+    function onConnectionStateChanged(state) { setRoomConnectionState(state); logHealthEvent('room_connection_state_changed', { state: String(state) }); }
 
     function trackDetail(pubOrTrack, participant) {
       return {
@@ -1936,6 +1952,25 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // refresh) from a start observed on a later run (displayShowState
   // genuinely flipped to 'live' while already mounted and watching --
   // unambiguously 'transition', no sessionStorage needed).
+  //
+  // Fix (b) (SHOW-1 diagnosis round) -- also require roomConnectionState
+  // === Connected before starting. Confirmed by both the Phase 1 audit
+  // and a real health_events capture: displayShowState can already read
+  // 'live' the instant this component mounts (a rejoining client's show
+  // row is fetched independently of the room's own connect handshake),
+  // which raced director_loop_started ahead of RoomEvent.Connected and
+  // set up the first publishData call to land while the engine's
+  // publisher transport wasn't ready yet -- see broadcastShotCommand's
+  // shot_publish_failure handling (lib/shotCommands.js) and the
+  // publish-failure recovery effect below for what happens if a cut
+  // still gets fired into a not-actually-ready connection. Gating here
+  // narrows how often that can happen; it isn't a guarantee by itself
+  // (room.state flips to Connected on signaling success, which can still
+  // race the engine's own internal transport setup) -- the recovery
+  // effect below is what actually detects and recovers from that
+  // remaining window. roomConnectionState (not room.state read directly)
+  // is the dependency so this effect re-evaluates the moment connection
+  // state changes, without needing a live property read as a dep.
   const autoStartedRef = useRef(false);
   const directorEffectHasRunRef = useRef(false);
   useEffect(() => {
@@ -1943,7 +1978,11 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     directorEffectHasRunRef.current = true;
 
     if (!isMainPerformer) return;
-    if (displayShowState === 'live' && !autoStartedRef.current) {
+    if (
+      displayShowState === 'live' &&
+      roomConnectionState === ConnectionState.Connected &&
+      !autoStartedRef.current
+    ) {
       autoStartedRef.current = true;
       const reason = isFirstRun ? classifyDirectorStartReason(ROOM_NAME, role) : 'transition';
       startAutoIfDirector();
@@ -1953,7 +1992,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       stopAuto();
       logHealthEvent('director_loop_stopped', { reason: 'show_ended' });
     }
-  }, [isMainPerformer, displayShowState, role]);
+  }, [isMainPerformer, displayShowState, role, roomConnectionState]);
 
   // The SHOW_LIVE send side, deferred here from L2/L3 (3a: "the director
   // device also broadcasts... at the moment soundcheck->live flips").
