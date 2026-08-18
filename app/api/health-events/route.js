@@ -53,32 +53,3 @@ export async function POST(request) {
     );
   }
 }
-
-// TEMPORARY -- Phase 2 analysis pass, remove once the timeline pull for
-// the main-performer-refresh test is done. Read-only mirror of the
-// docs/health_events_test_script.md timeline query, exposed here because
-// the analysis environment has no direct DB credential (deliberately --
-// the service-role key is redacted from that shell) but this route
-// already holds it legitimately server-side, same as POST above.
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const showId = searchParams.get('show_id') || 'pilot-room';
-    const admin = getSupabaseAdmin();
-    const { data, error } = await admin
-      .from('health_events')
-      .select('*')
-      .eq('show_id', showId)
-      .order('client_ts', { ascending: true })
-      .limit(2000);
-    if (error) {
-      return NextResponse.json({ ok: false, error: 'Query failed', detail: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true, count: data.length, events: data });
-  } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: 'Request failed', detail: String(err?.message || err) },
-      { status: 500 }
-    );
-  }
-}
