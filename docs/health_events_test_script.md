@@ -164,14 +164,70 @@ few attempts.
   manual tap in between would be a real bug (the "no infinite retry
   loops" constraint).
 
-**Known side effect to expect, not a new bug:** if audio was already
-publishing successfully before this test, a reconnect (auto or manual)
-may mute it — `mst_muted {which: "published"}` and/or a gap in
-`mic_level_sample`'s `outputRms`. This is the audio={false}-vs-manual-
-publish conflict from Part 3, explicitly deferred this round; the audio
-publish/mute logging added this round (`audio_publish_attempt/success/
-failure`, `signal_connected`) is what will let us fix it properly next
-round, not something to chase down now.
+**Updated — no longer an accepted side effect.** Two real recovery tests
+(2026-08-18) confirmed a reconnect (auto or manual) unpublishes the
+processed audio track and nothing republished it, killing audio
+permanently for the rest of the session. That's now fixed
+(`ensureAudioPublished`, wired into the recovery path, `RoomEvent.
+Reconnected`, and `RoomEvent.SignalConnected`) — see Test 1c below for
+what a healthy post-fix recovery should show for audio specifically. If
+audio does NOT resume after a recovery in this test, that's a real
+regression, not an expected side effect anymore.
+
+---
+
+## Test 1c — Audio survives a forced recovery
+
+Run this immediately after Test 1b (or as its own pass) — same
+DevTools-throttling approach to force the fix (c) recovery path, but
+this time watching audio specifically. Do this with the performer
+actually talking/making noise into the mic throughout, and **Device B
+(viewer) with sound on**.
+
+**Expected rows and observations, healthy system:**
+- Everything from Test 1b's recovery sequence (3x `shot_publish_failure`
+  → `publish_recovery_attempt` → `publish_recovery_outcome
+  {outcome:"reconnected"}`).
+- `track_local_unpublished {kind:"audio"}` at the moment of the
+  recovery's `room.disconnect()` — expected, this is the bug's own
+  trigger condition, not a problem by itself.
+- **`ensure_audio_published` with `action:"republished"`** appearing
+  within ~1s of `publish_recovery_outcome` — this is the row that
+  confirms the fix landed. If `action` instead reads
+  `"skipped_no_handle"` here, something's wrong (the mount-time audio
+  effect never set up `audioHandleRef` for this session — check
+  `audio_publish_attempt`/`audio_publish_success` appeared earlier in
+  the timeline). `"track_ended_recreated"` would mean the defensive
+  guard fired — not expected given neither capture so far has shown a
+  genuinely ended track, worth flagging if you see it.
+- **On Device B: audio should audibly resume within a few seconds of
+  `publish_recovery_outcome`'s timestamp.** This is the actual
+  regression test — listen, don't just read the timeline. Compare the
+  wall-clock gap against `publish_recovery_outcome`'s `client_ts`.
+- `mic_level_sample`'s `outputRms` should show continuous real values
+  across the whole recovery window (it always did, even before this
+  fix — the graph was never the problem) — use it alongside what you
+  hear to sanity-check the meter matches reality now, not just before.
+- **Mic toggle check:** after the recovery completes and audio's
+  confirmed back, toggle the mic off then on from the performer UI.
+  Device B should hear it mute and unmute accordingly, matching normal
+  (pre-recovery) toggle behavior. If the toggle appears to do nothing,
+  or Device B's audio doesn't match the toggle state, that's a real
+  finding — note whether `ensure_audio_published`'s `action` was
+  `"republished"` or `"track_ended_recreated"` for this session, since
+  the fix syncs `.enabled` to `micOn` explicitly only in the
+  recreate branch (the normal republish branch relies on it being the
+  same track object, which should already carry the right value).
+
+**Also watch for (SignalConnected path, not just the recovery path):**
+if a plain reconnect happens without going through fix (c) at all (e.g.
+Test 5's wifi drop, which triggers `RoomEvent.Reconnected`/
+`SignalConnected` without ever hitting 3 consecutive publish failures),
+audio should now survive that too — `ensure_audio_published` should
+appear with `trigger:"room_reconnected"` or `trigger:"signal_connected"`
+around that event, even though no `publish_recovery_attempt` occurs.
+Worth a quick check during Test 5 if you have a moment, not just
+Test 1c specifically.
 
 ---
 
