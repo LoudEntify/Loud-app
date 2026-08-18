@@ -1118,6 +1118,114 @@ button {
   }
 }
 
+/* Desktop portrait stage -- reintroduces the centered 9:16 "phone-box"
+   composition that used to exist here (see the Phase 2 redesign comment
+   on .stage-video-area above) and was deliberately removed because the
+   empty Ink space around it "was the problem". Same box shape, brought
+   back ONLY at this breakpoint, now paired with .blur-fill-background
+   filling that space instead of leaving it bare -- solving the exact
+   thing that motivated removing it the first time, without reverting
+   mobile (which keeps full-bleed, untouched, below this breakpoint).
+   Applying this directly to .stage-root -- the one wrapper both
+   BroadcastStage and ViewerStage already share, and that every stage
+   composition (VersusSplit, SpotlightStage, any future one) already
+   fills at width:100%;height:100% -- means the box itself never needs
+   to know or special-case what's rendering inside it.
+   --portrait-stage-width is set inline by BroadcastStage.jsx/LiveDemo.jsx
+   (ResizeObserver-measured, same pattern as --deck-height below) so the
+   blur-fill layer and side columns can size precisely off the stage's
+   actual rendered width rather than assuming a naive 100vh-based calc
+   that topbar/chrome offsets could throw off.
+   Left at inset:0 (mobile default) if the variable isn't set yet on
+   first paint -- aspect-ratio alone is a safe, harmless fallback shape
+   even before the JS measurement lands. */
+@media (min-width: 1025px) {
+  .stage-root {
+    position: absolute;
+    inset: 0 auto 0 50%;
+    height: 100%;
+    width: var(--portrait-stage-width, auto);
+    aspect-ratio: 9 / 16;
+    transform: translateX(-50%);
+  }
+}
+
+/* Full-bleed ambient background, one instance, mounted once in
+   RoomInner (LiveDemo.jsx) as a sibling BEHIND .stage-root -- see
+   components/BlurFillBackground.jsx. Hidden entirely below the desktop
+   breakpoint: .stage-root is full inset:0 there, so it would be fully
+   occluded anyway, but not rendering/attaching the extra <video> at all
+   on mobile avoids a second decode nobody would ever see. */
+.blur-fill-background {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .blur-fill-background {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    background: #011627;
+  }
+
+  .blur-fill-background video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* 35px -- mid-range of the spec's 30-40px guidance. GPU-composited
+       (a separate compositor layer, same mechanism backdrop-blur/PIP-
+       blur backgrounds in production video-call UIs already lean on) --
+       verified against the deployed preview rather than assumed, see
+       the commit that added this rule. */
+    filter: blur(35px);
+    transform: scale(1.08); /* hides the blur's own soft edge fringe at the video's true boundary */
+  }
+
+  .blur-fill-background::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(1, 22, 39, 0.8);
+  }
+}
+
+/* Desktop performer side columns -- Shots+Audio (left) and camfeed/
+   other-performer thumbnails (right), docked over the blur-fill instead
+   of the mobile bottom-overlay/thumbnail-strip positions. Only rendered
+   at all above the breakpoint (BroadcastStage.jsx's own matchMedia
+   check) -- these rules just position what's already there once it is.
+   z-index above .blur-fill-background (0) and .stage-video-area (1),
+   below nothing else on this screen since no other desktop-only overlay
+   competes for the same space. */
+.desktop-side-column {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .desktop-side-column {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 96px;
+    bottom: 24px;
+    z-index: 5;
+    width: calc((100% - var(--portrait-stage-width, 0px)) / 2 - 48px);
+    min-width: 220px;
+    overflow-y: auto;
+    gap: 16px;
+  }
+
+  .desktop-side-column--left {
+    left: 24px;
+  }
+
+  .desktop-side-column--right {
+    right: 24px;
+  }
+}
+
 /* The panel's own box is a sibling of .stage-video-area with a higher
    z-index, so its full rectangle -- including empty space below a short
    comment list -- would otherwise intercept clicks meant for controls

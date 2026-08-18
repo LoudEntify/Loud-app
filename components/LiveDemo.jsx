@@ -17,6 +17,7 @@ import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
 import CameraQRPanel from './CameraQRPanel';
+import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
@@ -2344,6 +2345,29 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     return () => clearInterval(id);
   }, [auto]);
 
+  // Desktop portrait stage (display-only) -- resolves the SAME track the
+  // centre stage is currently showing, for BlurFillBackground. Mirrors
+  // what the centre stage actually renders for EVERY role uniformly
+  // (SpotlightStage's activeSlot for versus, VersusSplit's fixed slot
+  // 'a' for solo) rather than assuming "each performer sees their own
+  // slot" -- in a versus show the artist's own centre stage can be
+  // showing the OTHER performer if a switch happened, and the blur-fill
+  // needs to track that, not role. Same targetIdentity-match-then-
+  // fallback formula RoomInner's own renderSlot (above) and
+  // EgressPage.jsx's renderSlot already duplicate independently --
+  // matching that existing pattern rather than introducing a shared
+  // export for one more consumer.
+  const blurFillSlot = performanceMode === 'versus' ? activePerformerSlot : 'a';
+  const blurFillCandidates = tracksForSlot(blurFillSlot);
+  const blurFillCmd = activeShot[blurFillSlot];
+  const blurFillMatched = blurFillCmd?.targetIdentity
+    ? blurFillCandidates.find((t) => t.participant.identity === blurFillCmd.targetIdentity)
+    : undefined;
+  const blurFillTrackRef =
+    blurFillMatched ||
+    blurFillCandidates.find((t) => t.participant.identity.startsWith(`contestant-${blurFillSlot}-`)) ||
+    blurFillCandidates[0];
+
   const stageProps = {
     performanceMode,
     renderSlot,
@@ -2371,6 +2395,13 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+      {/* Desktop portrait stage (display-only) -- ambient blur-fill,
+          hidden entirely below 1025px (reactions.css). Mounted once here
+          regardless of role (viewer or artist both get it, item 4/5 of
+          the spec); harmless no-op if blurFillTrackRef isn't resolved
+          yet (no video published, show not live) -- BlurFillBackground
+          itself no-ops on a null track. */}
+      <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
       {notice && <div className="stage-notice">{notice}</div>}
 
