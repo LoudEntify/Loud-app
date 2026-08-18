@@ -1373,6 +1373,24 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [implausibleAspect, myCameraTrackSid]);
 
+  // Phase 2 diagnostic instrumentation (SHOW-1 diagnosis round, Part 3) --
+  // counts RoomEvent.SignalConnected occurrences. Log-only; helps a future
+  // capture show directly whether SignalConnected fires more than once
+  // within a single mount (it fires on every reconnect, not just the
+  // initial connect -- see the audio={false}-vs-manual-publish conflict
+  // noted in the fix (c) recovery effect above) rather than inferring it
+  // from the absence of a downstream event.
+  const signalConnectedCountRef = useRef(0);
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    function onSignalConnected() {
+      signalConnectedCountRef.current += 1;
+      logHealthEvent('signal_connected', { occurrence: signalConnectedCountRef.current });
+    }
+    room.on(RoomEvent.SignalConnected, onSignalConnected);
+    return () => room.off(RoomEvent.SignalConnected, onSignalConnected);
+  }, [isMainPerformer, room]);
+
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
   useEffect(() => {
@@ -1403,9 +1421,29 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
         logHealthEvent('audiocontext_statechange', { state: handle.audioContext.state });
       };
 
-      await room.localParticipant.publishTrack(handle.processedTrack, {
-        source: Track.Source.Microphone,
-      });
+      // Phase 2 diagnostic instrumentation (SHOW-1 diagnosis round, Part
+      // 3) -- logging only, per explicit scope: the audio={false}-vs-
+      // manual-publish conflict found this round is NOT fixed here. This
+      // wraps the existing publishTrack call with timing/outcome logging
+      // and rethrows exactly as before (an unhandled rejection on this
+      // un-awaited IIFE, same as pre-existing behavior) so control flow
+      // is unchanged either way -- the absence of track_local_published
+      // previously left no direct signal that this call itself hung or
+      // rejected; this closes that gap.
+      const publishStartedAt = Date.now();
+      logHealthEvent('audio_publish_attempt', {});
+      try {
+        await room.localParticipant.publishTrack(handle.processedTrack, {
+          source: Track.Source.Microphone,
+        });
+        logHealthEvent('audio_publish_success', { durationMs: Date.now() - publishStartedAt });
+      } catch (err) {
+        logHealthEvent('audio_publish_failure', {
+          durationMs: Date.now() - publishStartedAt,
+          error: String(err?.message || err),
+        });
+        throw err;
+      }
     })();
     return () => {
       detachAudioTrackHealthListenersRef.current?.();
