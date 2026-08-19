@@ -22,9 +22,11 @@ import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
+import { useSearchParams } from 'next/navigation';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
+import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import './reactions.css';
@@ -2094,14 +2096,20 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // activeShotRef (not tracks/activeShot directly), same reasoning as
   // everywhere else in this file: stays a stable reference across
   // unrelated re-renders.
-  const fireAutoShot = useCallback((shotKey, decisionSource = 'auto', meta = {}) => {
+  // Shared by fireAutoShot and fireCueShot below -- both need the exact
+  // same resolve-and-broadcast steps, they just differ in which health
+  // event (if any) they log afterward. meta.framingHint is the caller's
+  // intended framing (e.g. 'wide', or a cue's slot_role) even when
+  // shotKey is a technique (zoomIn/zoomOut/pan) standing in for it --
+  // resolving against the hint, not the technique's own ambiguous
+  // 'currentOrSelected' source, is what makes a themed zoom/pan land on
+  // the SAME feed the caller actually chose instead of an arbitrary
+  // first-available role. meta.params (Cue-Sheet Director, Phase 1)
+  // forwards a cue's motion (direction/vertigo) onto the command's
+  // params field -- autoDirector never sets this, so its own behavior
+  // is unchanged.
+  const buildAndFireCommand = useCallback((shotKey, decisionSource, meta = {}) => {
     const roles = availableRoles(role, tracksRef.current);
-    // meta.framingHint is the cycle's intended framing (e.g. 'wide') even
-    // when shotKey is a technique (zoomIn/zoomOut/pan) standing in for
-    // it -- resolving against the hint, not the technique's own ambiguous
-    // 'currentOrSelected' source, is what makes a themed zoom/pan land on
-    // the SAME feed the cycle actually chose instead of an arbitrary
-    // first-available role.
     const sourceRole = resolveSourceRole(meta.framingHint || shotKey, roles);
     const targetIdentity = resolveTargetIdentity(tracksRef.current, role, sourceRole);
     const command = buildShotCommand({
@@ -2112,10 +2120,16 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       sourceRole,
       targetIdentity,
       decisionSource,
+      params: meta.params || {},
       availableRoles: roles,
     });
     broadcastShotCommand(room, command);
     setActiveShot((prev) => ({ ...prev, [command.slot]: command }));
+    return command;
+  }, [room, role]);
+
+  const fireAutoShot = useCallback((shotKey, decisionSource = 'auto', meta = {}) => {
+    const command = buildAndFireCommand(shotKey, decisionSource, meta);
     // Phase 2 diagnostic instrumentation -- every command the director
     // loop itself emits (scheduled cuts + the L6-2 forced failover both
     // route through here). Human taps from DirectorShotPanel are a
@@ -2129,7 +2143,16 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       targetIdentity: command.targetIdentity,
       sourceRole: command.sourceRole,
     });
-  }, [room, role]);
+  }, [buildAndFireCommand]);
+
+  // Cue-Sheet Director (Phase 1) -- cueDirector owns its own health
+  // events (cue_fired/cue_fallback), not 'director_shot_emitted' (that
+  // name specifically means "the auto loop is alive," which this isn't),
+  // so this skips fireAutoShot's logging and just returns the built
+  // command for cueDirector to log against.
+  const fireCueShot = useCallback((shotKey, decisionSource, meta = {}) => (
+    buildAndFireCommand(shotKey, decisionSource, meta)
+  ), [buildAndFireCommand]);
 
   const getAutoAvailableShots = useCallback(() => {
     const roles = availableRoles(role, tracksRef.current);
@@ -2170,6 +2193,84 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
       getCurrentFeed,
     });
   }, [isMainPerformer, room, fireAutoShot, getAutoAvailableShots, resolveAutoFeed, getCurrentFeed]);
+
+  // ─── Cue-Sheet Director (Phase 1, dev-only trigger) ──────────
+  // ?cueSheet=<id> loads one hand-written cue sheet and plays it against
+  // the backing track's own clock instead of relying on the Manual/Auto
+  // toggle -- that toggle and autoState are untouched this phase, per
+  // the CD-3 boundary. cueSheetSearchParams reads once; the id is not
+  // expected to change during a session.
+  const cueSheetSearchParams = useSearchParams();
+  const cueSheetId = cueSheetSearchParams.get('cueSheet');
+  const [cueSheet, setCueSheet] = useState(null);
+
+  useEffect(() => {
+    if (!cueSheetId) return undefined;
+    let cancelled = false;
+    fetch(`/api/cue-sheets/${cueSheetId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+      .then((data) => {
+        if (!cancelled) setCueSheet(data.sheet);
+      })
+      .catch((err) => console.warn('[cueDirector] failed to load cue sheet', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [cueSheetId]);
+
+  // The backing-track player instance is otherwise private to
+  // AudioDeckPanel/BackingTrackPanel (components/AudioDeckPanel.jsx) --
+  // this ref is the one place it surfaces up to where shot commands are
+  // actually built. getElapsed() returns seconds (Web Audio
+  // AudioContext.currentTime arithmetic, lib/audioProcessing.js); cue
+  // timestamp_ms is milliseconds, hence the *1000 below.
+  const backingTrackPlayerRef = useRef(null);
+  const handleBackingPlayerChange = useCallback((player) => {
+    backingTrackPlayerRef.current = player;
+  }, []);
+  const getBackingTrackState = useCallback(() => {
+    const player = backingTrackPlayerRef.current;
+    if (!player) return { elapsedMs: 0, isPlaying: false };
+    return { elapsedMs: player.getElapsed() * 1000, isPlaying: player.isPlaying() };
+  }, []);
+
+  const cueDirector = useMemo(() => {
+    if (!isMainPerformer || !room || !cueSheet) return null;
+    return createCueDirector({
+      sheet: cueSheet,
+      fireShot: fireCueShot,
+      getAvailableRoles: () => availableRoles(role, tracksRef.current),
+      getPlayerState: getBackingTrackState,
+      // Same suspend()/resume() pair onExclusiveMode already drives for
+      // staccato -- cue playback is another exclusive mode, not a
+      // special case (see the phase-gate plan, point (d)).
+      suspendAuto: () => auto?.suspend(),
+      resumeAuto: () => auto?.resume(),
+    });
+  }, [isMainPerformer, room, cueSheet, fireCueShot, getBackingTrackState, auto, role]);
+
+  useEffect(() => () => cueDirector?.dispose(), [cueDirector]);
+
+  // Starts once the show is actually live and connected (same signal
+  // auto's own start effect below uses), stops on show end -- mirrors
+  // autoDirector's own lifecycle wiring, deliberately without
+  // reproducing its full reconnect-race hardening: this is a dev-only
+  // trigger, not the default show path.
+  const cueStartedRef = useRef(false);
+  useEffect(() => {
+    if (!cueDirector) return;
+    if (
+      displayShowState === 'live' &&
+      roomConnectionState === ConnectionState.Connected &&
+      !cueStartedRef.current
+    ) {
+      cueStartedRef.current = true;
+      cueDirector.start();
+    }
+    if (displayShowState === 'ended') {
+      cueDirector.stop();
+    }
+  }, [cueDirector, displayShowState, roomConnectionState]);
 
   // Safety: stop whatever timer the previous instance had pending on
   // real unmount (or the rare case room/role itself changes) -- a stale
@@ -2493,6 +2594,7 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
             logHealthEvent(turningOn ? 'director_enable' : 'director_disable', {});
             if (turningOn) auto?.enable(); else auto?.disable();
           }}
+          onBackingPlayerChange={handleBackingPlayerChange}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
           feedsCollapsed={feedsCollapsed}
