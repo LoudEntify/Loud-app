@@ -1,9 +1,19 @@
 // scripts/seedCueSheet.js
 // ─────────────────────────────────────────────────────────────
-// Cue-Sheet Director, Phase 1 (CD-1). Hand-written seed for the
-// end-to-end spine proof -- run manually:
+// Cue-Sheet Director. Hand-written seed for testing without going
+// through the in-app editor (CD-3) -- run manually:
 //
-//   node scripts/seedCueSheet.js
+//   node scripts/seedCueSheet.js <path-to-audio-file> <artist-email>
+//
+// cue_sheets is now keyed by (track_hash, artist_email) --
+// docs/cue_sheets_migration_v2.sql -- so this needs a REAL file on disk
+// to hash: the seeded sheet only shows up in the app when that exact
+// file is loaded as the backing track (same SHA-256 the browser computes
+// via lib/trackHash.js, using Node's native crypto here instead of
+// crypto.subtle -- identical digest for the same bytes, just the
+// server-side-appropriate API for a plain Node script). artist-email
+// must match whatever email the performer joins with (normalized
+// trim().toLowerCase() the same way app/api/performer/claim-slot does).
 //
 // Written as a plain ES module (not run through Next's build pipeline,
 // unlike everything under lib/app), so it deliberately does NOT import
@@ -15,14 +25,15 @@
 // hand-authored cue row is validated with the exact same rules
 // cueDirector applies defensively at read time.
 //
-// Deletes any existing sheet for the same (show_id, slot) first, so
-// re-running this while iterating on cue timings doesn't accumulate
-// duplicate rows.
+// Deletes any existing sheet for the same (track_hash, artist_email)
+// first, so re-running this while iterating on cue timings doesn't
+// accumulate duplicate rows.
 // ─────────────────────────────────────────────────────────────
 
 import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, basename } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { validateCueSheet, isValidFallbackBehaviour } from '../lib/cueSheetValidation.js';
 
@@ -53,16 +64,23 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
+const [, , audioFilePath, artistEmailArg] = process.argv;
+if (!audioFilePath || !artistEmailArg) {
+  console.error('[seedCueSheet] Usage: node scripts/seedCueSheet.js <path-to-audio-file> <artist-email>');
+  process.exit(1);
+}
+if (!existsSync(audioFilePath)) {
+  console.error(`[seedCueSheet] File not found: ${audioFilePath}`);
+  process.exit(1);
+}
+
+const ARTIST_EMAIL = artistEmailArg.trim().toLowerCase();
+const TRACK_HASH = createHash('sha256').update(readFileSync(audioFilePath)).digest('hex');
+
 // ─── The hand-written sheet ────────────────────────────────────
-// pilot-room, slot 'a' -- the main-performer identifier convention
-// confirmed in app/api/token/route.js (requestedContestant 'a'|'b')
-// and components/LiveDemo.jsx (slot: role, role derived from the
-// 'contestant-a-'/'contestant-b-' identity prefix). 5 cues across 52s,
-// three distinct slot_roles (wide/main/side), one pan cue to exercise
-// the motion.direction path.
-const SHOW_ID = 'pilot-room';
-const SLOT = 'a';
-const TRACK_LABEL = 'phase-1 spine proof (any file -- content is irrelevant, only timing matters)';
+// 5 cues across 52s, three distinct slot_roles (wide/main/side), one
+// pan cue to exercise the motion.direction path.
+const TRACK_LABEL = basename(audioFilePath);
 const FALLBACK_BEHAVIOUR = 'default_wide';
 const RAW_CUES = [
   { timestamp_ms: 0, shot_type: 'wide', slot_role: 'wide' },
@@ -85,6 +103,8 @@ async function main() {
     process.exit(1);
   }
 
+  console.log(`[seedCueSheet] track_hash = ${TRACK_HASH}`);
+  console.log(`[seedCueSheet] artist_email = ${ARTIST_EMAIL}`);
   console.log('[seedCueSheet] Normalized cues:');
   console.log(JSON.stringify(cues, null, 2));
 
@@ -93,19 +113,19 @@ async function main() {
   const { error: deleteError, count } = await supabase
     .from('cue_sheets')
     .delete({ count: 'exact' })
-    .eq('show_id', SHOW_ID)
-    .eq('slot', SLOT);
+    .eq('track_hash', TRACK_HASH)
+    .eq('artist_email', ARTIST_EMAIL);
   if (deleteError) {
     console.error('[seedCueSheet] Failed to clear existing sheet(s):', deleteError);
     process.exit(1);
   }
-  if (count) console.log(`[seedCueSheet] Cleared ${count} existing sheet(s) for ${SHOW_ID}/${SLOT}`);
+  if (count) console.log(`[seedCueSheet] Cleared ${count} existing sheet(s) for this track/artist`);
 
   const { data, error } = await supabase
     .from('cue_sheets')
     .insert({
-      show_id: SHOW_ID,
-      slot: SLOT,
+      track_hash: TRACK_HASH,
+      artist_email: ARTIST_EMAIL,
       track_label: TRACK_LABEL,
       fallback_behaviour: FALLBACK_BEHAVIOUR,
       cues,
@@ -119,7 +139,7 @@ async function main() {
   }
 
   console.log(`\n[seedCueSheet] Inserted cue_sheets.id = ${data.id}`);
-  console.log(`Load the preview as the main performer with ?cueSheet=${data.id}`);
+  console.log(`Join as the main performer with email "${ARTIST_EMAIL}", load "${TRACK_LABEL}" as the backing track, and Cue mode should be available.`);
 }
 
 main();
