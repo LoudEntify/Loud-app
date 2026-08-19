@@ -102,7 +102,22 @@ export default function CommentsDock({
           aria-pressed={!commentsCollapsed}
         >
           <ChatCircle size={16} weight={commentsCollapsed ? 'fill' : 'regular'} />
-          {commentsCollapsed && count > 0 && <span className="comments-toggle-btn-count">{count}</span>}
+          {/* Always rendered (never conditionally mounted) -- this button
+              is right:24px-anchored, so a content-driven width change
+              (icon-only vs icon+badge) shifts its LEFT edge even though
+              the anchor itself never moves, violating "never moves,
+              never changes position" the moment the badge appears or
+              disappears. visibility (not the conditional-render this
+              had before) keeps the layout space reserved in both
+              states -- confirmed via a repro harness that toggling
+              without this shifted the button ~12px; with it, position
+              is pixel-identical across the full cycle. */}
+          <span
+            className="comments-toggle-btn-count"
+            style={{ visibility: commentsCollapsed && count > 0 ? 'visible' : 'hidden' }}
+          >
+            {count}
+          </span>
         </button>
       )}
     </>
