@@ -26,7 +26,7 @@ const PRESET = {
   outputDb: 0,
 };
 
-export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPhase }) {
+export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPhase, onBackingPlayerChange }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
   // Matches createPilotAudioTrack's own default (bypassGain 1 / processedGain
@@ -109,6 +109,12 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
   function handleBackingPlayerChange(player) {
     backingPlayerRef.current = player;
     player?.setSyncDelayMs(syncDelayMs);
+    // Cue-Sheet Director (Phase 1) -- the player instance is otherwise
+    // private to this component; this is the one seam that surfaces it
+    // to LiveDemo, where cueDirector's poll loop can read it. Optional --
+    // undefined outside the cue-director dev trigger, same as every
+    // other caller of this panel today.
+    onBackingPlayerChange?.(player);
   }
 
   function applySyncDelay(ms) {

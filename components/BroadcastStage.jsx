@@ -92,6 +92,7 @@ export default function BroadcastStage({
   onCommand,
   autoState,
   onToggleAuto,
+  onBackingPlayerChange,
   deckCollapsed,
   onToggleDeckCollapsed,
   commentsCollapsed,
@@ -362,6 +363,7 @@ export default function BroadcastStage({
                         audioContext={audioContext}
                         showEnded={showEnded}
                         showPhase={showPhase}
+                        onBackingPlayerChange={onBackingPlayerChange}
                       />
                     ),
                   },
@@ -426,6 +428,7 @@ export default function BroadcastStage({
               audioContext={audioContext}
               showEnded={showEnded}
               showPhase={showPhase}
+              onBackingPlayerChange={onBackingPlayerChange}
             />
           </div>
           <div className="desktop-side-column desktop-side-column--right">
