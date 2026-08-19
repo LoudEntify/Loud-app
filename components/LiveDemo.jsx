@@ -22,7 +22,6 @@ import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
-import { useSearchParams } from 'next/navigation';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
 import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
 import { createAutoDirector } from '../lib/autoDirector';
@@ -2194,29 +2193,20 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     });
   }, [isMainPerformer, room, fireAutoShot, getAutoAvailableShots, resolveAutoFeed, getCurrentFeed]);
 
-  // ─── Cue-Sheet Director (Phase 1, dev-only trigger) ──────────
-  // ?cueSheet=<id> loads one hand-written cue sheet and plays it against
-  // the backing track's own clock instead of relying on the Manual/Auto
-  // toggle -- that toggle and autoState are untouched this phase, per
-  // the CD-3 boundary. cueSheetSearchParams reads once; the id is not
-  // expected to change during a session.
-  const cueSheetSearchParams = useSearchParams();
-  const cueSheetId = cueSheetSearchParams.get('cueSheet');
+  // ─── Cue-Sheet Director (CD-3/CD-4) ───────────────────────────
+  // cueSheet is the last SAVED sheet for whatever track is currently
+  // loaded -- AudioDeckPanel (via BroadcastStage) reports it here
+  // whenever it changes (on track load and after a successful editor
+  // Save), never for in-progress unsaved edits. null means either no
+  // track is loaded yet or no sheet has ever been saved for this
+  // track+artist.
   const [cueSheet, setCueSheet] = useState(null);
+  const cueModeAvailable = !!cueSheet?.cues?.length;
 
-  useEffect(() => {
-    if (!cueSheetId) return undefined;
-    let cancelled = false;
-    fetch(`/api/cue-sheets/${cueSheetId}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
-      .then((data) => {
-        if (!cancelled) setCueSheet(data.sheet);
-      })
-      .catch((err) => console.warn('[cueDirector] failed to load cue sheet', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [cueSheetId]);
+  // CD-4: Manual/Auto/Cue -- three mutually exclusive top-level modes.
+  // Default 'auto' preserves the pre-CD-4 behavior ("auto runs by
+  // default when a show starts," lib/autoDirector.js's own rule 1).
+  const [mode, setMode] = useState('auto');
 
   // The backing-track player instance is otherwise private to
   // AudioDeckPanel/BackingTrackPanel (components/AudioDeckPanel.jsx) --
@@ -2251,26 +2241,17 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
 
   useEffect(() => () => cueDirector?.dispose(), [cueDirector]);
 
-  // Starts once the show is actually live and connected (same signal
-  // auto's own start effect below uses), stops on show end -- mirrors
-  // autoDirector's own lifecycle wiring, deliberately without
-  // reproducing its full reconnect-race hardening: this is a dev-only
-  // trigger, not the default show path.
-  const cueStartedRef = useRef(false);
+  // Re-engages Cue mode's engine whenever the underlying cueDirector
+  // instance itself changes (a track swap, or a fresh Save producing a
+  // new sheet reference) while mode is already 'cue' -- e.g. saving an
+  // edit mid-show should pick up seamlessly, not require re-toggling the
+  // mode. Safe to call on every such change: cueDirector.start() is
+  // idempotent-guarded (a no-op if already started), unlike
+  // auto.start() below, which is why applyMode (not a reactive effect)
+  // is what drives auto.
   useEffect(() => {
-    if (!cueDirector) return;
-    if (
-      displayShowState === 'live' &&
-      roomConnectionState === ConnectionState.Connected &&
-      !cueStartedRef.current
-    ) {
-      cueStartedRef.current = true;
-      cueDirector.start();
-    }
-    if (displayShowState === 'ended') {
-      cueDirector.stop();
-    }
-  }, [cueDirector, displayShowState, roomConnectionState]);
+    if (mode === 'cue') cueDirector?.start();
+  }, [mode, cueDirector]);
 
   // Safety: stop whatever timer the previous instance had pending on
   // real unmount (or the rare case room/role itself changes) -- a stale
@@ -2288,14 +2269,23 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     if (auto) logHealthEvent('director_loop_stopped', { reason: 'unmount' });
   }, [auto]);
 
-  // Single intended entry points for auto's lifecycle -- nothing else
-  // should call auto.start()/auto.stop() directly. Wired below (L4).
-  function startAutoIfDirector() {
-    if (!isMainPerformer) return; // only the director's own device runs auto
-    auto?.start();
-  }
-  function stopAuto() {
-    auto?.stop();
+  // CD-4: single intended entry point for engaging any of the three
+  // modes -- nothing else should call auto.start()/disable() or
+  // cueDirector.start()/stop() directly. Both engines' own start/stop/
+  // enable/disable already no-op safely when called redundantly, so
+  // this can run on every transition without needing to diff against
+  // the previous mode. cueDirector.start()'s own suspendAuto()/
+  // resumeAuto() calls (Phase 1) are untouched by this -- the explicit
+  // auto.disable()/cueDirector.stop() here just make the 3-way
+  // exclusivity hold even switching directly between 'auto' and 'cue'.
+  function applyMode(next) {
+    if (!isMainPerformer) return; // only the director's own device runs either engine
+    if (next !== 'auto') auto?.disable();
+    if (next !== 'cue') cueDirector?.stop();
+    if (next === 'auto') auto?.start();
+    if (next === 'cue') cueDirector?.start();
+    setMode(next);
+    logHealthEvent('mode_changed', { mode: next });
   }
 
   // Phase 2 diagnostic instrumentation -- proof-of-life heartbeat,
@@ -2368,11 +2358,12 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
     ) {
       autoStartedRef.current = true;
       const reason = isFirstRun ? classifyDirectorStartReason(ROOM_NAME, role) : 'transition';
-      startAutoIfDirector();
+      applyMode(mode); // engages whichever mode is currently selected (default 'auto')
       logHealthEvent('director_loop_started', { reason });
     }
     if (displayShowState === 'ended') {
-      stopAuto();
+      auto?.disable();
+      cueDirector?.stop();
       logHealthEvent('director_loop_stopped', { reason: 'show_ended' });
     }
   }, [isMainPerformer, displayShowState, role, roomConnectionState]);
@@ -2406,10 +2397,8 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   // this can never fire before L4's start trigger has actually run --
   // same "started" boundary the L4 bugfix made autoDirector itself
   // enforce internally, mirrored here at the call site. Goes straight
-  // through fireAutoShot with decisionSource 'auto', NOT
-  // auto.notifyHumanCommand() -- a forced failover is not a human
-  // override and must not arm the 45s human-override cooldown that
-  // would suppress auto's own next scheduled cut.
+  // through fireAutoShot with decisionSource 'auto', not 'human' -- a
+  // forced failover is a safety net, not a deliberate human override.
   useEffect(() => {
     if (!isMainPerformer) return;
     if (!autoStartedRef.current) return;
@@ -2432,9 +2421,10 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
   }, [isMainPerformer, displayShowState, activeShot, role, tracks, getAutoAvailableShots, fireAutoShot]);
 
   // Auto.state is a plain getter, not React state -- polled at a cheap
-  // interval so the indicator below actually reflects cooldown/suspend
-  // transitions that happen off-render (setTimeout-driven). Function
-  // over polish; fine for a badge that updates within half a second.
+  // interval so the Auto segment's "suspended" sub-label actually
+  // reflects staccato transitions that happen off-render (setTimeout-
+  // driven). Function over polish; fine for a badge that updates within
+  // half a second.
   const [autoState, setAutoState] = useState('off');
   useEffect(() => {
     if (!auto) {
@@ -2586,15 +2576,14 @@ function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggl
             logHealthEvent(on ? 'director_suspend' : 'director_resume', {});
             if (on) auto?.suspend(); else auto?.resume();
           }}
-          onHumanCommand={() => auto?.notifyHumanCommand()}
           onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
+          mode={mode}
+          onModeChange={applyMode}
+          cueModeAvailable={cueModeAvailable}
           autoState={autoState}
-          onToggleAuto={() => {
-            const turningOn = autoState === 'off';
-            logHealthEvent(turningOn ? 'director_enable' : 'director_disable', {});
-            if (turningOn) auto?.enable(); else auto?.disable();
-          }}
           onBackingPlayerChange={handleBackingPlayerChange}
+          artistEmail={email}
+          onCueSheetChange={setCueSheet}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
           feedsCollapsed={feedsCollapsed}
