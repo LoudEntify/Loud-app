@@ -5,10 +5,12 @@ import Knob from './Knob';
 import LevelMeterFader from './LevelMeterFader';
 import BackingTrackPanel from './BackingTrackPanel';
 import CalibrateSyncPanel from './CalibrateSyncPanel';
+import CueEditorPanel from './CueEditorPanel';
 import {
   tuneHighpass, tuneCompressor, tuneMakeupGainDb, tuneReverbMix,
   tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
 } from '../lib/audioProcessing';
+import { logHealthEvent } from '../lib/healthLog';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
@@ -26,7 +28,21 @@ const PRESET = {
   outputDb: 0,
 };
 
-export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPhase, onBackingPlayerChange }) {
+export default function AudioDeckPanel({
+  nodes,
+  audioContext,
+  showEnded,
+  showPhase,
+  onBackingPlayerChange,
+  // Cue-Sheet Director (CD-3) -- artistEmail is LiveDemo's own entry-gate
+  // email (the closest thing to a stable performer identity this
+  // codebase has, see docs/cue_sheets_migration_v2.sql). onCueSheetChange
+  // fires whenever the currently-relevant SAVED sheet changes (on track
+  // load and after a successful save) so LiveDemo can gate Cue mode and
+  // feed cueDirector -- never for in-progress unsaved edits.
+  artistEmail,
+  onCueSheetChange,
+}) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
   // Matches createPilotAudioTrack's own default (bypassGain 1 / processedGain
@@ -43,6 +59,22 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
   // load re-apply whatever's currently calibrated.
   const [syncDelayMs, setSyncDelayMs] = useState(0);
   const backingPlayerRef = useRef(null);
+
+  // Cue-Sheet Director (CD-3) -- cue editing state. Owned here (not in
+  // CueEditorPanel) because BackingTrackPanel (markers) and
+  // CueEditorPanel (the editor) are siblings that both need the same
+  // cues array. trackHash/loadedTrackHash are tracked separately so a
+  // fast track swap can't let a slow, stale GET response overwrite a
+  // newer one (guarded in loadCueSheet below).
+  const [trackHash, setTrackHash] = useState(null);
+  const [cues, setCues] = useState([]);
+  const [activeCueId, setActiveCueId] = useState(null);
+  const [fallbackBehaviour, setFallbackBehaviour] = useState('hold_last');
+  const [cueSheetDirty, setCueSheetDirty] = useState(false);
+  const [cueSheetSaving, setCueSheetSaving] = useState(false);
+  const [cueSheetSaveError, setCueSheetSaveError] = useState(null);
+  const loadedTrackHashRef = useRef(null); // most-recently-requested track hash, guards against a stale GET resolving late
+  const lastTrackLabelRef = useRef(null); // original filename, used as track_label on Save
 
   // Soundcheck-only feature -- the instant the show leaves soundcheck
   // (goes live), force monitoring off regardless of what the artist left
@@ -106,15 +138,103 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
     };
   }
 
-  function handleBackingPlayerChange(player) {
+  function handleBackingPlayerChange(player, newTrackHash, trackLabel) {
     backingPlayerRef.current = player;
     player?.setSyncDelayMs(syncDelayMs);
     // Cue-Sheet Director (Phase 1) -- the player instance is otherwise
     // private to this component; this is the one seam that surfaces it
-    // to LiveDemo, where cueDirector's poll loop can read it. Optional --
-    // undefined outside the cue-director dev trigger, same as every
-    // other caller of this panel today.
+    // to LiveDemo, where cueDirector's poll loop can read it.
     onBackingPlayerChange?.(player);
+
+    // A new track means a new cue sheet identity -- reset local editing
+    // state before loading whatever's saved for it (if anything).
+    loadedTrackHashRef.current = newTrackHash;
+    lastTrackLabelRef.current = trackLabel;
+    setTrackHash(newTrackHash);
+    setCues([]);
+    setActiveCueId(null);
+    setFallbackBehaviour('hold_last');
+    setCueSheetDirty(false);
+    setCueSheetSaveError(null);
+    onCueSheetChange?.(null);
+    if (newTrackHash) loadCueSheet(newTrackHash);
+  }
+
+  async function loadCueSheet(hash) {
+    if (!artistEmail) return; // no stable identity to key on yet -- editor still works locally, just can't load/save
+    try {
+      const res = await fetch(`/api/cue-sheets?track_hash=${hash}&artist_email=${encodeURIComponent(artistEmail)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      // Guard against a slower earlier fetch resolving after a faster
+      // later track swap already changed what's "current."
+      if (loadedTrackHashRef.current !== hash) return;
+      const sheet = data.sheet;
+      if (sheet) {
+        setCues(sheet.cues.map((c) => ({ ...c, id: crypto.randomUUID() })));
+        setFallbackBehaviour(sheet.fallback_behaviour);
+        onCueSheetChange?.(sheet);
+      }
+    } catch (err) {
+      console.warn('[cueEditor] failed to load cue sheet', err);
+    }
+  }
+
+  function addCue(timestampMs) {
+    const id = crypto.randomUUID();
+    setCues((prev) => [...prev, { id, timestamp_ms: Math.round(timestampMs), shot_type: 'wide', slot_role: 'main' }]);
+    setActiveCueId(id);
+    setCueSheetDirty(true);
+  }
+
+  function updateCue(id, patch) {
+    setCues((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setCueSheetDirty(true);
+  }
+
+  function deleteCue(id) {
+    setCues((prev) => prev.filter((c) => c.id !== id));
+    setActiveCueId((prev) => (prev === id ? null : prev));
+    setCueSheetDirty(true);
+  }
+
+  function changeFallbackBehaviour(value) {
+    setFallbackBehaviour(value);
+    setCueSheetDirty(true);
+  }
+
+  async function saveCueSheet() {
+    if (!trackHash || !artistEmail) {
+      setCueSheetSaveError('Missing track or performer email');
+      return;
+    }
+    setCueSheetSaving(true);
+    setCueSheetSaveError(null);
+    try {
+      const res = await fetch('/api/cue-sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_hash: trackHash,
+          artist_email: artistEmail,
+          track_label: lastTrackLabelRef.current || null,
+          fallback_behaviour: fallbackBehaviour,
+          cues: cues.map(({ id, ...rest }) => rest),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCueSheetSaveError(Array.isArray(data.detail) ? data.detail.join('; ') : data.error || 'Save failed');
+        return;
+      }
+      setCueSheetDirty(false);
+      onCueSheetChange?.(data.sheet);
+      logHealthEvent('cue_sheet_saved', { trackHash, cueCount: data.sheet.cues.length });
+    } catch (err) {
+      setCueSheetSaveError(String(err?.message || err));
+    } finally {
+      setCueSheetSaving(false);
+    }
   }
 
   function applySyncDelay(ms) {
@@ -288,6 +408,24 @@ export default function AudioDeckPanel({ nodes, audioContext, showEnded, showPha
           outputBus={nodes.outputBus}
           showEnded={showEnded}
           onPlayerChange={handleBackingPlayerChange}
+          cues={cues}
+          activeCueId={activeCueId}
+          onSelectCue={setActiveCueId}
+          onDropCue={addCue}
+        />
+        <CueEditorPanel
+          trackReady={!!trackHash}
+          cues={cues}
+          activeCueId={activeCueId}
+          fallbackBehaviour={fallbackBehaviour}
+          dirty={cueSheetDirty}
+          saving={cueSheetSaving}
+          saveError={cueSheetSaveError}
+          onSelectCue={setActiveCueId}
+          onUpdateCue={updateCue}
+          onDeleteCue={deleteCue}
+          onChangeFallbackBehaviour={changeFallbackBehaviour}
+          onSave={saveCueSheet}
         />
       </div>
     </div>
