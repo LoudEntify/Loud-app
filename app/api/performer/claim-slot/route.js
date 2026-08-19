@@ -2,12 +2,20 @@ import { AccessToken } from 'livekit-server-sdk';
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
 
 // Stage 3 of MULTI_PERFORMER_SPEC.md. Deliberately does NOT call or
 // modify app/api/token/route.js -- that route's behaviour is out of
 // scope tonight (locked decision in the spec doc); this mints its own
 // LiveKit AccessToken instead, gated entirely by a valid show_slots
 // code rather than the client asserting a slot letter.
+//
+// Accounts & Identity Day 1: auth is now layered UNDER the code, not
+// instead of it -- the code still answers "which slot", this answers
+// "who is asking". `email` is no longer taken from the request body
+// (free-typed, unverified, spoofable) -- it comes from the verified
+// artist session instead, so `claimed_by_email` can no longer be
+// spoofed by whatever string a client happens to send.
 //
 // Required env vars: same LIVEKIT_API_KEY/LIVEKIT_API_SECRET/LIVEKIT_URL
 // as app/api/token/route.js, plus SUPABASE_SERVICE_ROLE_KEY (lib/
@@ -23,9 +31,14 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Server missing LiveKit environment variables' }, { status: 500 });
     }
 
-    const { show_id: showId, code, email, participantId } = await request.json();
-    if (!showId || !code || !email) {
-      return NextResponse.json({ error: 'show_id, code, and email are required' }, { status: 400 });
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
+
+    const { show_id: showId, code, participantId } = await request.json();
+    if (!showId || !code) {
+      return NextResponse.json({ error: 'show_id and code are required' }, { status: 400 });
     }
 
     const admin = getSupabaseAdmin();
@@ -51,7 +64,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Code not recognized' }, { status: 401 });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = auth.user.email.trim().toLowerCase();
     const warning =
       slotRow.claimed_by_email && slotRow.claimed_by_email !== normalizedEmail
         ? `This code was already claimed by ${slotRow.claimed_by_email} -- joining anyway.`
