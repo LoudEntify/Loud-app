@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { loadBackingTrack } from '../lib/audioProcessing';
+import { shotFamilyColor } from '../lib/shotTypes';
+import { computeTrackHash } from '../lib/trackHash';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -57,7 +59,19 @@ function Waveform({ peaks, color }) {
 // (nothing uploaded, nothing stored), decodes it, and mixes it into the
 // same output bus the vocal chain feeds. Requires headphones -- see the
 // note in lib/audioProcessing.js for why.
-export default function BackingTrackPanel({ audioContext, outputBus, showEnded, onPlayerChange }) {
+export default function BackingTrackPanel({
+  audioContext,
+  outputBus,
+  showEnded,
+  onPlayerChange,
+  // Cue-Sheet Director (CD-3) -- all optional, so this panel renders
+  // exactly as before when omitted (e.g. nothing about the base
+  // playback path changes for a caller that doesn't pass them).
+  cues = [],
+  activeCueId = null,
+  onSelectCue,
+  onDropCue,
+}) {
   const [fileName, setFileName] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -116,7 +130,16 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
     if (!file || !audioContext || !outputBus) return;
     setLoading(true);
     playerRef.current?.disconnect();
-    const player = await loadBackingTrack(audioContext, outputBus, file);
+    // Computed alongside the decode, not instead of it -- Blob.arrayBuffer()
+    // re-reads the file's bytes each call (not a stream, safe to call
+    // twice on the same File), and loadBackingTrack doesn't expose the
+    // raw bytes it already read back out. Cue-Sheet Director (CD-3): this
+    // hash is the only stable identity a backing track has (see
+    // lib/trackHash.js) -- it's what the cue editor loads/saves against.
+    const [player, trackHash] = await Promise.all([
+      loadBackingTrack(audioContext, outputBus, file),
+      computeTrackHash(file),
+    ]);
     player.setVolume(volume);
     playerRef.current = player;
     setDuration(player.duration);
@@ -126,7 +149,7 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
     setLoading(false);
     // trackGain/delayNode are created fresh per load -- the parent
     // re-applies whatever sync compensation is currently calibrated.
-    onPlayerChange?.(player);
+    onPlayerChange?.(player, trackHash, file.name);
   }
 
   function togglePlay() {
@@ -155,6 +178,15 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
     playerRef.current.seek(fraction * duration);
   }
 
+  // Cue-Sheet Director (CD-3) -- "drop a cue at the playhead," available
+  // whether the track is playing or paused (unlike seekTo, which needs a
+  // click target on the waveform, this just reads wherever the playhead
+  // already is).
+  function handleDropCue() {
+    if (!playerRef.current) return;
+    onDropCue?.(playerRef.current.getElapsed() * 1000);
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <span style={{ fontSize: 11, letterSpacing: '0.1em', color: '#888780', textTransform: 'uppercase' }}>
@@ -175,6 +207,9 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button className="control-btn" onClick={togglePlay}>{playing ? 'Pause' : 'Play'}</button>
             <button className="control-btn" onClick={stop}>Stop</button>
+            {onDropCue && (
+              <button className="control-btn" onClick={handleDropCue}>Drop cue</button>
+            )}
             <span ref={elapsedLabelRef} style={{ fontSize: 12, color: '#B4B2A9' }}>0:00 / {formatTime(duration)}</span>
           </div>
 
@@ -190,6 +225,50 @@ export default function BackingTrackPanel({ audioContext, outputBus, showEnded, 
               <div ref={playheadRef} style={{ position: 'absolute', inset: 0, width: '0%', overflow: 'hidden', pointerEvents: 'none' }}>
                 <Waveform peaks={peaks} color="#2ec4b6" />
               </div>
+              {/* Cue markers (CD-3) -- same (timestamp / duration) * 100%
+                  math as the playhead overlay above, positioned in the
+                  same relative wrapper so they stay pixel-aligned with it.
+                  stopPropagation so a marker tap doesn't also seek. */}
+              {duration > 0 && cues.map((cue) => {
+                const leftPct = Math.min(100, Math.max(0, (cue.timestamp_ms / 1000 / duration) * 100));
+                const isActive = cue.id === activeCueId;
+                const color = shotFamilyColor(cue.shot_type);
+                return (
+                  <div
+                    key={cue.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectCue?.(cue.id);
+                    }}
+                    title={`${cue.shot_type} @ ${formatTime(cue.timestamp_ms / 1000)}`}
+                    style={{
+                      position: 'absolute',
+                      left: `${leftPct}%`,
+                      top: 0,
+                      bottom: 0,
+                      width: isActive ? 3 : 2,
+                      marginLeft: isActive ? -1.5 : -1,
+                      background: color,
+                      boxShadow: isActive ? `0 0 6px ${color}` : 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: -4,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: color,
+                        boxShadow: isActive ? `0 0 6px ${color}` : 'none',
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
 
