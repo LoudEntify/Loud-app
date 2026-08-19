@@ -185,7 +185,10 @@ export default function BroadcastStage({
     <div
       className={`stage-root stage-root--performer ${videoFullView ? 'stage-root--maximized' : ''}`}
       ref={stageRef}
-      style={portraitStageWidth ? { '--portrait-stage-width': `${portraitStageWidth}px` } : undefined}
+      style={{
+        ...(portraitStageWidth ? { '--portrait-stage-width': `${portraitStageWidth}px` } : undefined),
+        '--sidebar-width': sidebarCollapsed ? '0px' : '232px',
+      }}
     >
       {/* stage-video-area--versus modifier retired in Phase 2 (redesign) --
           it existed only to widen/reshape the phone-box for versus mode,

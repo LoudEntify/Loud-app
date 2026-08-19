@@ -1259,8 +1259,21 @@ button {
     gap: 16px;
   }
 
+  /* --sidebar-width (set inline by BroadcastStage.jsx, mirrors
+     --portrait-stage-width's pattern) -- 232px/0px matching .sidebar's
+     own base width and .sidebar--collapsed's 0. Needed because Build 3c
+     took the sidebar out of flex flow in live mode (position:fixed,
+     .page-shell-main back to full width) so .desktop-side-column--left's
+     own left:24px, added later by feature/desktop-portrait-stage without
+     knowledge of that change, was landing directly under the sidebar's
+     nav (z-index:20, pointer-events:auto on its header/nav) instead of
+     beside it -- confirmed via getBoundingClientRect showing both at
+     x:0-232 overlapping, garbled/overlapping text and (for shot buttons
+     under that x-range) an unclickable sidebar-nav layer sitting on top.
+     220px min-width above already exceeds the collapsed width some, so
+     this doesn't need its own clamp beyond the var's own fallback. */
   .desktop-side-column--left {
-    left: 24px;
+    left: calc(var(--sidebar-width, 232px) + 24px);
   }
 
   .desktop-side-column--right {
