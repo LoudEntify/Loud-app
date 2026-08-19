@@ -1414,15 +1414,15 @@ button {
    only that variant needs extra clearance -- ViewerStage's plain
    .stage-side-panel has nothing above it to avoid and stays at the
    base 112px even at desktop.
-   Measured worst case via a repro harness with the actual longest
-   content the banner ever renders (LIVE state + the publish-warning/
-   reconnect button): compact .stage-topbar bottoms at ~54px,
-   .lifecycle-banner starts at 48px and -- even at its widest, wrapping
-   only if it truly has to -- bottoms around ~84px. 132px clears that
-   with a real margin, not a just-barely fit. */
+   144px (bumped from round 2's 132px): .comments-toggle-btn now sits
+   in the gap between .lifecycle-banner and this panel (top:108px,
+   ~26px tall) -- 132px left it only ~4px of clearance under that
+   button, too tight to trust across font-rendering differences. 144px
+   gives the button real margin on both sides (banner bottoms ~97px,
+   button ends ~134px, panel starts 144px). */
 @media (min-width: 1025px) {
   .stage-side-panel--broadcast {
-    top: 132px;
+    top: 144px;
   }
 }
 
@@ -1466,6 +1466,21 @@ button {
 
 .comments-collapse-btn:hover {
   color: #2ec4b6;
+}
+
+/* Live device test (round 3): the header chevron + collapsed-only
+   reveal-tab combo never worked as a usable desktop control -- fixing
+   their click-target overlap (round 2) didn't change that, because the
+   real problem was the interaction model itself: two different
+   elements at two different positions depending on state. Retired at
+   desktop in favor of .comments-toggle-btn below -- ONE element, ONE
+   fixed position, in both states. Mobile is untouched: this only hides
+   the header button at the desktop breakpoint, its mobile behavior
+   (always visible in the header, collapses the panel) is unchanged. */
+@media (min-width: 1025px) {
+  .comments-collapse-btn {
+    display: none;
+  }
 }
 
 .stage-side-panel-body {
@@ -1520,35 +1535,60 @@ button {
   z-index: 20;
 }
 
-/* Desktop portrait stage -- mobile's edge-hugging arrow tab (right:0 of
-   the real viewport, via position:fixed) would land either off in the
-   blur-fill gutter or colliding with .desktop-side-column--right
-   (VideoDeckPanel / the live-show rail) depending on gutter width --
-   neither is "a small unobtrusive button/tab" per the spec. Repositioned
-   to resolve against .stage-root instead (position:absolute, same
-   technique as .stage-bottom-overlay's own desktop override), tucked
-   inside the stage's own bottom-right corner -- inside the narrow box
-   means it never needs to know the gutter width or what's docked there.
-   CommentsDock.jsx swaps the tall CaretLeft arrow for a comment-icon +
-   count pill at this breakpoint (same element, same reactions.css-driven
-   position -- only the icon/content changes). */
+/* .comments-reveal-tab has NO desktop override anymore -- it's mobile-
+   only now (CommentsDock.jsx only renders it there). Its base rule
+   above (position:fixed, right edge, collapsed-only) is exactly the
+   existing mobile behavior, untouched.
+
+   Desktop's single persistent toggle -- CommentsDock.jsx renders this
+   UNCONDITIONALLY at desktop widths (both expanded and collapsed), a
+   completely separate element from .stage-side-panel's own header/body
+   (that box opacity:0's on collapse -- see .stage-side-panel--collapsed
+   above -- so nothing inside it can ever be a control that must survive
+   both states). Fixed position, right:24px to align with the panel's
+   own right edge (reads as "belongs to" comments, per spec's "adjacent
+   to the comments area"). Two different top offsets because the two
+   variants have different real clearance needs above them:
+   --broadcast sits below .lifecycle-banner (artist-only, worst-case
+   measured bottom ~97px at this breakpoint -- see that rule's own
+   comment), the plain viewer variant only needs to clear .stage-topbar
+   (measured bottom 54px, no banner). Both values checked against their
+   panel's own top (.stage-side-panel--broadcast's 132px /
+   .stage-side-panel's base 112px) so the toggle never touches either
+   neighbor, confirmed via a repro harness in both show states. */
+.comments-toggle-btn {
+  display: none;
+}
+
 @media (min-width: 1025px) {
-  .comments-reveal-tab {
+  .comments-toggle-btn {
+    display: flex;
     position: absolute;
-    top: auto;
-    right: 12px;
-    bottom: 24px;
-    transform: none;
-    width: auto;
-    height: auto;
-    padding: 8px 12px;
+    right: 24px;
+    align-items: center;
+    justify-content: center;
     gap: 6px;
+    padding: 6px 10px;
     border-radius: 999px;
-    border-right: 1px solid rgba(46, 196, 182, 0.5);
+    background: transparent;
+    border: 1px solid rgba(46, 196, 182, 0.5);
+    box-shadow: 0 0 8px rgba(46, 196, 182, 0.35);
+    color: #2ec4b6;
+    filter: var(--icon-halo);
+    cursor: pointer;
+    z-index: 20;
+  }
+
+  .comments-toggle-btn--broadcast {
+    top: 108px;
+  }
+
+  .comments-toggle-btn:not(.comments-toggle-btn--broadcast) {
+    top: 70px;
   }
 }
 
-.comments-reveal-tab-count {
+.comments-toggle-btn-count {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
