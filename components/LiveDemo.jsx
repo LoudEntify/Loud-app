@@ -2098,19 +2098,36 @@ function RoomInner({ performanceMode, role, notice, selfName, email, maximized, 
   // unrelated re-renders.
   // Shared by fireAutoShot and fireCueShot below -- both need the exact
   // same resolve-and-broadcast steps, they just differ in which health
-  // event (if any) they log afterward. meta.framingHint is the caller's
-  // intended framing (e.g. 'wide', or a cue's slot_role) even when
-  // shotKey is a technique (zoomIn/zoomOut/pan) standing in for it --
-  // resolving against the hint, not the technique's own ambiguous
-  // 'currentOrSelected' source, is what makes a themed zoom/pan land on
-  // the SAME feed the caller actually chose instead of an arbitrary
-  // first-available role. meta.params (Cue-Sheet Director, Phase 1)
-  // forwards a cue's motion (direction/vertigo) onto the command's
-  // params field -- autoDirector never sets this, so its own behavior
-  // is unchanged.
+  // event (if any) they log afterward.
+  //
+  // meta.framingHint is auto's own concept: the intended FRAMING (a
+  // SHOT_TYPES key, e.g. 'wide') even when shotKey is a technique
+  // (zoomIn/zoomOut/pan) standing in for it -- resolving against the
+  // hint, not the technique's own ambiguous 'currentOrSelected' source,
+  // is what makes a themed zoom/pan land on the SAME feed the cycle
+  // actually chose instead of an arbitrary first-available role.
+  //
+  // meta.sourceRole is a DIFFERENT thing, added for Cue-Sheet Director:
+  // an already-resolved camera ROLE ('main'/'wide'/'close'/'side'), used
+  // as-is with no resolveSourceRole lookup at all. A cue's slot_role is
+  // exactly this -- an authored role intent, not a framing -- and must
+  // never be passed as framingHint: SHOT_TYPES has no entries named
+  // 'main'/'wide'/'close'/'side' (those are role names, not shot names,
+  // even though 'wide' happens to spell the same both ways), so
+  // resolveSourceRole(meta.framingHint) would look up a nonexistent shot
+  // and silently return null -- confirmed via a device-test health-
+  // events capture where a 'side'-role cue resolved to the main
+  // performer with no cue_fallback logged (resolveTargetIdentity treats
+  // a falsy role as "no override," not "resolution failed," and falls
+  // through to main). autoDirector never sets meta.sourceRole, so its
+  // own behavior is completely unchanged by this.
+  //
+  // meta.params (Cue-Sheet Director) forwards a cue's motion (direction/
+  // vertigo) onto the command's params field -- autoDirector never sets
+  // this either.
   const buildAndFireCommand = useCallback((shotKey, decisionSource, meta = {}) => {
     const roles = availableRoles(role, tracksRef.current);
-    const sourceRole = resolveSourceRole(meta.framingHint || shotKey, roles);
+    const sourceRole = meta.sourceRole ?? resolveSourceRole(meta.framingHint || shotKey, roles);
     const targetIdentity = resolveTargetIdentity(tracksRef.current, role, sourceRole);
     const command = buildShotCommand({
       showId: ROOM_NAME,
@@ -2275,13 +2292,23 @@ function RoomInner({ performanceMode, role, notice, selfName, email, maximized, 
   // cueDirector.start()/stop() directly. Both engines' own start/stop/
   // enable/disable already no-op safely when called redundantly, so
   // this can run on every transition without needing to diff against
-  // the previous mode. cueDirector.start()'s own suspendAuto()/
-  // resumeAuto() calls (Phase 1) are untouched by this -- the explicit
-  // auto.disable()/cueDirector.stop() here just make the 3-way
-  // exclusivity hold even switching directly between 'auto' and 'cue'.
+  // the previous mode.
+  //
+  // auto.disable() only fires for 'manual' -- NOT for every non-'auto'
+  // transition (a bug found via a device-test health-events capture:
+  // director_heartbeat read 'off' throughout a whole cue-playback
+  // session, never 'suspended'). auto.disable() sets started=false, and
+  // autoDirector's `state` getter checks `!started` BEFORE it checks
+  // `suspended` -- so calling disable() on the 'cue' transition was
+  // stomping the state before cueDirector.start()'s own suspendAuto()
+  // call (Phase 1's actual mechanism) got a chance to make 'suspended'
+  // observable, even though suspendAuto() still ran and auto genuinely
+  // wasn't emitting. Entering 'cue' now relies on suspendAuto()/
+  // resumeAuto() alone, exactly as designed -- auto stays suspended
+  // (resumable), not stopped, while cues play.
   function applyMode(next) {
     if (!isMainPerformer) return; // only the director's own device runs either engine
-    if (next !== 'auto') auto?.disable();
+    if (next === 'manual') auto?.disable();
     if (next !== 'cue') cueDirector?.stop();
     if (next === 'auto') auto?.start();
     if (next === 'cue') cueDirector?.start();
