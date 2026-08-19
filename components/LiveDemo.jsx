@@ -758,6 +758,7 @@ export default function LiveDemo() {
             role={conn.assignedRole}
             notice={notice}
             selfName={conn.name}
+            email={email}
             maximized={maximized}
             onToggleMaximize={toggleMaximize}
             sidebarCollapsed={sidebarCollapsed}
@@ -856,7 +857,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
