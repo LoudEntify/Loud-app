@@ -19,11 +19,17 @@
 //   onExclusiveMode — (isExclusive: boolean) => void
 //                     called true when staccato starts, false on stop.
 //                     Wire this to pause/resume the auto-rotate timer.
-//   onHumanCommand  — optional () => void, fires on every human tap
-//                     (NOT on sequencer auto-cuts) -- wire this to reset
-//                     the auto-director's override cooldown.
 //   onCommand       — optional (command) => void, fires after each
 //                     broadcast (use to drive the local programme preview)
+//   mode            — 'manual' | 'auto' | 'cue' (CD-4's three-state
+//                     control, replaces the old Auto on/off toggle)
+//   onModeChange    — (next: 'manual'|'auto'|'cue') => void
+//   cueModeAvailable — whether a saved cue sheet exists for the
+//                     currently loaded track -- gates the Cue segment
+//   autoState       — 'running' | 'suspended' | 'off', display only:
+//                     drives the small "suspended" sub-label on the Auto
+//                     segment while staccato holds it (mode itself
+//                     already shows which of the three is active)
 //
 // PRD: Director Experience | S&I: Real-time media, Observability
 // ─────────────────────────────────────────────────────────────
@@ -54,18 +60,14 @@ const GROUPS = [
   { title: 'Mode', keys: ['staccato'] },
 ];
 
-const AUTO_COLORS = {
-  running: '#2ec4b6',
-  cooldown: '#ff9f1c',
-  suspended: '#fdfffc66',
-  off: '#fdfffc44',
-};
-const AUTO_LABELS = {
-  running: 'AUTO',
-  cooldown: 'AUTO · COOLDOWN',
-  suspended: 'AUTO · SUSPENDED',
-  off: 'AUTO · OFF',
-};
+// CD-4: Manual/Auto/Cue are three top-level modes, not a togglable
+// overlay -- this replaces the old single AUTO/AUTO·COOLDOWN/AUTO·
+// SUSPENDED/AUTO·OFF button. 'cooldown' no longer exists as a state
+// (lib/autoDirector.js dropped the fixed-cooldown override mechanism --
+// a human tap now just gets silently overwritten by auto's own
+// already-scheduled next cut, no separate hold window to display).
+const MODES = ['manual', 'auto', 'cue'];
+const MODE_LABELS = { manual: 'Manual', auto: 'Auto', cue: 'Cue' };
 
 export default function DirectorShotPanel({
   room,
@@ -75,10 +77,11 @@ export default function DirectorShotPanel({
   tracks = [],
   showPhase = 'live', // 'soundcheck' | 'live' -- tags every command this panel fires
   onExclusiveMode,
-  onHumanCommand,
   onCommand,
-  autoState = 'off', // 'running' | 'cooldown' | 'suspended' | 'off'
-  onToggleAuto,
+  mode = 'auto',
+  onModeChange,
+  cueModeAvailable = false,
+  autoState = 'off', // 'running' | 'suspended' | 'off' -- display only, see prop doc above
 }) {
   const [activeShot, setActiveShot] = useState(null);
   const [staccatoOn, setStaccatoOn] = useState(false);
@@ -124,7 +127,11 @@ export default function DirectorShotPanel({
   const fire = useCallback(
     async (shotKey, params = {}) => {
       if (!room) return;
-      onHumanCommand?.(); // every tap through this function is a human tap
+      // CD-4: a human tap needs no notification call anywhere anymore --
+      // it broadcasts immediately below like always, and whichever
+      // automatic mode is active (auto or cue) simply overwrites it at
+      // its own next already-scheduled decision. See lib/autoDirector.js's
+      // rule-of-engagement note.
 
       // Any direct shot tap while staccato runs = intent to leave the mode
       if (staccatoOn && shotKey !== 'staccato') {
@@ -178,7 +185,7 @@ export default function DirectorShotPanel({
       await broadcastShotCommand(room, command);
       onCommand?.(command);
     },
-    [room, showId, slot, availableRoles, tracks, showPhase, staccatoOn, sequencer, onExclusiveMode, onHumanCommand, onCommand]
+    [room, showId, slot, availableRoles, tracks, showPhase, staccatoOn, sequencer, onExclusiveMode, onCommand]
   );
 
   // Build 3c -- fully transparent, floating directly on the video inside
@@ -226,26 +233,42 @@ export default function DirectorShotPanel({
               ● STACCATO RUNNING
             </span>
           )}
-          <button
-            type="button"
-            onClick={onToggleAuto}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: 1,
-              color: AUTO_COLORS[autoState] || AUTO_COLORS.off,
-              textShadow:
-                autoState === 'running' || autoState === 'cooldown'
-                  ? `var(--text-halo), 0 0 8px ${AUTO_COLORS[autoState]}88`
-                  : 'var(--text-halo)',
-              cursor: onToggleAuto ? 'pointer' : 'default',
-            }}
-          >
-            ● {AUTO_LABELS[autoState] || AUTO_LABELS.off}
-          </button>
+          {/* CD-4: Manual/Auto/Cue -- three mutually exclusive modes, not
+              a togglable overlay. Same transparent + glow-border language
+              as the shot buttons below (isActive -> teal). Cue is
+              disabled (not hidden) with a hint when no saved sheet exists
+              for the currently loaded track. */}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {MODES.map((m) => {
+              const isActive = mode === m;
+              const isCueDisabled = m === 'cue' && !cueModeAvailable;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  disabled={isCueDisabled}
+                  onClick={() => onModeChange?.(m)}
+                  title={isCueDisabled ? 'Save a cue sheet for this track to enable Cue mode' : undefined}
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: 6,
+                    border: `1.5px solid ${isActive ? C.teal : '#fdfffc22'}`,
+                    background: isActive ? `${C.teal}22` : 'transparent',
+                    boxShadow: isActive ? `0 0 8px ${C.teal}66` : 'none',
+                    color: isCueDisabled ? '#fdfffc44' : C.porcelain,
+                    textShadow: 'var(--text-halo)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: 1,
+                    cursor: isCueDisabled ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {MODE_LABELS[m]}
+                  {m === 'auto' && mode === 'auto' && autoState === 'suspended' ? ' · suspended' : ''}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

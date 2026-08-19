@@ -48,7 +48,7 @@ const DEFAULT_DECK_HEIGHT = 340;
 // VideoDeckPanel are rendered directly here now, PerformerDeck.jsx is
 // retired. This does mean BroadcastStage is no longer purely LiveKit-
 // agnostic passthrough -- it now needs the shot-director's own props
-// (room, showId, availableRoles, tracks, autoState, the on* callbacks),
+// (room, showId, availableRoles, tracks, mode, the on* callbacks),
 // threaded straight through from RoomInner exactly as DirectorShotPanel
 // used to receive them directly; still no LiveKit CALLS happen in this
 // file itself, just prop plumbing.
@@ -88,11 +88,14 @@ export default function BroadcastStage({
   availableRoles,
   tracks,
   onExclusiveMode,
-  onHumanCommand,
   onCommand,
-  autoState,
-  onToggleAuto,
+  mode,
+  onModeChange,
+  cueModeAvailable,
+  autoState, // 'running' | 'suspended' | 'off' -- only used for the Auto segment's "suspended" sub-indicator now, not for driving the toggle itself
   onBackingPlayerChange,
+  artistEmail,
+  onCueSheetChange,
   deckCollapsed,
   onToggleDeckCollapsed,
   commentsCollapsed,
@@ -347,10 +350,11 @@ export default function BroadcastStage({
                         tracks={tracks}
                         showPhase={showPhase}
                         onExclusiveMode={onExclusiveMode}
-                        onHumanCommand={onHumanCommand}
                         onCommand={onCommand}
+                        mode={mode}
+                        onModeChange={onModeChange}
+                        cueModeAvailable={cueModeAvailable}
                         autoState={autoState}
-                        onToggleAuto={onToggleAuto}
                       />
                     ),
                   },
@@ -364,6 +368,8 @@ export default function BroadcastStage({
                         showEnded={showEnded}
                         showPhase={showPhase}
                         onBackingPlayerChange={onBackingPlayerChange}
+                        artistEmail={artistEmail}
+                        onCueSheetChange={onCueSheetChange}
                       />
                     ),
                   },
@@ -418,10 +424,11 @@ export default function BroadcastStage({
               tracks={tracks}
               showPhase={showPhase}
               onExclusiveMode={onExclusiveMode}
-              onHumanCommand={onHumanCommand}
               onCommand={onCommand}
+              mode={mode}
+              onModeChange={onModeChange}
+              cueModeAvailable={cueModeAvailable}
               autoState={autoState}
-              onToggleAuto={onToggleAuto}
             />
             <AudioDeckPanel
               nodes={audioNodes}
@@ -429,6 +436,8 @@ export default function BroadcastStage({
               showEnded={showEnded}
               showPhase={showPhase}
               onBackingPlayerChange={onBackingPlayerChange}
+              artistEmail={artistEmail}
+              onCueSheetChange={onCueSheetChange}
             />
           </div>
           <div className="desktop-side-column desktop-side-column--right">
