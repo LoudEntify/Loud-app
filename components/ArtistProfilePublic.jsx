@@ -93,10 +93,14 @@ export default function ArtistProfilePublic({ artistId }) {
             {profile.display_name}
           </div>
 
-          {profile.genre && (
-            <span style={{ display: 'inline-block', marginTop: 10, fontSize: 10.5, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.7)', border: '1px solid rgba(1,22,39,0.15)', clipPath: 'polygon(6px 0,100% 0,100% 100%,calc(100% - 6px) 100%,0 100%,0 6px)', padding: '7px 11px' }}>
-              {profile.genre}
-            </span>
+          {profile.genres?.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+              {profile.genres.map((g) => (
+                <span key={g} style={{ fontSize: 10.5, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.7)', border: '1px solid rgba(1,22,39,0.15)', clipPath: 'polygon(6px 0,100% 0,100% 100%,calc(100% - 6px) 100%,0 100%,0 6px)', padding: '7px 11px' }}>
+                  {g}
+                </span>
+              ))}
+            </div>
           )}
 
           <p style={{ marginTop: 16, fontSize: 13.5, lineHeight: 1.6, color: profile.bio ? 'rgba(1,22,39,0.8)' : 'rgba(1,22,39,0.35)' }}>

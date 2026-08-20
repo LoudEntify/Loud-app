@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
+import GenreSelect from './GenreSelect';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -16,14 +17,24 @@ const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transp
 // and account-deletion sections from the old mock are removed rather than
 // left as decoration now that everything around them is real -- neither
 // was ever backed by anything, and leaving them would misleadingly imply
-// they now are. display_name/genre are editable for both roles; bio/photo
-// are artist-only, per this round's scope (viewer profile stays minimal).
+// they now are.
+//
+// Product decision (fold-in round, after the test sitting started): bio
+// and photo are no longer artist-only -- both roles get the full profile
+// (display name, genres, bio, photo). Role differences stay strictly
+// capability-based (hosting shows, claiming slots, cue-sheet authoring,
+// technical director/audio panels), enforced at the API-route/claim level
+// -- see app/api/performer/claim-slot/route.js and app/api/cue-sheets/
+// route.js's verifyArtistAuth checks, and components/LiveDemo.jsx's
+// isMainPerformer gating (only ever true after a claim-slot success) --
+// not by hiding form fields here. This file no longer branches on role at
+// all for what's editable.
 export default function AccountSettings() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [displayName, setDisplayName] = useState('');
-  const [genre, setGenre] = useState('');
+  const [genres, setGenres] = useState([]);
   const [bio, setBio] = useState('');
   const [photoUrl, setPhotoUrl] = useState(null);
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -43,7 +54,7 @@ export default function AccountSettings() {
         if (cancelled) return;
         setProfile(p);
         setDisplayName(p?.display_name || '');
-        setGenre(p?.genre || '');
+        setGenres(p?.genres || []);
         setBio(p?.bio || '');
         setPhotoUrl(p?.avatar_url || null);
       }
@@ -61,8 +72,7 @@ export default function AccountSettings() {
     setSaving(true);
     setSaveError('');
     setSaveNotice('');
-    const fields = { display_name: displayName.trim(), genre: genre.trim() || null };
-    if (profile?.role === 'artist') fields.bio = bio.trim() || null;
+    const fields = { display_name: displayName.trim(), genres, bio: bio.trim() || null };
     const { profile: updated, error } = await updateProfile(fields);
     if (error) {
       setSaveError(error.message || 'Could not save changes.');
@@ -126,28 +136,26 @@ export default function AccountSettings() {
         <div style={{ marginTop: 24 }}>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>PROFILE INFO</span>
 
-          {isArtist && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
-              <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
-                {photoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                )}
-              </div>
-              <div>
-                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={photoUploading}
-                  style={{ padding: '10px 14px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'rgba(46,196,182,0.12)', border: 'none', cursor: photoUploading ? 'default' : 'pointer' }}
-                >
-                  {photoUploading ? 'UPLOADING…' : 'CHANGE PHOTO'}
-                </button>
-                <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 6 }}>JPG or PNG, up to 5MB.</div>
-              </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
+              {photoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              )}
             </div>
-          )}
+            <div>
+              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+                style={{ padding: '10px 14px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'rgba(46,196,182,0.12)', border: 'none', cursor: photoUploading ? 'default' : 'pointer' }}
+              >
+                {photoUploading ? 'UPLOADING…' : 'CHANGE PHOTO'}
+              </button>
+              <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 6 }}>JPG or PNG, up to 5MB.</div>
+            </div>
+          </div>
 
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
             <input
@@ -158,21 +166,18 @@ export default function AccountSettings() {
             />
             <input value={session.user.email} disabled style={{ flex: 1, ...inputStyle, opacity: 0.5 }} />
           </div>
-          <input
-            value={genre}
-            onChange={(e) => setGenre(e.target.value)}
-            placeholder={isArtist ? 'Genre' : 'Genre preferences'}
-            style={{ width: '100%', boxSizing: 'border-box', marginTop: 10, ...inputStyle }}
+
+          <div style={{ marginTop: 10 }}>
+            <GenreSelect value={genres} onChange={setGenres} />
+          </div>
+
+          <textarea
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            placeholder="Bio"
+            rows={4}
+            style={{ width: '100%', boxSizing: 'border-box', marginTop: 10, resize: 'vertical', ...inputStyle }}
           />
-          {isArtist && (
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Bio"
-              rows={4}
-              style={{ width: '100%', boxSizing: 'border-box', marginTop: 10, resize: 'vertical', ...inputStyle }}
-            />
-          )}
 
           <button
             type="button"
