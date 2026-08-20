@@ -28,6 +28,7 @@ import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { signUp, signIn } from '../lib/supabaseAuth';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
@@ -254,6 +255,24 @@ export default function LiveDemo() {
   // resolves, once a claim actually succeeds.
   const [role, setRole] = useState('viewer'); // 'viewer' | 'performer' | 'a' | 'b' (post-claim only) | 'camfeed-a' | 'camfeed-b'
   const [performerCode, setPerformerCode] = useState('');
+  // Accounts & Identity Day 1 -- artist login/signup branch at the gate.
+  // gateAudience is the new top-level choice: 'viewer' keeps the
+  // existing anonymous form (below) byte-for-byte; 'artist' is the new
+  // real-auth path. artistSession holds the Supabase session once an
+  // artist authenticates -- its presence is what gates
+  // handleClaimAndGoLive's Authorization header, and what step==='role'
+  // branches on to skip the free role dropdown entirely (an
+  // authenticated artist only ever goes to the performer flow, so
+  // `role` is set to 'performer' programmatically once auth succeeds,
+  // same sentinel isContestantRole already checks for below).
+  const [gateAudience, setGateAudience] = useState(null); // null | 'viewer' | 'artist'
+  const [artistAuthTab, setArtistAuthTab] = useState('login'); // 'login' | 'signup'
+  const [artistEmailInput, setArtistEmailInput] = useState('');
+  const [artistPassword, setArtistPassword] = useState('');
+  const [artistDisplayName, setArtistDisplayName] = useState('');
+  const [artistAuthError, setArtistAuthError] = useState('');
+  const [artistAuthSubmitting, setArtistAuthSubmitting] = useState(false);
+  const [artistSession, setArtistSession] = useState(null);
   // Held for Stage 4's active-performer switch control -- only ever
   // non-null on the device that most recently claimed slot 'a'.
   const [sessionToken, setSessionToken] = useState(null);
@@ -476,10 +495,12 @@ export default function LiveDemo() {
   // state -- viewers/camfeed devices join exactly as before, ungated.
   // canGoLive() isn't null-safe (throws on show.slated_at if show is
   // null), so it's only ever called behind the `show &&` guard here.
-  // 'performer' here means "on the role-selection screen, about to
-  // claim a code" (MULTI_PERFORMER_SPEC.md Stage 3) -- role only ever
-  // becomes the real 'a'/'b' after a successful claim, by which point
-  // this screen is no longer rendered.
+  // 'performer' here means "authenticated as an artist, about to claim
+  // a code" (MULTI_PERFORMER_SPEC.md Stage 3, now gated by Accounts &
+  // Identity Day 1's auth layer -- see handleArtistAuth, the only place
+  // role is ever set to 'performer') -- role only ever becomes the real
+  // 'a'/'b' after a successful claim, by which point this screen is no
+  // longer rendered.
   const isContestantRole = role === 'performer';
   const goLiveDisabledReason = !isContestantRole
     ? null
@@ -525,14 +546,23 @@ export default function LiveDemo() {
       setError('Enter your performer code.');
       return;
     }
+    if (!artistSession) {
+      setError('Sign in as an artist to claim a slot.');
+      return;
+    }
     try {
       const res = await fetch('/api/performer/claim-slot', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // claim-slot now verifies this server-side (lib/verifyArtistAuth.js)
+          // and derives claimed_by_email from it -- email is no longer sent
+          // in the body at all.
+          Authorization: `Bearer ${artistSession.access_token}`,
+        },
         body: JSON.stringify({
           show_id: show?.id,
           code: performerCode.trim(),
-          email,
           participantId,
         }),
       });
@@ -557,6 +587,24 @@ export default function LiveDemo() {
     }
   }
 
+  // Shared by both gate paths -- the viewer's plain form and, after
+  // auth, the artist branch below -- since registering a join in
+  // `participants` (email + consent) is the same operation regardless
+  // of which identity mechanism produced the email.
+  async function registerParticipant(emailValue, consent) {
+    if (!show?.id) {
+      throw new Error("Couldn't reach the show yet -- try again in a moment.");
+    }
+    const res = await fetch('/api/participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ show_id: show.id, email: emailValue, consent }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not continue');
+    return data.participantId;
+  }
+
   async function handleGateSubmit() {
     setGateError('');
     const trimmed = email.trim();
@@ -564,20 +612,10 @@ export default function LiveDemo() {
       setGateError('Enter your email to continue.');
       return;
     }
-    if (!show?.id) {
-      setGateError("Couldn't reach the show yet -- try again in a moment.");
-      return;
-    }
     setGateSubmitting(true);
     try {
-      const res = await fetch('/api/participants', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ show_id: show.id, email: trimmed, consent: marketingConsent }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not continue');
-      setParticipantId(data.participantId);
+      const id = await registerParticipant(trimmed, marketingConsent);
+      setParticipantId(id);
       setStep('mode');
     } catch (e) {
       setGateError(e.message);
@@ -586,7 +624,134 @@ export default function LiveDemo() {
     }
   }
 
+  // Accounts & Identity Day 1. Auth answers WHO; the performer code
+  // (still ahead, at step==='role') answers WHICH SLOT -- this only
+  // signs the artist in and gets them to the same code-entry screen the
+  // old role dropdown used to, it never claims a slot itself.
+  async function handleArtistAuth() {
+    setArtistAuthError('');
+    if (!artistEmailInput.trim() || !artistPassword) {
+      setArtistAuthError('Email and password are required.');
+      return;
+    }
+    setArtistAuthSubmitting(true);
+    try {
+      const result = artistAuthTab === 'signup'
+        ? await signUp({
+            email: artistEmailInput.trim(),
+            password: artistPassword,
+            role: 'artist',
+            displayName: artistDisplayName.trim() || artistEmailInput.trim(),
+          })
+        : await signIn({ email: artistEmailInput.trim(), password: artistPassword });
+
+      if (result.error) {
+        setArtistAuthError(result.error.message || 'Authentication failed.');
+        return;
+      }
+      if (result.needsEmailConfirmation) {
+        setArtistAuthError('Check your email to confirm your account, then log in.');
+        setArtistAuthTab('login');
+        return;
+      }
+      if (result.profile && result.profile.role !== 'artist') {
+        setArtistAuthError('This account is not an artist account.');
+        return;
+      }
+
+      const session = result.data.session;
+      const verifiedEmail = session.user.email;
+      const displayName = result.profile?.display_name || verifiedEmail;
+      const id = await registerParticipant(verifiedEmail, false);
+
+      setArtistSession(session);
+      setParticipantId(id);
+      setEmail(verifiedEmail);
+      setName(displayName);
+      setRole('performer');
+      setStep('mode');
+    } catch (e) {
+      setArtistAuthError(e.message);
+    } finally {
+      setArtistAuthSubmitting(false);
+    }
+  }
+
   if (step === 'gate') {
+    if (!gateAudience) {
+      return (
+        <PageShell active="live">
+          <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2>Pilot show</h2>
+            <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Are you here to watch, or to perform?</p>
+            <button onClick={() => setGateAudience('viewer')} style={primaryBtnStyle}>I&apos;m a viewer</button>
+            <button onClick={() => setGateAudience('artist')} style={primaryBtnStyle}>I&apos;m an artist</button>
+          </div>
+        </PageShell>
+      );
+    }
+
+    if (gateAudience === 'artist') {
+      return (
+        <PageShell active="live">
+          <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2>Artist sign in</h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setArtistAuthTab('login')}
+                style={{ ...primaryBtnStyle, opacity: artistAuthTab === 'login' ? 1 : 0.5 }}
+              >
+                Log in
+              </button>
+              <button
+                onClick={() => setArtistAuthTab('signup')}
+                style={{ ...primaryBtnStyle, opacity: artistAuthTab === 'signup' ? 1 : 0.5 }}
+              >
+                Sign up
+              </button>
+            </div>
+            {artistAuthTab === 'signup' && (
+              <input
+                placeholder="display name"
+                value={artistDisplayName}
+                onChange={(e) => setArtistDisplayName(e.target.value)}
+                style={fieldStyle}
+              />
+            )}
+            <input
+              type="email"
+              placeholder="email"
+              value={artistEmailInput}
+              onChange={(e) => setArtistEmailInput(e.target.value)}
+              style={fieldStyle}
+            />
+            <input
+              type="password"
+              placeholder="password"
+              value={artistPassword}
+              onChange={(e) => setArtistPassword(e.target.value)}
+              style={fieldStyle}
+            />
+            <button
+              onClick={handleArtistAuth}
+              disabled={artistAuthSubmitting}
+              style={{ ...primaryBtnStyle, opacity: artistAuthSubmitting ? 0.6 : 1 }}
+            >
+              {artistAuthSubmitting ? 'Please wait…' : artistAuthTab === 'signup' ? 'Create account' : 'Log in'}
+            </button>
+            {artistAuthError && <p style={{ color: '#e71d36' }}>{artistAuthError}</p>}
+            <button
+              onClick={() => setGateAudience(null)}
+              style={{ background: 'none', border: 'none', color: 'rgba(253, 255, 252, 0.5)', fontSize: 12, padding: 4 }}
+            >
+              ← Back
+            </button>
+          </div>
+        </PageShell>
+      );
+    }
+
+    // gateAudience === 'viewer' -- existing anonymous form, unchanged.
     return (
       <PageShell active="live">
         <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -617,6 +782,12 @@ export default function LiveDemo() {
             {gateSubmitting ? 'Continuing…' : 'Continue'}
           </button>
           {gateError && <p style={{ color: '#e71d36' }}>{gateError}</p>}
+          <button
+            onClick={() => setGateAudience(null)}
+            style={{ background: 'none', border: 'none', color: 'rgba(253, 255, 252, 0.5)', fontSize: 12, padding: 4 }}
+          >
+            ← Back
+          </button>
         </div>
       </PageShell>
     );
@@ -640,53 +811,23 @@ export default function LiveDemo() {
       <PageShell active="live">
         <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
-          <input
-            placeholder="your name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={fieldStyle}
-          />
-          <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
-            <option value="viewer">Viewer</option>
-            <option value="performer">Performer (code required)</option>
-            <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
-            {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
-          </select>
-          {role === 'performer' && (
-            <input
-              placeholder="performer code"
-              value={performerCode}
-              onChange={(e) => setPerformerCode(e.target.value)}
-              style={fieldStyle}
-            />
-          )}
-          {role.startsWith('camfeed-') && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              {[
-                { value: 'wide', label: 'Wide' },
-                { value: 'close', label: 'Close' },
-                { value: 'side', label: 'Side' },
-              ].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setCamRole(opt.value)}
-                  style={{
-                    flex: 1,
-                    padding: 10,
-                    borderRadius: 8,
-                    background: camRole === opt.value ? '#2ec4b6' : 'rgba(253, 255, 252, 0.06)',
-                    color: camRole === opt.value ? '#011627' : '#fdfffc',
-                    border: camRole === opt.value ? 'none' : '1px solid rgba(253, 255, 252, 0.2)',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-          {isContestantRole ? (
+          {artistSession ? (
+            // Accounts & Identity Day 1 -- an authenticated artist skips
+            // the free name/role picker entirely (identity already comes
+            // from the verified session, role is already 'performer',
+            // set in handleArtistAuth) and goes straight to the one thing
+            // auth doesn't answer: which slot. isContestantRole/
+            // goLiveDisabledReason below are unchanged -- role==='performer'
+            // is the same sentinel they always checked, just reachable
+            // only through this branch now instead of a dropdown option.
             <>
+              <p style={{ color: 'rgba(253, 255, 252, 0.7)', fontSize: 13 }}>Signed in as {name || email}</p>
+              <input
+                placeholder="performer code"
+                value={performerCode}
+                onChange={(e) => setPerformerCode(e.target.value)}
+                style={fieldStyle}
+              />
               <button
                 onClick={handleClaimAndGoLive}
                 disabled={!!goLiveDisabledReason}
@@ -703,7 +844,45 @@ export default function LiveDemo() {
               )}
             </>
           ) : (
-            <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
+            <>
+              <input
+                placeholder="your name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                style={fieldStyle}
+              />
+              <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
+                <option value="viewer">Viewer</option>
+                <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
+                {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
+              </select>
+              {role.startsWith('camfeed-') && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[
+                    { value: 'wide', label: 'Wide' },
+                    { value: 'close', label: 'Close' },
+                    { value: 'side', label: 'Side' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setCamRole(opt.value)}
+                      style={{
+                        flex: 1,
+                        padding: 10,
+                        borderRadius: 8,
+                        background: camRole === opt.value ? '#2ec4b6' : 'rgba(253, 255, 252, 0.06)',
+                        color: camRole === opt.value ? '#011627' : '#fdfffc',
+                        border: camRole === opt.value ? 'none' : '1px solid rgba(253, 255, 252, 0.2)',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
+            </>
           )}
           {error && <p style={{ color: '#e71d36' }}>{error}</p>}
         </div>

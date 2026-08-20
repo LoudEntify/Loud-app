@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
+import { AccessToken, TrackSource } from 'livekit-server-sdk';
 import { NextResponse } from 'next/server';
 
 // This route is the only place the LiveKit API secret is ever touched.
@@ -10,10 +10,6 @@ import { NextResponse } from 'next/server';
 //   LIVEKIT_API_KEY
 //   LIVEKIT_API_SECRET
 //   LIVEKIT_URL        (e.g. wss://yourproject.livekit.cloud)
-
-function toHttpUrl(wsUrl) {
-  return wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
-}
 
 export async function GET(request) {
   try {
@@ -31,7 +27,6 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const room = searchParams.get('room') || 'pilot-room';
     const identity = searchParams.get('identity') || `guest-${Date.now()}`;
-    const requestedContestant = searchParams.get('contestant'); // 'a' | 'b' | null -- main performer
     const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
 
     // Extra camera feeds: video-only, no data messages, no slot-exclusivity
@@ -50,38 +45,30 @@ export async function GET(request) {
       return NextResponse.json({ token, url: livekitUrl, slotTaken: false, assignedRole: `camfeed-${camfeed}` });
     }
 
-    // Check whether the requested contestant slot is already occupied by a
-    // currently-connected participant, so a third person can't also publish
-    // as "contestant A" over an existing performer.
-    let slotTaken = false;
+    // Accounts & Identity Day 1: `?contestant=a|b` no longer grants publish
+    // rights. It used to mint a publish-capable token gated only by a
+    // same-prefix name-collision check against live LiveKit participants --
+    // no code, no auth -- flagged "accepted-not-solved" in
+    // MULTI_PERFORMER_SPEC.md, closed now. The only legitimate way to get a
+    // performer-publish token is app/api/performer/claim-slot, which
+    // requires both a valid show_slots code AND a verified artist session
+    // as of this round, and mints its own AccessToken directly -- it never
+    // calls this route. No button in the current UI ever sent `contestant=`
+    // here (confirmed: the role dropdown's performer option always routes
+    // through claim-slot); this branch existed only as directly-callable
+    // API surface. Still logged, in case anything is actually relying on
+    // it, but it now falls through to the same subscribe-only grant every
+    // viewer gets rather than ever setting canPublish.
+    const requestedContestant = searchParams.get('contestant');
     if (requestedContestant === 'a' || requestedContestant === 'b') {
-      // MULTI_PERFORMER_SPEC.md: performer slots are meant to be claimed
-      // via /api/performer/claim-slot's code check now -- this direct
-      // path still works unmodified (accepted-not-solved bypass, not
-      // fixed here), so at least log any real use of it.
-      console.warn('[token] contestant= claim via unguarded bypass path', { room, requestedContestant, identity });
-      try {
-        const svc = new RoomServiceClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
-        const participants = await svc.listParticipants(room);
-        const prefix = `contestant-${requestedContestant}-`;
-        slotTaken = participants.some(
-          (p) => p.identity.startsWith(prefix) && p.identity !== identity
-        );
-      } catch (e) {
-        // Room doesn't exist yet (first person joining) -- not taken.
-        slotTaken = false;
-      }
+      console.warn('[token] contestant= requested but no longer grants publish (bypass closed)', { room, requestedContestant, identity });
     }
-
-    // If the slot is taken, silently fall back to a viewer-only token rather
-    // than erroring, so a late joiner isn't blocked -- they just watch instead.
-    const assignedContestant = slotTaken ? null : requestedContestant;
 
     const at = new AccessToken(apiKey, apiSecret, { identity });
     at.addGrant({
       room,
       roomJoin: true,
-      canPublish: assignedContestant === 'a' || assignedContestant === 'b',
+      canPublish: false,
       canSubscribe: true,
       // Comments travel as data messages, which is a separate permission
       // from publishing video/audio. Everyone -- viewers included -- needs
@@ -94,8 +81,8 @@ export async function GET(request) {
     return NextResponse.json({
       token,
       url: livekitUrl,
-      slotTaken,
-      assignedRole: assignedContestant || 'viewer',
+      slotTaken: false,
+      assignedRole: 'viewer',
     });
   } catch (err) {
     // Any unexpected crash returns readable JSON instead of an empty body --
