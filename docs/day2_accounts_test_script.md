@@ -1,17 +1,29 @@
 # Manual test script — Accounts & Identity Day 2 (profiles, recordings library, visibility)
 
 Single-sitting script covering everything in this round: profile edit
-(artist + viewer), the recordings library, the public/private toggle, the
-public artist profile, and the enforcement gauntlet for private recordings.
-No part of this was verified in a browser on my end — the Chrome extension
-was unavailable for this whole round, so every device step below is
-unverified rendering, not a re-confirmation of something I already saw
-work. Where I'm specifically uncertain something renders correctly, I've
-said so inline rather than assumed it. Treat every "Expected result" as a
-prediction from reading the code, not an observation.
+(artist + viewer — now identical in what's editable, see Change 1 below),
+the genre tag picker, the recordings library, the public/private toggle,
+the public artist profile, and the enforcement gauntlet for private
+recordings. No part of this was verified in a browser on my end — the
+Chrome extension was unavailable for this whole round, so every device
+step below is unverified rendering, not a re-confirmation of something I
+already saw work. Where I'm specifically uncertain something renders
+correctly, I've said so inline rather than assumed it. Treat every
+"Expected result" as a prediction from reading the code, not an
+observation.
 
-Preview: `https://loud-ogszxt76m-korey-alashe.vercel.app` (branch
-`feature/profiles-library`, not merged to main).
+**Mid-sitting product changes, folded in after batch 1's findings were
+fixed:** (1) bio and photo are no longer artist-only — both roles get the
+full profile. (2) genre is now a fixed-list, tag-style multi-select
+(`lib/genres.js`/`components/GenreSelect.jsx`), not free text. Step 3/4
+below reflect this; if you're comparing against batch 1's original run,
+the pass conditions for viewer profile specifically have inverted (see
+Step 4's note).
+
+Preview: redeployed after this round's changes — check with me for the
+current URL before starting, since a fresh `vercel deploy` mints a new
+one each time (branch `feature/profiles-library`, still not merged to
+main).
 
 Existing test account from Day 1, reusable here: **artist**,
 `accounts-day1-test@mailinator.com` / `TestPass123!`.
@@ -88,6 +100,12 @@ select id, name, public from storage.buckets where id = 'avatars';
 select count(*) as total_rows, count(artist_id) as matched_to_account from cue_sheets;
 ```
 
+You'll also need to run `docs/genres_migration.sql` (new this pass, for
+the genre tag-picker product decision). Its own verification queries are
+inline in that file — run them, and specifically check the "didn't map
+cleanly" query near the bottom so nothing from the old free-text genre
+field got silently dropped.
+
 ```sql
 -- Standard closing statement from here on (Finding 2) -- run this after
 -- any migration/verification pass, not only when something's visibly
@@ -163,15 +181,31 @@ anything in this app's code, since nothing here touches the write path.
 ## Step 3 — Artist profile edit round-trip
 
 **Action:** Still signed in as the artist, go to `/settings`. Edit
-**display name**, **genre**, and **bio**. Click **CHANGE PHOTO**, pick
-a small image file (well under 5MB). Click **SAVE CHANGES**. Once it
-says "Saved.", **reload the page** (not just re-open the tab — a full
-reload, to force a fresh fetch rather than trusting in-memory state).
+**display name** and **bio**. In the genre field, type a few letters of
+a real genre (e.g. "afro") and confirm a filtered dropdown appears;
+click a suggestion (or press Enter) to add it as a tag; add 2-3 genres
+this way. Then try typing something that matches **nothing** in
+`lib/genres.js` (e.g. "xyz123") and confirm no suggestions appear and
+nothing gets added if you press Enter — this is the "no free-typing"
+rule, worth confirming it actually holds, not just that the happy path
+works. Click the **×** on one tag to remove it. Click **CHANGE PHOTO**,
+pick a small image file (well under 5MB). Click **SAVE CHANGES**. Once
+it says "Saved.", **reload the page** (not just re-open the tab — a
+full reload, to force a fresh fetch rather than trusting in-memory
+state).
 
 **Expected result:** page loads with your session already recognized
-(no "sign in" prompt). The photo picker button and bio field should be
-visible (artist-only fields). After reload, all four fields — name,
-genre, bio, photo — show the values you just saved, not the old ones.
+(no "sign in" prompt). Photo picker, genre tag picker, and bio field
+should all be visible. After reload, all fields — name, genre tags,
+bio, photo — show the values you just saved, not the old ones, and the
+genre field shows them as tags (not a plain text string).
+
+**I'm specifically uncertain about:** the dropdown's positioning/z-index
+in this exact layout (`components/GenreSelect.jsx` is brand new,
+unrendered by me) — if it appears cut off or behind other elements
+rather than simply not appearing, that's a CSS issue to note separately
+from whether the underlying filter/select logic works (test the logic
+via keyboard — type, Enter — even if the visual dropdown looks off).
 
 **Retest note (batch 1, Finding 4):** text fields and the photo picker
 itself were already confirmed working. What was broken, now fixed: the
@@ -209,25 +243,76 @@ behaving the way the migration intends.
 
 ---
 
-## Step 4 — Viewer profile (minimal, per this round's scope)
+## Step 4 — Viewer profile (now full — pass condition inverted from batch 1)
 
-**Action:** Sign up a **new** account via `/auth` — toggle **I'M A
-FAN** (this maps to the `viewer` role in the database; the UI label
-wasn't changed to avoid drifting from existing product copy). Use a
-fresh mailinator alias, e.g. `day2-viewer-test@mailinator.com`. Confirm
-via the email (same mailinator-inbox pattern as Day 1: go to
-`mailinator.com`, check the public inbox for that alias, click the
-confirmation link). Log in, go to `/settings`.
+**Product decision, mid-sitting:** viewers now get the SAME profile
+fields as artists (bio, photo, genre tags) — engagement rationale, both
+sides should be able to know who they're dealing with. What stays
+role-gated is capability, not profile fields — covered in 4b below.
 
-**Expected result:** display name + genre fields are editable and
-save/reload the same way as Step 3. **Bio and photo-upload should NOT
-appear at all** for this account — that's the intended artist-only
-gating, not a missing feature.
+**4a — Action:** Sign up a **new** account via `/auth` — toggle **I'M A
+FAN** (maps to the `viewer` role in the database; the UI label wasn't
+changed to avoid drifting from existing product copy). Use a fresh
+mailinator alias, e.g. `day2-viewer-test@mailinator.com`. Confirm via
+the email (same mailinator-inbox pattern as Day 1). Log in, go to
+`/settings`. Edit display name, add 2-3 genre tags (same picker as Step
+3), write a bio, upload a photo. Save, reload.
 
-**What a failure would indicate:** if bio/photo fields DO show for this
-account, the `profile?.role === 'artist'` check in
-`AccountSettings.jsx` isn't reading the real role — check what
-`ensureProfile` actually wrote to this account's `profiles` row.
+**Expected result — inverted from batch 1's original script:** bio and
+the photo picker **should now appear and work** for this account,
+identically to Step 3. This is the opposite of what batch 1 checked
+for (which correctly asserted bio/photo were artist-only, under the
+scope at the time) — if bio/photo are STILL missing here, the
+`isArtist` conditionals that used to gate them in
+`AccountSettings.jsx` weren't fully removed; check the component
+directly against what's described in Change 1's commit.
+
+**4b — Action (the thing that actually matters now — capability, not
+fields):** Still on this viewer account, confirm the restrictions
+**below** actually hold. These were true before this round's product
+change and aren't supposed to have moved — this is a verification
+that removing the UI field-gating didn't accidentally loosen anything
+real, not a test of new behavior.
+
+- **Cannot claim a performer slot.** Go to the live-show gate (`/`),
+  choose **I'm an artist**, and try logging in with this viewer
+  account's credentials on that form. Real enforcement:
+  `app/api/performer/claim-slot/route.js` calls `verifyArtistAuth`
+  (`lib/verifyArtistAuth.js`), which 403s with "This action requires
+  an artist account" for any non-artist role — **at the API route**,
+  not just by hiding a button. Confirm you get that rejection (or, if
+  the artist-login branch's own UI stops you earlier since the gate
+  flow assumes artist credentials, confirm you simply cannot reach a
+  live performer view with this account by any path).
+- **Cannot author cue sheets.** Same mechanism —
+  `app/api/cue-sheets/route.js`'s GET/POST both call
+  `verifyArtistAuth` — but there's no direct UI path to even attempt
+  this as a viewer (cue authoring only renders behind
+  `isMainPerformer`, itself only reachable after a successful,
+  artist-gated slot claim), so this is really the same check as the
+  bullet above, not a separately reachable one.
+- **Cannot see technical director/audio panels.** Same reasoning —
+  `components/LiveDemo.jsx`'s `isMainPerformer` can only become true
+  via a successful claim-slot response, so there's no scenario where a
+  viewer reaches `DirectorShotPanel`/`AudioDeckPanel` at all, gated or
+  otherwise.
+- **"Access earnings"** — nothing to test here. I confirmed there's no
+  real earnings/payments feature anywhere in this codebase to gate —
+  `ArtistDashboard.jsx`'s "TOKENS EARNED"/"TOP SUPPORTERS" numbers are
+  static mock content, not connected to any account or capability.
+  Worth knowing this is currently ungated only because there's nothing
+  real behind it yet, not because it was deliberately left open.
+
+**One honest gap, not introduced this round:** `/dashboard` itself
+(the page, not any of the capabilities above) renders for **any**
+authenticated user who navigates there directly, viewer included —
+it's not blocked at the page/route level. This isn't a data leak (its
+recordings query is scoped to `artist_id = auth.uid()`, so a viewer
+just sees an empty library, same RLS as everyone else) and it predates
+this round, but it's real: nothing stops a viewer from landing on the
+"STUDIO" page and seeing artist-oriented chrome. Confirm this is what
+actually happens (an oddly-empty but harmless page, not an error and
+not someone else's data) rather than assuming it away.
 
 ---
 
@@ -286,10 +371,11 @@ browser tab (private/incognito window, to make sure you're seeing what
 an anonymous visitor sees, not something cached from your own session).
 
 **Expected result:** the public profile shows the artist's display
-name, genre, and bio (whatever you saved in Step 3) — or the stated
-empty states ("No bio yet.") if any field is blank. The now-public
-recording should appear in the RECORDINGS list and be playable by
-clicking it, with **no login required**.
+name, genre tags, and bio (whatever you saved in Step 3) — or the
+stated empty states ("No bio yet.", no tag row at all if no genres
+picked) if any field is blank. The now-public recording should appear
+in the RECORDINGS list and be playable by clicking it, with **no login
+required**.
 
 Now flip the same recording back to **PRIVATE** on the dashboard, and
 refresh the logged-out public-profile tab.
