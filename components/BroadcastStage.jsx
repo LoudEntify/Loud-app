@@ -95,6 +95,7 @@ export default function BroadcastStage({
   autoState, // 'running' | 'suspended' | 'off' -- only used for the Auto segment's "suspended" sub-indicator now, not for driving the toggle itself
   onBackingPlayerChange,
   artistEmail,
+  artistAccessToken,
   onCueSheetChange,
   deckCollapsed,
   onToggleDeckCollapsed,
@@ -372,6 +373,7 @@ export default function BroadcastStage({
                         showPhase={showPhase}
                         onBackingPlayerChange={onBackingPlayerChange}
                         artistEmail={artistEmail}
+                        artistAccessToken={artistAccessToken}
                         onCueSheetChange={onCueSheetChange}
                       />
                     ),
@@ -440,6 +442,7 @@ export default function BroadcastStage({
               showPhase={showPhase}
               onBackingPlayerChange={onBackingPlayerChange}
               artistEmail={artistEmail}
+              artistAccessToken={artistAccessToken}
               onCueSheetChange={onCueSheetChange}
             />
           </div>
