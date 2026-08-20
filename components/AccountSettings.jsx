@@ -1,28 +1,109 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getAccountType, setAccountType, onAccountTypeChange } from '../lib/mockAccount';
+import { useState, useEffect, useRef } from 'react';
+import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
-const ORANGE = '#ff9f1c';
 
-// Mock data only -- editing/saving doesn't reach a real backend, and the
-// password-confirm modal just closes on either button. The account-type
-// section is the one control here with a real (if entirely local) effect:
-// see lib/mockAccount.js.
+const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '12px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' };
+
+// Accounts & Identity Day 2 -- real profile edit, replacing the old
+// mock-only version (hardcoded defaultValues, no-op Save, a client-side
+// "upgrade to artist" button that made no sense once role became a real,
+// signup-time-only field on the profiles table). The SECURITY (2FA toggle)
+// and account-deletion sections from the old mock are removed rather than
+// left as decoration now that everything around them is real -- neither
+// was ever backed by anything, and leaving them would misleadingly imply
+// they now are. display_name/genre are editable for both roles; bio/photo
+// are artist-only, per this round's scope (viewer profile stays minimal).
 export default function AccountSettings() {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [twoFa, setTwoFa] = useState(true);
-  const [accountType, setAccountTypeState] = useState('fan');
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [displayName, setDisplayName] = useState('');
+  const [genre, setGenre] = useState('');
+  const [bio, setBio] = useState('');
+  const [photoUrl, setPhotoUrl] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saveNotice, setSaveNotice] = useState('');
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
-    setAccountTypeState(getAccountType());
-    return onAccountTypeChange(() => setAccountTypeState(getAccountType()));
+    let cancelled = false;
+    async function load() {
+      const s = await getSession();
+      if (cancelled) return;
+      setSession(s);
+      if (s) {
+        const { profile: p } = await getProfile(s.user.id);
+        if (cancelled) return;
+        setProfile(p);
+        setDisplayName(p?.display_name || '');
+        setGenre(p?.genre || '');
+        setBio(p?.bio || '');
+        setPhotoUrl(p?.photo_url || null);
+      }
+      setLoading(false);
+    }
+    load();
+    return onAuthStateChange((_event, s) => {
+      setSession(s);
+      if (!s) setProfile(null);
+    });
   }, []);
 
-  const upgrade = () => setAccountType('artist');
+  async function handleSave() {
+    if (!session) return;
+    setSaving(true);
+    setSaveError('');
+    setSaveNotice('');
+    const fields = { display_name: displayName.trim(), genre: genre.trim() || null };
+    if (profile?.role === 'artist') fields.bio = bio.trim() || null;
+    const { profile: updated, error } = await updateProfile(fields);
+    if (error) {
+      setSaveError(error.message || 'Could not save changes.');
+    } else {
+      setProfile(updated);
+      setSaveNotice('Saved.');
+    }
+    setSaving(false);
+  }
+
+  async function handlePhotoChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true);
+    setSaveError('');
+    const { url, error } = await uploadAvatar(file);
+    if (error) {
+      setSaveError(error.message || 'Photo upload failed.');
+    } else {
+      setPhotoUrl(url);
+      await updateProfile({ photo_url: url });
+    }
+    setPhotoUploading(false);
+  }
+
+  if (loading) {
+    return <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px' }}>Loading…</div>;
+  }
+
+  if (!session) {
+    return (
+      <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px 60px' }}>
+        <div style={{ maxWidth: 640, margin: '0 auto' }}>
+          <div style={{ fontSize: 21, fontWeight: 700, color: INK }}>Settings</div>
+          <p style={{ marginTop: 16, fontSize: 13, color: 'rgba(1,22,39,0.6)' }}>Sign in to view and edit your profile.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isArtist = profile?.role === 'artist';
 
   return (
     <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px 60px' }}>
@@ -32,93 +113,80 @@ export default function AccountSettings() {
 
         <div style={{ marginTop: 24 }}>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>PROFILE INFO</span>
+
+          {isArtist && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
+                {photoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+              </div>
+              <div>
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={photoUploading}
+                  style={{ padding: '10px 14px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'rgba(46,196,182,0.12)', border: 'none', cursor: photoUploading ? 'default' : 'pointer' }}
+                >
+                  {photoUploading ? 'UPLOADING…' : 'CHANGE PHOTO'}
+                </button>
+                <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 6 }}>JPG or PNG, up to 5MB.</div>
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
             <input
-              defaultValue="Jordan Reyes"
-              style={{ flex: 1, border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '12px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' }}
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Display name"
+              style={{ flex: 1, ...inputStyle }}
             />
-            <input
-              defaultValue="jordanreyes@email.com"
-              style={{ flex: 1, border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '12px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' }}
-            />
+            <input value={session.user.email} disabled style={{ flex: 1, ...inputStyle, opacity: 0.5 }} />
           </div>
+          <input
+            value={genre}
+            onChange={(e) => setGenre(e.target.value)}
+            placeholder={isArtist ? 'Genre' : 'Genre preferences'}
+            style={{ width: '100%', boxSizing: 'border-box', marginTop: 10, ...inputStyle }}
+          />
+          {isArtist && (
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              placeholder="Bio"
+              rows={4}
+              style={{ width: '100%', boxSizing: 'border-box', marginTop: 10, resize: 'vertical', ...inputStyle }}
+            />
+          )}
+
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
-            style={{ marginTop: 12, maxWidth: 220, width: '100%', textAlign: 'center', padding: '13px 0', fontSize: 11, letterSpacing: '0.08em', fontWeight: 700, color: TEAL, background: 'rgba(46,196,182,0.12)', boxShadow: '0 0 12px rgba(46,196,182,0.2)' }}
+            onClick={handleSave}
+            disabled={saving}
+            style={{ marginTop: 12, maxWidth: 220, width: '100%', textAlign: 'center', padding: '13px 0', fontSize: 11, letterSpacing: '0.08em', fontWeight: 700, color: TEAL, background: 'rgba(46,196,182,0.12)', boxShadow: '0 0 12px rgba(46,196,182,0.2)', opacity: saving ? 0.6 : 1, border: 'none', cursor: saving ? 'default' : 'pointer' }}
           >
-            SAVE CHANGES
+            {saving ? 'SAVING…' : 'SAVE CHANGES'}
           </button>
-        </div>
-
-        <div style={{ marginTop: 28 }}>
-          <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SECURITY</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: '13px 14px' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: INK }}>Two-factor authentication for edits</div>
-              <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>Require a code before profile changes save</div>
-            </div>
-            <div
-              onClick={() => setTwoFa((v) => !v)}
-              style={{ width: 38, height: 20, flexShrink: 0, cursor: 'pointer', position: 'relative', background: twoFa ? 'rgba(46,196,182,0.15)' : 'rgba(1,22,39,0.06)', border: `1px solid ${twoFa ? 'rgba(46,196,182,0.5)' : 'rgba(1,22,39,0.15)'}`, clipPath: 'polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)' }}
-            >
-              <div style={{ position: 'absolute', top: 2, width: 14, height: 14, background: twoFa ? TEAL : 'rgba(1,22,39,0.4)', left: twoFa ? 20 : 2, transition: 'left 0.2s ease', boxShadow: twoFa ? '0 0 8px rgba(46,196,182,0.6)' : 'none' }} />
-            </div>
-          </div>
+          {saveError && <p style={{ marginTop: 8, fontSize: 12, color: '#e71d36' }}>{saveError}</p>}
+          {saveNotice && <p style={{ marginTop: 8, fontSize: 12, color: TEAL }}>{saveNotice}</p>}
         </div>
 
         <div style={{ marginTop: 28 }}>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>ACCOUNT TYPE</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: '13px 14px' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: INK }}>
-                Currently a <strong>{accountType === 'artist' ? 'artist' : 'fan'}</strong> account
-              </div>
-              <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
-                {accountType === 'artist'
-                  ? 'PROFILE in the sidebar takes you to your Artist Dashboard.'
-                  : 'Upgrading unlocks the Artist Dashboard and studio tools.'}
-              </div>
+          <div style={{ marginTop: 12, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: '13px 14px' }}>
+            <div style={{ fontSize: 13, color: INK }}>
+              Signed in as an <strong>{isArtist ? 'artist' : 'viewer'}</strong> account
             </div>
-            {accountType !== 'artist' && (
-              <button
-                type="button"
-                onClick={upgrade}
-                style={{ flexShrink: 0, padding: '10px 16px', fontSize: 10.5, letterSpacing: '0.06em', fontWeight: 700, color: ORANGE, background: 'rgba(255,159,28,0.12)', boxShadow: '0 0 10px rgba(255,159,28,0.2)' }}
-              >
-                UPGRADE TO ARTIST ACCOUNT
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid rgba(1,22,39,0.08)' }}>
-          <span style={{ fontSize: 9.5, letterSpacing: '0.1em', color: 'rgba(1,22,39,0.3)' }}>ACCOUNT</span>
-          <div style={{ display: 'flex', gap: 24, marginTop: 12 }}>
-            <div style={{ fontSize: 12.5, color: 'rgba(1,22,39,0.4)', cursor: 'pointer' }}>Request my data</div>
-            <div style={{ fontSize: 12.5, color: 'rgba(1,22,39,0.4)', cursor: 'pointer' }}>Close account</div>
+            <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
+              Account type is set at signup and can&apos;t be changed here.
+            </div>
           </div>
         </div>
 
       </div>
-
-      {modalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(253,255,252,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 10 }}>
-          <div style={{ width: '100%', maxWidth: 340, background: PORCELAIN, border: '1px solid rgba(46,196,182,0.4)', boxShadow: '0 0 30px rgba(46,196,182,0.2)', clipPath: 'polygon(16px 0,100% 0,100% 100%,0 100%,0 16px)', padding: 22 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: INK }}>Confirm your password</div>
-            <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.5)', marginTop: 6, lineHeight: 1.5 }}>Re-enter your password to save these changes to your profile.</div>
-            <input
-              type="password"
-              placeholder="Password"
-              style={{ width: '100%', boxSizing: 'border-box', marginTop: 14, border: '1px solid rgba(1,22,39,0.2)', background: 'transparent', padding: '12px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' }}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={() => setModalOpen(false)} style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.6)', background: 'rgba(1,22,39,0.06)' }}>CANCEL</button>
-              <button type="button" onClick={() => setModalOpen(false)} style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: PORCELAIN, background: TEAL, boxShadow: '0 0 12px rgba(46,196,182,0.4)' }}>CONFIRM</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
