@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../lib/verifyArtistAuth';
 import { validateCueSheet, isValidFallbackBehaviour } from '../../../lib/cueSheetValidation';
 
 // Cue-Sheet Director (CD-3/CD-4). cue_sheets is now keyed by
 // (track_hash, artist_email) -- docs/cue_sheets_migration_v2.sql -- not
 // (show_id, slot) anymore, so sheets persist per track and are reusable
-// across shows. Same convention as every other route touching this
-// table: zero RLS policies, service-role client only, no anon-key path
-// exists.
+// across shows. Written via the service-role client only, same as every
+// other route touching this table.
+//
+// Accounts & Identity Day 2: previously this route trusted whatever
+// artist_email string a client sent, with zero verification -- in
+// practice always reachable only via an authenticated artist session (cue
+// authoring UI only renders behind isMainPerformer), but not enforced
+// here. Now requires the same verifyArtistAuth check claim-slot uses, and
+// writes artist_id (docs/ownership_migration.sql) from the verified
+// session on every save. artist_email/its unique key are unchanged --
+// this adds a verified ownership column alongside them, not a rekey.
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TRACK_HASH_RE = /^[0-9a-f]{64}$/; // lib/trackHash.js -- hex SHA-256
@@ -17,6 +26,11 @@ function normalizeEmail(raw) {
 }
 
 export async function GET(request) {
+  const auth = await verifyArtistAuth(request);
+  if (auth.error) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   const { searchParams } = new URL(request.url);
   const trackHash = searchParams.get('track_hash') || '';
   const artistEmail = normalizeEmail(searchParams.get('artist_email'));
@@ -56,6 +70,11 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const auth = await verifyArtistAuth(request);
+  if (auth.error) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   try {
     const body = await request.json();
     const trackHash = body.track_hash || '';
@@ -89,6 +108,7 @@ export async function POST(request) {
         {
           track_hash: trackHash,
           artist_email: artistEmail,
+          artist_id: auth.user.id,
           track_label: trackLabel,
           fallback_behaviour: fallbackBehaviour,
           cues,
@@ -96,7 +116,7 @@ export async function POST(request) {
         },
         { onConflict: 'track_hash,artist_email' }
       )
-      .select('id, track_hash, artist_email, track_label, fallback_behaviour, cues, updated_at')
+      .select('id, track_hash, artist_email, artist_id, track_label, fallback_behaviour, cues, updated_at')
       .single();
 
     if (error) {

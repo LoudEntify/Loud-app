@@ -98,6 +98,7 @@ export async function POST(request) {
       .from('show_slots')
       .update({
         claimed_by_email: normalizedEmail,
+        claimed_by_user_id: auth.user.id,
         claimed_at: new Date().toISOString(),
         session_token: sessionToken,
         session_token_issued_at: new Date().toISOString(),
@@ -107,6 +108,21 @@ export async function POST(request) {
     if (updateErr) {
       console.error('[claim-slot] show_slots update failed:', updateErr);
       return NextResponse.json({ error: 'Could not claim slot' }, { status: 500 });
+    }
+
+    // Accounts & Identity Day 2: first-claim-wins ownership -- the first
+    // artist to successfully claim any slot on a show becomes its owner.
+    // `is('artist_id', null)` makes this a no-op once a show already has an
+    // owner (or for shows claimed before this column existed, which stay
+    // ownerless until their next claim). Not fatal -- ownership assignment
+    // isn't required for the claim itself to succeed.
+    const { error: showOwnerErr } = await admin
+      .from('shows')
+      .update({ artist_id: auth.user.id })
+      .eq('id', showId)
+      .is('artist_id', null);
+    if (showOwnerErr) {
+      console.error('[claim-slot] shows ownership update failed:', showOwnerErr);
     }
 
     if (participantId) {

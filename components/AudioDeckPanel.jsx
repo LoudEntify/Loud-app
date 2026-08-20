@@ -41,6 +41,11 @@ export default function AudioDeckPanel({
   // load and after a successful save) so LiveDemo can gate Cue mode and
   // feed cueDirector -- never for in-progress unsaved edits.
   artistEmail,
+  // Accounts & Identity Day 2 -- app/api/cue-sheets/route.js now requires a
+  // verified artist session (same verifyArtistAuth check claim-slot already
+  // uses); this is LiveDemo's artistSession.access_token, threaded down the
+  // same path as artistEmail.
+  artistAccessToken,
   onCueSheetChange,
 }) {
   const [manualMix, setManualMix] = useState(false);
@@ -161,9 +166,11 @@ export default function AudioDeckPanel({
   }
 
   async function loadCueSheet(hash) {
-    if (!artistEmail) return; // no stable identity to key on yet -- editor still works locally, just can't load/save
+    if (!artistEmail || !artistAccessToken) return; // no verified session yet -- editor still works locally, just can't load/save
     try {
-      const res = await fetch(`/api/cue-sheets?track_hash=${hash}&artist_email=${encodeURIComponent(artistEmail)}`);
+      const res = await fetch(`/api/cue-sheets?track_hash=${hash}&artist_email=${encodeURIComponent(artistEmail)}`, {
+        headers: { Authorization: `Bearer ${artistAccessToken}` },
+      });
       if (!res.ok) return;
       const data = await res.json();
       // Guard against a slower earlier fetch resolving after a faster
@@ -204,8 +211,8 @@ export default function AudioDeckPanel({
   }
 
   async function saveCueSheet() {
-    if (!trackHash || !artistEmail) {
-      setCueSheetSaveError('Missing track or performer email');
+    if (!trackHash || !artistEmail || !artistAccessToken) {
+      setCueSheetSaveError('Missing track or artist session');
       return;
     }
     setCueSheetSaving(true);
@@ -213,7 +220,10 @@ export default function AudioDeckPanel({
     try {
       const res = await fetch('/api/cue-sheets', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${artistAccessToken}`,
+        },
         body: JSON.stringify({
           track_hash: trackHash,
           artist_email: artistEmail,

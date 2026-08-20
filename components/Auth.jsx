@@ -26,6 +26,11 @@ const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transp
 // those is out of scope for this round. Real auth is now the source of
 // truth for identity; the mock flag just keeps existing nav behavior
 // working until that's migrated too.
+//
+// No genre field here (Day 2 product decision) -- genres are now a fixed-
+// list multi-select (lib/genres.js, components/GenreSelect.jsx), and this
+// compact signup form never had room for that picker. Every account
+// starts with genres: [] and picks them later via Settings.
 export default function Auth() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
@@ -33,7 +38,6 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [genre, setGenre] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -57,7 +61,6 @@ export default function Auth() {
           password,
           role: dbRole,
           displayName: displayName.trim() || email.trim(),
-          genre: role === 'artist' ? genre.trim() : null,
         });
         if (result.error) {
           setError(result.error.message || 'Sign up failed.');
@@ -135,14 +138,6 @@ export default function Auth() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 style={inputStyle}
               />
-              {role === 'artist' && (
-                <input
-                  placeholder="Genre (optional)"
-                  value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
-                  style={inputStyle}
-                />
-              )}
             </div>
           </>
         )}
