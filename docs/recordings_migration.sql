@@ -1,7 +1,7 @@
 -- recordings migration (Accounts & Identity, Day 2 -- profiles + recordings library)
 -- Run manually in the Supabase SQL editor -- not applied automatically.
 --
--- Amended after the Day 2 test sitting's findings 1-3 (2026-08-20):
+-- Amended after the Day 2 test sitting's findings (2026-08-20), batches 1-2:
 --   - profiles.bio/avatar_url were read/written by this round's code but
 --     never actually added by any committed migration -- section 0 below
 --     fixes that gap for real, retroactively. Column name is `avatar_url`
@@ -13,13 +13,24 @@
 --     SQL editor (storage-schema permissions) and took `avatars_public_read`
 --     down with it (avatars_owner_insert/update landed fine on their own).
 --     Bucket creation is now a dashboard step, not SQL -- see section 2.
+--   - profiles.genres (Change 2, the genre tag picker) was originally a
+--     SEPARATE file, docs/genres_migration.sql -- it WAS written and
+--     committed before the mid-sitting product-decision code shipped
+--     (confirmed: commit 87fb2f2, 2026-08-20 20:56 GMT+1, ahead of the
+--     redeploy), so this wasn't a repeat of the bio/avatar_url gap where
+--     the column genuinely was never written down anywhere. What went
+--     wrong instead: two migration files existed for one round's worth of
+--     profiles changes, and the standalone one wasn't run before testing
+--     reached it. Folded into this single file now (section 0 below,
+--     genres_migration.sql deleted) specifically so there's exactly one
+--     place to look and one thing to diff a round's code against -- not
+--     because the SQL itself was ever wrong.
 --   - Every table this file touches now gets an information_schema.columns
 --     check alongside the pg_policies one, and the whole file ends with a
---     schema-cache reload -- this is the third schema-cache/silent-failure
---     incident this month; treat both as standard, not optional, from here.
+--     schema-cache reload -- standard from here, not optional.
 --
 -- Three things in this file:
---   0. profiles -- bio/avatar_url columns (retroactive fix, see above).
+--   0. profiles -- bio/avatar_url/genres columns (retroactive fix, see above).
 --   1. recordings -- new table, RLS-gated metadata for egress-produced files.
 --   2. avatars -- new PUBLIC storage bucket, for profile photos.
 --
@@ -38,12 +49,74 @@
 -- request.
 
 -- ─── 0. profiles (retroactive fix -- see header) ─────────────
--- Both nullable, same as every other optional profile field. No RLS
--- change needed -- Day 1's owner-write/public-artist-read policies
--- already cover any column on this table, RLS is row-level not
--- column-level.
+-- bio/avatar_url nullable, same as every other optional profile field.
+-- No RLS change needed for any of this -- Day 1's owner-write/public-
+-- artist-read policies already cover any column on this table, RLS is
+-- row-level not column-level.
 alter table profiles add column if not exists bio text;
 alter table profiles add column if not exists avatar_url text;
+
+-- genres text[] -- see lib/genres.js for the canonical fixed list and
+-- components/GenreSelect.jsx for the picker. text[] chosen over a join
+-- table: a bounded, small tag count per profile with no per-genre
+-- metadata needed, and text[] supports GIN indexing + the && / @>
+-- operators directly for "any of these genres" queries, which is what
+-- genre-based discovery/contest matching will need later. Straight
+-- pass-through from supabase-js too -- `.update({ genres: [...] })`
+-- serializes a JS array natively.
+alter table profiles add column if not exists genres text[] not null default '{}';
+
+-- One-time backfill from the old free-text `genre` column -- splits on
+-- commas and normalizes known variants against the canonical list
+-- (case-insensitive, trimmed). Best-effort, not a guarantee -- anything
+-- that doesn't match a known form is dropped from `genres` for that row
+-- (never invented or guessed at); the verification query below finds
+-- exactly which rows that happened to. The old `genre` column is NOT
+-- dropped -- kept as a read-only historical trail, same pattern this app
+-- already uses elsewhere (cue_sheets kept artist_email when artist_id
+-- was added). The app no longer reads or writes it after this round.
+update profiles
+set genres = (
+  select coalesce(array_agg(distinct mapped) filter (where mapped is not null), '{}')
+  from (
+    select case lower(trim(piece))
+      when 'afrobeats' then 'Afrobeats'
+      when 'amapiano' then 'Amapiano'
+      when 'r&b' then 'R&B'
+      when 'rnb' then 'R&B'
+      when 'r n b' then 'R&B'
+      when 'r and b' then 'R&B'
+      when 'r''n''b' then 'R&B'
+      when 'rap' then 'Rap'
+      when 'hip-hop' then 'Hip-Hop'
+      when 'hip hop' then 'Hip-Hop'
+      when 'hiphop' then 'Hip-Hop'
+      when 'gospel' then 'Gospel'
+      when 'pop' then 'Pop'
+      when 'soul' then 'Soul'
+      when 'jazz' then 'Jazz'
+      when 'reggae' then 'Reggae'
+      when 'dancehall' then 'Dancehall'
+      when 'afro-fusion' then 'Afro-fusion'
+      when 'afro fusion' then 'Afro-fusion'
+      when 'afrofusion' then 'Afro-fusion'
+      when 'alte' then 'Alté'
+      when 'alté' then 'Alté'
+      when 'highlife' then 'Highlife'
+      when 'drill' then 'Drill'
+      when 'grime' then 'Grime'
+      when 'electronic' then 'Electronic'
+      when 'house' then 'House'
+      when 'rock' then 'Rock'
+      when 'country' then 'Country'
+      when 'folk' then 'Folk'
+      when 'classical' then 'Classical'
+      else null
+    end as mapped
+    from unnest(string_to_array(profiles.genre, ',')) as piece
+  ) matched
+)
+where genre is not null and genre <> '';
 
 -- ─── 1. recordings ────────────────────────────────────────────
 -- storage_path is the raw S3 key egress already writes
@@ -141,18 +214,28 @@ from pg_policies
 where tablename in ('recordings', 'objects')
 order by tablename, policyname;
 
--- Expect: profiles -> bio, avatar_url (2 rows). recordings -> all 7
--- declared columns. Fewer than expected on profiles means section 0 above
--- didn't run -- exactly Finding 1's failure mode, now checked for
--- explicitly instead of assumed.
+-- Expect: profiles -> bio, avatar_url, genres (3 rows). recordings -> all
+-- 7 declared columns. Fewer than expected on profiles means section 0
+-- above didn't (fully) run -- exactly the failure mode both bio/
+-- avatar_url and genres hit, now checked for explicitly instead of
+-- assumed.
 select table_name, column_name
 from information_schema.columns
-where (table_name = 'profiles' and column_name in ('bio', 'avatar_url'))
+where (table_name = 'profiles' and column_name in ('bio', 'avatar_url', 'genres'))
    or table_name = 'recordings'
 order by table_name, column_name;
 
--- Standard final statement from here on (Finding 2) -- PostgREST's schema
--- cache doesn't always pick up new tables/columns/policies immediately on
--- its own; this is what actually fixed Day 1's "schema cache" 404 and
--- should be run as a matter of course, not only when something breaks.
+-- Rows here had a non-empty old `genre` string that backfilled to an
+-- EMPTY genres array -- every piece failed to match the canonical list.
+-- Not necessarily wrong (could be legitimate free text that was never a
+-- real genre), but worth a manual look since it means that profile lost
+-- its genre display until someone re-picks from the fixed list.
+select id, genre, genres
+from profiles
+where genre is not null and genre <> '' and genres = '{}';
+
+-- Standard final statement from here on -- PostgREST's schema cache
+-- doesn't always pick up new tables/columns/policies immediately on its
+-- own; this is what actually fixed Day 1's "schema cache" 404 and should
+-- be run as a matter of course, not only when something breaks.
 notify pgrst, 'reload schema';

@@ -54,16 +54,15 @@ select table_name from information_schema.tables where table_name = 'recordings'
 ```
 
 ```sql
--- Expect: profiles -> bio, avatar_url (2 rows). recordings -> all 7
--- declared columns (id, show_id, artist_id, storage_path, title,
--- recorded_at, visibility, created_at is 8 -- created_at may or may not
--- list depending on how you scope this, don't worry about the exact
--- count on recordings, just confirm bio/avatar_url both appear for
--- profiles -- that's the column check batch 1's Finding 2 says was
--- missing and would have caught Finding 1 early).
+-- Expect: profiles -> bio, avatar_url, genres (3 rows). recordings ->
+-- all 7 declared columns. Don't worry about the exact count on
+-- recordings, just confirm all three profiles columns appear -- this is
+-- the column check batch 1's Finding 2 asked for, and the reason genres
+-- specifically (batch 2, Finding 1) would have been caught immediately
+-- if it had been run against the consolidated file from the start.
 select table_name, column_name
 from information_schema.columns
-where (table_name = 'profiles' and column_name in ('bio', 'avatar_url'))
+where (table_name = 'profiles' and column_name in ('bio', 'avatar_url', 'genres'))
    or table_name = 'recordings'
 order by table_name, column_name;
 ```
@@ -100,11 +99,16 @@ select id, name, public from storage.buckets where id = 'avatars';
 select count(*) as total_rows, count(artist_id) as matched_to_account from cue_sheets;
 ```
 
-You'll also need to run `docs/genres_migration.sql` (new this pass, for
-the genre tag-picker product decision). Its own verification queries are
-inline in that file — run them, and specifically check the "didn't map
-cleanly" query near the bottom so nothing from the old free-text genre
-field got silently dropped.
+**Batch 2, Finding 1:** `profiles.genres` was originally a separate file
+(`docs/genres_migration.sql`) — it existed and was committed before the
+genre-picker code shipped, but having two migration files for one
+round's profiles changes meant it went un-run before testing reached it.
+Folded into `docs/recordings_migration.sql`'s section 0 now (the
+standalone file is deleted) — there is exactly one migration doc for
+this round's `profiles` columns from here on. The column check above
+already covers `genres` alongside `bio`/`avatar_url`; also run the
+"didn't map cleanly" query near the bottom of that file's section 0 so
+nothing from the old free-text genre field got silently dropped.
 
 ```sql
 -- Standard closing statement from here on (Finding 2) -- run this after
@@ -403,40 +407,80 @@ caching artifact (there's no caching layer here).
 
 ## Step 7 — Enforcement gauntlet (the hard part)
 
+**Errata (batch 2, Finding 3):** Vercel preview deployments sit behind
+Vercel's own SSO wall for **every** request, not just browser page
+loads — plain `curl` from a terminal gets redirected to a Vercel login
+page instead of ever reaching the app, for 7a/7b both. That wall isn't
+present on production. Two ways to actually run 7a/7b against a
+**preview**: `vercel curl <url>` (handles the SSO bypass automatically,
+same tool used to diagnose the egress `EGRESS_TEMPLATE_BASE_URL` gap
+earlier this round) instead of plain `curl`, or — the standing method,
+no CLI needed — run the `fetch(...)` calls below **from the browser's
+own DevTools console** on an already-loaded page of that deployment,
+where the SSO cookie is already satisfied. Against **production**,
+plain `curl` works fine, no wall, no substitution needed — this is what
+made 7c's result "cleanest evidence" (7c is a direct Supabase Storage
+URL, never touches Vercel's SSO at all, on either preview or
+production).
+
 Make sure the recording you're testing with is currently **private**
 (end of Step 6 left it that way). Get its `id` from the query in Step 6
 if you don't already have it.
 
 ### 7a — Second logged-in account, via the app's own route
 
-**Action:** Using the **viewer** account from Step 4 (or sign up a
-second fresh artist account if you'd rather test artist-vs-artist), log
-in via `/auth` in a browser tab. Open DevTools → Application →
-Local Storage → find the `sb-<project-ref>-auth-token` entry, copy the
-`access_token` value out of it. Then, from a terminal:
-```
-curl -i "https://loud-ogszxt76m-korey-alashe.vercel.app/api/recordings/<recording-id>/url" \
-  -H "Authorization: Bearer <access_token>"
-```
-(This calls the app's own API route, not Supabase directly — it's
-exactly the same request the app's own UI would make, just triggered by
-hand since there's no UI path for one account to reach another
-account's private recording id at all.)
+Two sub-cases, not one — see the ordering note below for why both
+matter.
 
-**Expected result:** `403`, body along the lines of `{"error":"Not
-authorized to view this recording"}`.
+**7a-i — Different role (fan/viewer account).** Using the viewer
+account from Step 4, log in via `/auth` in a browser tab, open DevTools
+console on that same tab, and run:
+```js
+const { data } = await window.supabase?.auth.getSession() ?? {};
+// If window.supabase isn't exposed, pull the token from Application ->
+// Local Storage -> the sb-<project-ref>-auth-token entry instead.
+fetch('/api/recordings/<recording-id>/url', {
+  headers: { Authorization: `Bearer ${data.session.access_token}` },
+}).then(r => r.status).then(console.log);
+```
 
-**What a failure would indicate:** a `200` with a real signed URL here
-would be a serious bug — it would mean the ownership check
-(`auth.user.id !== recording.artist_id`) in
-`app/api/recordings/[id]/url/route.js` isn't working.
+**Expected result:** `403`, `{"error":"This action requires an artist
+account"}` — this is the **role** gate
+(`lib/verifyArtistAuth.js`), not the ownership check.
+
+**7a-ii — Same role, different artist (ownership check).** This is the
+one 7a-i can't exercise — a non-artist gets rejected before the code
+ever reaches the ownership comparison (see the ordering note). Sign up
+a **second artist account** (cheapest form: just sign up + confirm —
+it never needs to claim a slot, run a show, or own any recording of its
+own; it only needs `role = 'artist'` to get past the first gate). Log
+in as that second artist, repeat the same `fetch` call against the
+**first** artist's private recording id.
+
+**Expected result:** `403`, `{"error":"Not authorized to view this
+recording"}` — this is the different message, confirming you actually
+reached the ownership check this time, not the role gate again.
+
+**Ordering, confirmed directly in the code**
+(`app/api/recordings/[id]/url/route.js`): the role check
+(`verifyArtistAuth`) runs first; the ownership comparison
+(`auth.user.id !== recording.artist_id`) only runs if that passes. A
+fan account is correctly rejected before ever reaching the ownership
+check — 7a-i alone doesn't exercise it, which is exactly what the
+gauntlet's first pass found. 7a-ii is what actually proves the
+ownership check works.
+
+**What a failure would indicate:** a `200` with a real signed URL in
+either sub-case would be a serious bug. In 7a-i, the role gate itself
+is broken. In 7a-ii specifically, it would mean the ownership check is
+either not running or comparing the wrong ids.
 
 ### 7b — Logged-out tab, the app's own route
 
-**Action:** From a logged-out/incognito tab or plain `curl` with no
-Authorization header:
-```
-curl -i "https://loud-ogszxt76m-korey-alashe.vercel.app/api/recordings/<recording-id>/url"
+**Action:** From a logged-out/incognito tab, DevTools console (or
+`vercel curl` on preview, plain `curl` on production):
+```js
+fetch('/api/recordings/<recording-id>/url').then(r => r.status).then(console.log);
 ```
 
 **Expected result:** `401`, `{"error":"Missing Authorization header"}`.
@@ -445,19 +489,22 @@ curl -i "https://loud-ogszxt76m-korey-alashe.vercel.app/api/recordings/<recordin
 
 This is the actual test of storage-level enforcement, not app logic —
 it deliberately goes around the app, because that's the real-world
-scenario (a leaked or guessed URL). Get the raw path:
+scenario (a leaked or guessed URL), and it's the one sub-step immune to
+the SSO wall either way (a direct Supabase Storage request, not a
+request to this app at all). Get the raw path:
 ```sql
 select storage_path from recordings where id = '<recording-id>';
 ```
-Then, from a logged-out tab or `curl`, try:
+Then, from any browser tab or `curl` (logged in or out, doesn't
+matter — the bucket itself must refuse this regardless of who's asking):
 ```
 https://<your-supabase-project-url>/storage/v1/object/public/recordings/<storage_path>
 ```
 
-**Expected result:** a failure response (400/404-class — Supabase
-returns something like `{"statusCode":"400","error":"Bucket not
-found"}` or an access-denied-style body for a request against a bucket
-that's no longer public). It must **not** return the video file.
+**Confirmed result (batch 2):** `404`, `NoSuchBucket` — the bucket is
+no longer resolvable at the public-object endpoint at all once private,
+which is a cleaner refusal than a 400/403 would have been. It must
+**not** return the video file.
 
 **What a failure would indicate:** if this URL actually serves the
 video, Step 1's bucket-privacy change either didn't take effect or
