@@ -1,7 +1,25 @@
 -- recordings migration (Accounts & Identity, Day 2 -- profiles + recordings library)
 -- Run manually in the Supabase SQL editor -- not applied automatically.
 --
--- Two things in this file:
+-- Amended after the Day 2 test sitting's findings 1-3 (2026-08-20):
+--   - profiles.bio/avatar_url were read/written by this round's code but
+--     never actually added by any committed migration -- section 0 below
+--     fixes that gap for real, retroactively. Column name is `avatar_url`
+--     (not the `photo_url` the app briefly used) to match what was
+--     manually patched into the live database during the test sitting --
+--     the app's code has been updated to match this file, not the other
+--     way around, so a fresh environment and the live one now agree.
+--   - `insert into storage.buckets` for `avatars` silently failed in the
+--     SQL editor (storage-schema permissions) and took `avatars_public_read`
+--     down with it (avatars_owner_insert/update landed fine on their own).
+--     Bucket creation is now a dashboard step, not SQL -- see section 2.
+--   - Every table this file touches now gets an information_schema.columns
+--     check alongside the pg_policies one, and the whole file ends with a
+--     schema-cache reload -- this is the third schema-cache/silent-failure
+--     incident this month; treat both as standard, not optional, from here.
+--
+-- Three things in this file:
+--   0. profiles -- bio/avatar_url columns (retroactive fix, see above).
 --   1. recordings -- new table, RLS-gated metadata for egress-produced files.
 --   2. avatars -- new PUBLIC storage bucket, for profile photos.
 --
@@ -18,6 +36,14 @@
 -- bucket is private, a bare object URL 400s for everyone; only a signed URL
 -- obtained through that route works, and only after it authorizes the
 -- request.
+
+-- ─── 0. profiles (retroactive fix -- see header) ─────────────
+-- Both nullable, same as every other optional profile field. No RLS
+-- change needed -- Day 1's owner-write/public-artist-read policies
+-- already cover any column on this table, RLS is row-level not
+-- column-level.
+alter table profiles add column if not exists bio text;
+alter table profiles add column if not exists avatar_url text;
 
 -- ─── 1. recordings ────────────────────────────────────────────
 -- storage_path is the raw S3 key egress already writes
@@ -70,12 +96,21 @@ create policy "recordings_select_public" on recordings
 
 -- ─── 2. avatars (new public bucket) ──────────────────────────
 -- Public by design -- a public artist profile photo has no privacy
--- requirement, unlike recordings. Path convention: {auth.uid()}/{filename},
--- enforced by the write policies below via storage.foldername(), so a user
--- can only ever write inside their own folder.
-insert into storage.buckets (id, name, public)
-values ('avatars', 'avatars', true)
-on conflict (id) do nothing;
+-- requirement, unlike recordings. Path convention: {auth.uid()}/avatar
+-- (fixed, no extension -- see lib/supabaseAuth.js's uploadAvatar, fixed
+-- alongside this same test-sitting round to stop re-uploads in a
+-- different format from orphaning the old file instead of overwriting
+-- it), enforced by the write policies below via storage.foldername(), so
+-- a user can only ever write inside their own folder.
+--
+-- CREATE THE BUCKET VIA THE DASHBOARD FIRST, NOT SQL: `insert into
+-- storage.buckets` from the SQL editor failed silently here (storage-
+-- schema permissions) and took avatars_public_read down with it as a
+-- side effect. Dashboard -> Storage -> New bucket -> name `avatars`,
+-- Public bucket: ON. Only once that exists, run the three policies below
+-- (they're plain RLS policies on storage.objects, not bucket-creation
+-- statements, so they aren't affected by the same permission issue on
+-- their own).
 
 create policy "avatars_public_read" on storage.objects
   for select using (bucket_id = 'avatars');
@@ -89,7 +124,12 @@ create policy "avatars_owner_update" on storage.objects
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text)
   with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
--- ─── Verification query -- run after the above, confirm before moving on ──
+-- ─── Verification -- run all three, confirm before moving on ────
+-- This is now the standard shape (per Finding 2, 2026-08-20): a policy
+-- check AND a column check for every table this file touches, not just
+-- the new ones -- Finding 1 happened precisely because only the new-table
+-- case was ever checked before.
+
 -- Expect 4 rows for `recordings` (select_own, insert_own, update_own,
 -- select_public) and 3 rows for `storage.objects` scoped to bucket_id =
 -- 'avatars' (public_read, owner_insert, owner_update). If this returns
@@ -100,3 +140,19 @@ select schemaname, tablename, policyname, cmd, roles
 from pg_policies
 where tablename in ('recordings', 'objects')
 order by tablename, policyname;
+
+-- Expect: profiles -> bio, avatar_url (2 rows). recordings -> all 7
+-- declared columns. Fewer than expected on profiles means section 0 above
+-- didn't run -- exactly Finding 1's failure mode, now checked for
+-- explicitly instead of assumed.
+select table_name, column_name
+from information_schema.columns
+where (table_name = 'profiles' and column_name in ('bio', 'avatar_url'))
+   or table_name = 'recordings'
+order by table_name, column_name;
+
+-- Standard final statement from here on (Finding 2) -- PostgREST's schema
+-- cache doesn't always pick up new tables/columns/policies immediately on
+-- its own; this is what actually fixed Day 1's "schema cache" 404 and
+-- should be run as a matter of course, not only when something breaks.
+notify pgrst, 'reload schema';

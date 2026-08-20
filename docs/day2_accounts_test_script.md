@@ -21,14 +21,39 @@ Existing test account from Day 1, reusable here: **artist**,
 ## Before you start — migrations + verification
 
 You've already run `docs/recordings_migration.sql` and
-`docs/ownership_migration.sql`. **Per the standing ritual, confirm they
-actually landed before doing anything else** — Day 1 had a real case of a
-migration silently not creating its policies with no visible error. Run
-all of these and check the row counts match:
+`docs/ownership_migration.sql`, plus the batch-1 findings' manual patches
+(profiles.bio/avatar_url columns, the avatars bucket via dashboard,
+avatars_public_read by hand). `docs/recordings_migration.sql` has since
+been amended to fold all of that in for real, so a **fresh** environment
+doesn't repeat batch 1's three findings — your live database already
+matches what the updated file describes, so you don't need to re-run it,
+just confirm with the queries below (updated to match the amended file,
+retroactively per Finding 2).
+
+**Per the standing ritual, confirm every table/column/policy this round
+touches actually landed before doing anything else** — this is now the
+third schema-cache/silent-migration incident (Day 1's profiles table
+cache, Day 1's missing policies, batch 1's missing profiles columns).
+Run all of these and check the counts match:
 
 ```sql
 -- Expect exactly 1 row.
 select table_name from information_schema.tables where table_name = 'recordings';
+```
+
+```sql
+-- Expect: profiles -> bio, avatar_url (2 rows). recordings -> all 7
+-- declared columns (id, show_id, artist_id, storage_path, title,
+-- recorded_at, visibility, created_at is 8 -- created_at may or may not
+-- list depending on how you scope this, don't worry about the exact
+-- count on recordings, just confirm bio/avatar_url both appear for
+-- profiles -- that's the column check batch 1's Finding 2 says was
+-- missing and would have caught Finding 1 early).
+select table_name, column_name
+from information_schema.columns
+where (table_name = 'profiles' and column_name in ('bio', 'avatar_url'))
+   or table_name = 'recordings'
+order by table_name, column_name;
 ```
 
 ```sql
@@ -61,6 +86,13 @@ select id, name, public from storage.buckets where id = 'avatars';
 -- cue_sheets backfill sanity -- not a pass/fail, just worth knowing
 -- the ratio before you rely on artist_id anywhere.
 select count(*) as total_rows, count(artist_id) as matched_to_account from cue_sheets;
+```
+
+```sql
+-- Standard closing statement from here on (Finding 2) -- run this after
+-- any migration/verification pass, not only when something's visibly
+-- broken.
+notify pgrst, 'reload schema';
 ```
 
 If any of these don't match, stop and re-run the relevant migration
@@ -141,12 +173,26 @@ reload, to force a fresh fetch rather than trusting in-memory state).
 visible (artist-only fields). After reload, all four fields — name,
 genre, bio, photo — show the values you just saved, not the old ones.
 
-**I'm specifically uncertain about:** whether the hidden-file-input
-photo picker is actually clickable in the rendered layout (it's a
-`ref`-triggered click on a real `<input type="file">`, a pattern
-mirrored from `BackingTrackPanel.jsx`'s working audio-file picker, but
-untested in this exact new layout) — if clicking "CHANGE PHOTO" does
-nothing, that's the first thing to suspect, not the upload logic itself.
+**Retest note (batch 1, Finding 4):** text fields and the photo picker
+itself were already confirmed working. What was broken, now fixed: the
+photo persisted to storage but `handlePhotoChange` never checked the
+follow-up `profiles` write for an error, so a column-name mismatch
+(code wrote `photo_url`, the table has `avatar_url`) failed silently —
+the picker showed the new image locally while the database kept the old
+(null) value, with "Saved." never even referring to the photo (that
+message comes from the separate SAVE CHANGES flow, which never touched
+the photo field at all). Fixed: the write now uses `avatar_url`
+throughout, and a failure surfaces as a real error message instead of
+silently reverting nothing. Specifically re-verify: upload a photo,
+reload, confirm it persists (not just previews). Then upload a
+**different-format** image (e.g. a `.png` after a `.jpg`) and confirm
+the old file is replaced, not left behind — the upload path was also
+changed from `{uid}/photo.{ext}` to a fixed `{uid}/avatar` (no
+extension) specifically so re-uploads always overwrite regardless of
+format; any stray files from before this fix (batch 1's "orphaned
+strays") are still sitting in the bucket under the old naming and can be
+deleted by hand from the Storage dashboard whenever convenient — not
+cleaned up automatically.
 
 **What a failure would indicate:** stuck on "Loading…" forever → the
 session-fetch effect is hanging or throwing silently (check browser
