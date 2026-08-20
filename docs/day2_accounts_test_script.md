@@ -1,0 +1,356 @@
+# Manual test script — Accounts & Identity Day 2 (profiles, recordings library, visibility)
+
+Single-sitting script covering everything in this round: profile edit
+(artist + viewer), the recordings library, the public/private toggle, the
+public artist profile, and the enforcement gauntlet for private recordings.
+No part of this was verified in a browser on my end — the Chrome extension
+was unavailable for this whole round, so every device step below is
+unverified rendering, not a re-confirmation of something I already saw
+work. Where I'm specifically uncertain something renders correctly, I've
+said so inline rather than assumed it. Treat every "Expected result" as a
+prediction from reading the code, not an observation.
+
+Preview: `https://loud-ogszxt76m-korey-alashe.vercel.app` (branch
+`feature/profiles-library`, not merged to main).
+
+Existing test account from Day 1, reusable here: **artist**,
+`accounts-day1-test@mailinator.com` / `TestPass123!`.
+
+---
+
+## Before you start — migrations + verification
+
+You've already run `docs/recordings_migration.sql` and
+`docs/ownership_migration.sql`. **Per the standing ritual, confirm they
+actually landed before doing anything else** — Day 1 had a real case of a
+migration silently not creating its policies with no visible error. Run
+all of these and check the row counts match:
+
+```sql
+-- Expect exactly 1 row.
+select table_name from information_schema.tables where table_name = 'recordings';
+```
+
+```sql
+-- Expect 4 rows for recordings (select_own, insert_own, update_own,
+-- select_public) and 3 for objects (avatars_public_read, avatars_owner_insert,
+-- avatars_owner_update) -- 7 total. Fewer means some policy failed to
+-- create -- see docs/recordings_migration.sql's own header comment.
+select schemaname, tablename, policyname, cmd, roles
+from pg_policies
+where tablename in ('recordings', 'objects')
+order by tablename, policyname;
+```
+
+```sql
+-- Expect: shows 3 rows (read_shows, update_shows, insert_shows),
+-- cue_sheets 3 rows (cue_sheets_select_own/insert_own/update_own),
+-- show_slots 0 rows (still zero-policy by design -- not a bug if empty).
+select schemaname, tablename, policyname, cmd, roles
+from pg_policies
+where tablename in ('shows', 'show_slots', 'cue_sheets')
+order by tablename, policyname;
+```
+
+```sql
+-- Expect 1 row, public = true.
+select id, name, public from storage.buckets where id = 'avatars';
+```
+
+```sql
+-- cue_sheets backfill sanity -- not a pass/fail, just worth knowing
+-- the ratio before you rely on artist_id anywhere.
+select count(*) as total_rows, count(artist_id) as matched_to_account from cue_sheets;
+```
+
+If any of these don't match, stop and re-run the relevant migration
+(check for an error you may have missed) before continuing — every step
+below depends on this data model actually being in place.
+
+---
+
+## Step 1 — Set the recordings bucket to private
+
+**Action:** Supabase dashboard → Storage → `recordings` → Settings →
+toggle to private.
+
+**Verify via SQL:**
+```sql
+select id, name, public from storage.buckets where id = 'recordings';
+```
+Expect `public = false`.
+
+**Why first:** everything downstream (the egress check, the enforcement
+gauntlet) is only a meaningful test under the real target condition —
+testing egress writes or private-URL refusal against a still-public
+bucket would pass for the wrong reason.
+
+---
+
+## Step 2 — Egress sanity check: LiveKit still writes to the bucket
+
+This directly answers the question you asked for: do the storage
+changes this round (bucket now private; no `storage.objects` RLS
+policies added for `recordings` at all, since reads go through a
+service-role signed-URL route instead) break LiveKit's own S3-protocol
+write? My reasoning says no — egress authenticates with a static
+access-key/secret over the raw S3-compatible protocol, a separate path
+from the Storage REST API that the public/private flag and any RLS
+policies actually gate — but reasoning isn't proof.
+
+**Action:** As the artist (`accounts-day1-test@mailinator.com`), go
+through a normal short live show: gate → **I'm an artist** → log in →
+Solo → performer code `NEW-CODE-A` → **Claim & Go Live**. Wait ~15-30s
+(enough for at least one egress-eligible segment), then **End Show**.
+Wait an additional ~30-60s after ending — egress needs time to finish
+encoding/uploading before the object appears in the bucket; don't treat
+an empty result immediately after End Show as a failure yet.
+
+**Expected result:** the show runs normally (this part is unchanged
+from every prior round — if it doesn't, that's a regression unrelated
+to this round's actual scope, worth noting separately). After the wait,
+a new object should exist in the bucket.
+
+**Verify:** rather than checking the bucket directly, use the app's own
+sync route (keeps this test inside the app, not a direct Storage call) —
+covered by Step 5 below, which will pick this recording up. If Step 5
+shows 0 recordings after a sync, come back here: that's the signal this
+check actually failed, not a sync-route bug — check the Vercel function
+logs for `[egress]`-prefixed errors from `app/api/egress/start` /
+`stop` around the time of this test.
+
+**What a failure would indicate:** if the show runs fine but no
+recording ever appears even after a generous wait and a retry, the
+private bucket setting is the prime suspect (my reasoning above would be
+wrong) — the fix would be re-checking whether LiveKit Cloud's own S3
+credentials need anything else granted for a private bucket, not
+anything in this app's code, since nothing here touches the write path.
+
+---
+
+## Step 3 — Artist profile edit round-trip
+
+**Action:** Still signed in as the artist, go to `/settings`. Edit
+**display name**, **genre**, and **bio**. Click **CHANGE PHOTO**, pick
+a small image file (well under 5MB). Click **SAVE CHANGES**. Once it
+says "Saved.", **reload the page** (not just re-open the tab — a full
+reload, to force a fresh fetch rather than trusting in-memory state).
+
+**Expected result:** page loads with your session already recognized
+(no "sign in" prompt). The photo picker button and bio field should be
+visible (artist-only fields). After reload, all four fields — name,
+genre, bio, photo — show the values you just saved, not the old ones.
+
+**I'm specifically uncertain about:** whether the hidden-file-input
+photo picker is actually clickable in the rendered layout (it's a
+`ref`-triggered click on a real `<input type="file">`, a pattern
+mirrored from `BackingTrackPanel.jsx`'s working audio-file picker, but
+untested in this exact new layout) — if clicking "CHANGE PHOTO" does
+nothing, that's the first thing to suspect, not the upload logic itself.
+
+**What a failure would indicate:** stuck on "Loading…" forever → the
+session-fetch effect is hanging or throwing silently (check browser
+console). Shows the "Sign in to view your profile" state despite being
+logged in → the session isn't being picked up (check that `/auth`
+login and `/settings` are genuinely sharing the same browser session,
+not a cookie/storage partition issue). Save errors outright → likely an
+RLS or missing-column issue (re-check the `pg_policies`/
+`information_schema` output above). Fields **revert after reload**
+despite a "Saved." message → the update silently didn't persist even
+though the client thought it succeeded — a real bug worth flagging
+precisely, since it would mean `profiles_update_own`'s RLS check isn't
+behaving the way the migration intends.
+
+---
+
+## Step 4 — Viewer profile (minimal, per this round's scope)
+
+**Action:** Sign up a **new** account via `/auth` — toggle **I'M A
+FAN** (this maps to the `viewer` role in the database; the UI label
+wasn't changed to avoid drifting from existing product copy). Use a
+fresh mailinator alias, e.g. `day2-viewer-test@mailinator.com`. Confirm
+via the email (same mailinator-inbox pattern as Day 1: go to
+`mailinator.com`, check the public inbox for that alias, click the
+confirmation link). Log in, go to `/settings`.
+
+**Expected result:** display name + genre fields are editable and
+save/reload the same way as Step 3. **Bio and photo-upload should NOT
+appear at all** for this account — that's the intended artist-only
+gating, not a missing feature.
+
+**What a failure would indicate:** if bio/photo fields DO show for this
+account, the `profile?.role === 'artist'` check in
+`AccountSettings.jsx` isn't reading the real role — check what
+`ensureProfile` actually wrote to this account's `profiles` row.
+
+---
+
+## Step 5 — Library render + playback
+
+**Action:** Back on the **artist** account (`accounts-day1-test@...`),
+go to `/dashboard`. Look at the **RECORDINGS** section. If it's empty,
+click **SYNC RECORDINGS**.
+
+**Expected result:** the sync button shows a result like "Synced -- 1
+new, 0 already up to date." (exact count depends on how many egress
+recordings exist for this artist's shows total, including anything from
+before this round). The recording from Step 2 should now appear as a
+card: a placeholder thumbnail, a title, a date. Clicking the thumbnail
+should start inline playback (a `<video>` element appears below the
+card and plays).
+
+**I'm specifically uncertain about:** whether this recording lands
+attributed to the right show on the first try — the sync route matches
+a bucket object to a show by room name + nearest recording time among
+*your own* shows (stated as a heuristic in the route's own comment,
+given egress's object keys don't embed a show id). If Step 2's
+recording doesn't show up after sync even though Step 2's wait was long
+enough, check whether the show you claimed in Step 2 actually has
+`shows.artist_id` set to your account yet — first successful slot claim
+sets it, so a claim from a much earlier, different-account test could
+theoretically already own that room's `shows` row if you're reusing an
+old show rather than a fresh one.
+
+**What a failure would indicate:** Sync button does nothing / shows an
+error → check the response body (likely an auth or bucket-list issue).
+Recording appears but clicking does nothing → check the browser network
+tab for the `GET /api/recordings/[id]/url` call; a 403 here for your
+*own* recording would be a real bug (ownership check comparing the
+wrong id). Video element appears but doesn't play → check for a CORS
+error in the console first, that's the more likely culprit than the
+signed URL itself being wrong.
+
+---
+
+## Step 6 — Toggle flip + public profile reflects it
+
+**Action:** On the same recording card, click the visibility toggle to
+flip it to **PUBLIC**. Note the recording's `id` isn't shown in the UI
+anywhere — if you need it for Step 7's URL or Step 8, get it via:
+```sql
+select id, title, visibility from recordings where artist_id = (
+  select id from auth.users where email = 'accounts-day1-test@mailinator.com'
+);
+```
+
+Then open (or ask me for) the artist's public profile URL:
+`/artist/<artist-profile-id>` — the id is the same `auth.users.id` /
+`profiles.id` from the query above. Open it in a **fresh, logged-out**
+browser tab (private/incognito window, to make sure you're seeing what
+an anonymous visitor sees, not something cached from your own session).
+
+**Expected result:** the public profile shows the artist's display
+name, genre, and bio (whatever you saved in Step 3) — or the stated
+empty states ("No bio yet.") if any field is blank. The now-public
+recording should appear in the RECORDINGS list and be playable by
+clicking it, with **no login required**.
+
+Now flip the same recording back to **PRIVATE** on the dashboard, and
+refresh the logged-out public-profile tab.
+
+**Expected result:** the recording disappears from the public list
+immediately (this is a live RLS-backed query, not a cache).
+
+**I'm specifically uncertain about:** the overall visual layout of
+`/artist/[id]` — it's a brand-new page this round, adapted in structure
+(not code) from the existing `components/ArtistProfile.jsx` mock, but
+never rendered. If anything looks broken or misaligned, that's more
+likely than the underlying data being wrong — check the data itself
+(display name/bio/recording list) separately from how it looks before
+concluding something's actually broken versus just visually rough.
+
+**What a failure would indicate:** artist not found / blank page →
+check the `id` in the URL matches `profiles.id` exactly. Public
+recording missing from the list → check `visibility` actually saved as
+`'public'` in the table (Step 6's toggle should have written this).
+Private recording still showing after flipping back → the public-read
+policy or the toggle's own update isn't working — a real finding, not a
+caching artifact (there's no caching layer here).
+
+---
+
+## Step 7 — Enforcement gauntlet (the hard part)
+
+Make sure the recording you're testing with is currently **private**
+(end of Step 6 left it that way). Get its `id` from the query in Step 6
+if you don't already have it.
+
+### 7a — Second logged-in account, via the app's own route
+
+**Action:** Using the **viewer** account from Step 4 (or sign up a
+second fresh artist account if you'd rather test artist-vs-artist), log
+in via `/auth` in a browser tab. Open DevTools → Application →
+Local Storage → find the `sb-<project-ref>-auth-token` entry, copy the
+`access_token` value out of it. Then, from a terminal:
+```
+curl -i "https://loud-ogszxt76m-korey-alashe.vercel.app/api/recordings/<recording-id>/url" \
+  -H "Authorization: Bearer <access_token>"
+```
+(This calls the app's own API route, not Supabase directly — it's
+exactly the same request the app's own UI would make, just triggered by
+hand since there's no UI path for one account to reach another
+account's private recording id at all.)
+
+**Expected result:** `403`, body along the lines of `{"error":"Not
+authorized to view this recording"}`.
+
+**What a failure would indicate:** a `200` with a real signed URL here
+would be a serious bug — it would mean the ownership check
+(`auth.user.id !== recording.artist_id`) in
+`app/api/recordings/[id]/url/route.js` isn't working.
+
+### 7b — Logged-out tab, the app's own route
+
+**Action:** From a logged-out/incognito tab or plain `curl` with no
+Authorization header:
+```
+curl -i "https://loud-ogszxt76m-korey-alashe.vercel.app/api/recordings/<recording-id>/url"
+```
+
+**Expected result:** `401`, `{"error":"Missing Authorization header"}`.
+
+### 7c — Raw storage URL, no app involved at all
+
+This is the actual test of storage-level enforcement, not app logic —
+it deliberately goes around the app, because that's the real-world
+scenario (a leaked or guessed URL). Get the raw path:
+```sql
+select storage_path from recordings where id = '<recording-id>';
+```
+Then, from a logged-out tab or `curl`, try:
+```
+https://<your-supabase-project-url>/storage/v1/object/public/recordings/<storage_path>
+```
+
+**Expected result:** a failure response (400/404-class — Supabase
+returns something like `{"statusCode":"400","error":"Bucket not
+found"}` or an access-denied-style body for a request against a bucket
+that's no longer public). It must **not** return the video file.
+
+**What a failure would indicate:** if this URL actually serves the
+video, Step 1's bucket-privacy change either didn't take effect or
+isn't sufficient by itself — this would be the single most important
+finding to report back, since it means private recordings are
+currently NOT enforced at the file level regardless of what the app or
+RLS say. Re-check `select public from storage.buckets where id =
+'recordings'` returns `false`, and if it does and this URL still
+works, that's worth escalating rather than assuming user error.
+
+---
+
+## Notes on what's out of scope for this script
+
+- No thumbnail generation exists (placeholder icon only) — not a bug,
+  stated scope for this round (real thumbnails need a background job,
+  Day 3+).
+- `shows`/`show_slots` RLS tightening and the `cue_sheets` artist_id
+  backfill are data-model changes with no dedicated UI step above — the
+  `pg_policies` queries in "Before you start" are their verification.
+  If you want to exercise the `shows` ownership grandfather clause
+  specifically (an unclaimed show's state can still transition), that
+  would need a show that's never had a slot claimed since this
+  migration ran — not staged for you in this script since every show in
+  active use this round has already been claimed at least once.
+- Discover-page wiring (making existing "view artist" links point at
+  the new `/artist/[id]` route instead of the old hardcoded
+  `/artist` page) is explicitly Day 3, not tested here.
