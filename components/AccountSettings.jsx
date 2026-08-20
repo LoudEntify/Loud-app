@@ -45,7 +45,7 @@ export default function AccountSettings() {
         setDisplayName(p?.display_name || '');
         setGenre(p?.genre || '');
         setBio(p?.bio || '');
-        setPhotoUrl(p?.photo_url || null);
+        setPhotoUrl(p?.avatar_url || null);
       }
       setLoading(false);
     }
@@ -81,9 +81,21 @@ export default function AccountSettings() {
     const { url, error } = await uploadAvatar(file);
     if (error) {
       setSaveError(error.message || 'Photo upload failed.');
+      setPhotoUploading(false);
+      return;
+    }
+    // Day 2 test sitting, Finding 4: this second write was previously
+    // fire-and-forget with no error check -- a failed persist (e.g. the
+    // profiles.avatar_url/photo_url column-name mismatch that caused this
+    // exact bug) left the picked image showing locally (optimistic
+    // photoUrl state, set below regardless of outcome) while the database
+    // silently never got it, with zero signal to the user. Now checked
+    // and reverted on failure like every other save path in this file.
+    const { error: persistErr } = await updateProfile({ avatar_url: url });
+    if (persistErr) {
+      setSaveError(persistErr.message || 'Photo saved to storage but could not be linked to your profile.');
     } else {
       setPhotoUrl(url);
-      await updateProfile({ photo_url: url });
     }
     setPhotoUploading(false);
   }

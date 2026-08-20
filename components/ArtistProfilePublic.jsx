@@ -82,9 +82,9 @@ export default function ArtistProfilePublic({ artistId }) {
       <div style={{ display: 'flex', gap: 48, maxWidth: 1160, margin: '0 auto', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
         <div style={{ width: 280, flexShrink: 0 }}>
-          {profile.photo_url ? (
+          {profile.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={profile.photo_url} alt="" style={{ width: 106, height: 106, borderRadius: '50%', objectFit: 'cover' }} />
+            <img src={profile.avatar_url} alt="" style={{ width: 106, height: 106, borderRadius: '50%', objectFit: 'cover' }} />
           ) : (
             <AvatarRing name={profile.display_name} size={106} />
           )}
