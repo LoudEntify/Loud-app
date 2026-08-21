@@ -19,7 +19,7 @@ import ViewerStage from './ViewerStage';
 import CameraQRPanel from './CameraQRPanel';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
-import { createPilotAudioTrack } from '../lib/audioProcessing';
+import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
@@ -1028,15 +1028,15 @@ export default function LiveDemo() {
           data-lk-theme="default"
           style={{ height: '100%', width: '100%' }}
         >
-          {/* Gated on the plain (non-broadcast-aware) showState, available
-              here in the outer component -- deliberately conservative:
-              this can only ever delay a viewer's audio starting slightly
-              late (if they're relying on a SHOW_LIVE receipt their own
-              clock hasn't caught up to yet), never leak it early, which
-              is the actual requirement (3c: "soundcheck audio must not
-              leak"). Performers/camfeed devices are unaffected -- always
-              rendered, matching behavior before this lifecycle work. */}
-          {(!isViewerRole || showState === 'live') && <RoomAudioRenderer />}
+          {/* Fix (1c) -- RoomAudioRenderer moved INTO RoomInner, where
+              displayShowState exists. It was gated here on the plain
+              clock-derived showState, which cannot see a SHOW_ENDED
+              receipt: L1's polling stops once the cached row reaches
+              'soundcheck', and the clock derives 'live' forever after,
+              so a viewer who learned the show ended from the broadcast
+              kept RoomAudioRenderer mounted indefinitely and kept
+              hearing the performer. The gate needs the same authoritative
+              state the rest of the lifecycle UI already uses. */}
           <RoomInner
             performanceMode={performanceMode}
             role={conn.assignedRole}
@@ -1194,7 +1194,22 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // it, two concurrent calls could both see "not published yet" and both
   // publish, producing two audio track publications.
   const audioPublishInFlightRef = useRef(false);
+  // Fix (1b) -- a ref, not the state value, because ensureAudioPublished
+  // and the SignalConnected handler are long-lived callbacks that would
+  // otherwise capture a stale `displayShowState` from the render that
+  // created them. Set in an effect below, next to displayShowState.
+  const showEndedRef = useRef(false);
+
   const ensureAudioPublished = useCallback(async (trigger) => {
+    // Fix (1b) -- once the show has ended, nothing may put the mic back
+    // on air. This is load-bearing, not defensive: this function fires on
+    // signal_connected, room_reconnected AND publish recovery, so without
+    // this guard any reconnect after END SHOW silently republishes the
+    // performer's live microphone to whoever is still in the room.
+    if (showEndedRef.current) {
+      logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_show_ended' });
+      return;
+    }
     if (audioPublishInFlightRef.current) {
       logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_in_flight' });
       return;
@@ -1244,12 +1259,19 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         trackToPublish = freshHandle.processedTrack;
         action = 'track_ended_recreated';
       }
-      // Sync the republished track to the current mic-toggle state --
-      // toggleMic sets .enabled directly on this same track object, so a
-      // same-object republish already carries the right value forward;
-      // this only matters for the track_ended_recreated branch, where a
-      // brand new track defaults to enabled=true regardless of micOn.
-      trackToPublish.enabled = micOn;
+      // Fix (2c) -- the published track is now ALWAYS enabled; mute state
+      // lives in the Web Audio graph (micMuteGain), not on the track.
+      // This previously set `.enabled = micOn`, which under the new model
+      // would take the backing track off air on every republish whenever
+      // the artist happened to be muted.
+      //
+      // The graph carries mute across a same-object republish by itself.
+      // The track_ended_recreated branch above builds a WHOLE new graph,
+      // though, so its micMuteGain starts at unity -- re-assert the
+      // current toggle state against whichever handle we ended up with.
+      trackToPublish.enabled = true;
+      const nodesToSync = audioHandleRef.current?.nodes;
+      if (nodesToSync) tuneMicMuted(nodesToSync, !micOn);
       await room.localParticipant.publishTrack(trackToPublish, {
         source: Track.Source.Microphone,
       });
@@ -2006,13 +2028,23 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       });
       await ensureAudioPublished('signal_connected');
       const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-      if (pub?.isMuted && micOn) {
+      // Fix (2c) -- no longer conditional on micOn. Under the new model
+      // OUR mute lives in the audio graph, so a muted PUBLICATION here is
+      // never ours: it is LiveKitRoom's own SignalConnected handler
+      // calling setMicrophoneEnabled(false) (see this effect's header).
+      // Leaving it muted whenever the artist happened to be mic-muted
+      // would take the backing track off air too, and would survive the
+      // artist un-muting.
+      //
+      // Fix (1b) -- except once the show has ended, where a muted
+      // publication is deliberate and must stay that way.
+      if (pub?.isMuted && !showEndedRef.current) {
         pub.unmute();
       }
     }
     room.on(RoomEvent.SignalConnected, onSignalConnected);
     return () => room.off(RoomEvent.SignalConnected, onSignalConnected);
-  }, [isMainPerformer, room, ensureAudioPublished, micOn]);
+  }, [isMainPerformer, room, ensureAudioPublished]);
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
@@ -2053,6 +2085,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // is unchanged either way -- the absence of track_local_published
       // previously left no direct signal that this call itself hung or
       // rejected; this closes that gap.
+      // Fix (1b) -- this effect publishes DIRECTLY rather than through
+      // ensureAudioPublished, so it needs its own copy of the guard.
+      // Checked here, after the createPilotAudioTrack() await, because
+      // the show can end during graph construction -- and because a
+      // performer rejoining an already-ended show reaches this line with
+      // the ended teardown having already run and found nothing to stop.
+      // Without this, either case puts the mic back on air.
+      if (showEndedRef.current) {
+        logHealthEvent('audio_publish_attempt', { action: 'skipped_show_ended' });
+        return;
+      }
       const publishStartedAt = Date.now();
       logHealthEvent('audio_publish_attempt', {});
       try {
@@ -2078,11 +2121,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     };
   }, [isMainPerformer, room]);
 
+  // Fix (2b) -- mutes the MIC inside the Web Audio graph rather than
+  // disabling the published track. The published track is the graph's
+  // combined output (vocals + backing track), so `track.enabled = false`
+  // -- what this did before -- took the backing track off air too, which
+  // is never what "mute my mic" means mid-performance.
   const toggleMic = useCallback(() => {
-    const track = audioHandleRef.current?.processedTrack;
-    if (!track) return;
-    track.enabled = !micOn;
-    setMicOn((v) => !v);
+    const nodes = audioHandleRef.current?.nodes;
+    if (!nodes) return;
+    const nextMicOn = !micOn;
+    tuneMicMuted(nodes, !nextMicOn);
+    setMicOn(nextMicOn);
+    logHealthEvent('mic_mute_toggled', { micOn: nextMicOn });
   }, [micOn]);
 
   const toggleCam = useCallback(async () => {
@@ -2168,6 +2218,47 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     : receivedShowLive
       ? 'live'
       : showState;
+
+  // ─── Fix (1a/1b): take the mic off air when the show ends ──────
+  // END SHOW previously updated show state, broadcast SHOW_ENDED and
+  // stopped egress -- but never touched the published audio track, which
+  // stayed live until the artist happened to click Leave. Anything said
+  // off-air in that window went out to every viewer still in the room.
+  // A privacy defect, and the reason this runs at the SOURCE: it must not
+  // depend on every client choosing to stop rendering.
+  //
+  // Mute first, then unpublish. Muting is immediate and local; unpublish
+  // is the authoritative removal but involves a round trip, so doing it
+  // in that order means the audio is off air at the earliest possible
+  // moment even if the unpublish is slow or fails outright.
+  //
+  // Keyed on displayShowState, so a versus show's non-director performer
+  // stops on the SHOW_ENDED broadcast too, not only on its own clock.
+  useEffect(() => {
+    showEndedRef.current = displayShowState === 'ended';
+  }, [displayShowState]);
+
+  const audioStoppedForEndRef = useRef(false);
+  useEffect(() => {
+    if (!isMainPerformer) return;
+    if (displayShowState !== 'ended' || audioStoppedForEndRef.current) return;
+    audioStoppedForEndRef.current = true;
+    (async () => {
+      const handle = audioHandleRef.current;
+      try {
+        const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        if (pub && !pub.isMuted) pub.mute();
+        if (handle?.processedTrack) {
+          await room.localParticipant.unpublishTrack(handle.processedTrack);
+        }
+        logHealthEvent('audio_stopped_on_show_end', { hadPublication: !!pub });
+      } catch (err) {
+        // Never let this throw into the ended transition -- the mute
+        // above has almost certainly already taken the audio off air.
+        logHealthEvent('audio_stopped_on_show_end', { action: 'failed', error: String(err?.message || err) });
+      }
+    })();
+  }, [isMainPerformer, displayShowState, room]);
 
   // 'ended' has no other fallback path: L1's polling stops once the
   // cache reaches 'soundcheck', and from there the clock derives 'live'
@@ -3021,6 +3112,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           the spec); harmless no-op if blurFillTrackRef isn't resolved
           yet (no video published, show not live) -- BlurFillBackground
           itself no-ops on a null track. */}
+      {/* Fix (1c) -- relocated from the outer LiveDemo (see the note at
+          that call site). Same rule as before for viewers, now keyed on
+          displayShowState: audio only while genuinely live, so it can
+          neither leak during soundcheck (3c) nor keep playing after the
+          show has ended. Performers/camfeed devices are unaffected --
+          always rendered, exactly as before. */}
+      {(role !== 'viewer' || displayShowState === 'live') && <RoomAudioRenderer />}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
       {notice && <div className="stage-notice">{notice}</div>}
