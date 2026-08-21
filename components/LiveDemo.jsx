@@ -28,10 +28,20 @@ import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { describeTransport } from '../lib/transportDiagnostics';
 import { signUp, signIn } from '../lib/supabaseAuth';
 import './reactions.css';
 
 const ROOM_NAME = 'pilot-room';
+
+// Fix (b2) -- ceiling on automatic publish recoveries per session.
+// recoveryAttempted now resets whenever an episode resolves (so one bad
+// moment at show start no longer spends the whole show's automatic
+// budget), but each recovery is a real disconnect/connect that
+// interrupts audio -- so a pathological fail/resolve/fail cycle must not
+// be able to loop on it indefinitely. Past this count the performer
+// keeps the manual banner and nothing reconnects on its own.
+const MAX_AUTOMATIC_RECOVERIES = 3;
 
 // Portrait is the output target always (Stage 1 of the portrait capture
 // work) -- requested uniformly, for every source, not just phones.
@@ -217,6 +227,35 @@ function attachAudioTrackHealthListeners(rawTrack, publishedTrack) {
 // refresh). The 'transition' case (soundcheck -> live while already
 // mounted and watching) is detected separately at the call site, since
 // it doesn't need sessionStorage at all.
+// Fix (b1) -- a bounded probe. The pre-flight gates the director, the
+// SHOW_LIVE broadcast AND the recording start, so it is now on the
+// show's critical path: it must be impossible for it to hang the show
+// open. publishData's own path is internally bounded (the SDK's
+// peerConnectionTimeout loop in ensureDataTransportConnected), so this
+// is belt-and-braces against any future SDK path that awaits
+// unbounded -- a timed-out probe is treated exactly like a failed one,
+// which routes into recovery rather than into waiting forever.
+const PREFLIGHT_PROBE_TIMEOUT_MS = 8000;
+
+function probeWithTimeout(room) {
+  let timer;
+  const probe = publishHealthProbe(room);
+  // The losing side of the race still settles. publishHealthProbe
+  // already logs and notifies its own outcome internally, so this
+  // handler exists purely so a late rejection can't surface as an
+  // unhandled promise rejection.
+  probe.catch(() => {});
+  return Promise.race([
+    probe,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`pre-flight probe timed out after ${PREFLIGHT_PROBE_TIMEOUT_MS}ms`)),
+        PREFLIGHT_PROBE_TIMEOUT_MS
+      );
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function classifyDirectorStartReason(showId, role) {
   try {
     const key = `healthlog:director-started:${showId}:${role}`;
@@ -1100,7 +1139,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // audio effect (not isMainPerformer) or a reconnect landed before
       // the mount-time graph setup finished. Not an error: the mount
       // effect's own publish runs once it's ready.
-      logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_no_handle' });
+      // Fix (b3) -- snapshot here too. This firing with
+      // skipped_no_handle at signal-connect, BEFORE go-live, is one of
+      // the signals that the start sequence races itself; correlating it
+      // against the transport state is how we tell "graph not built yet"
+      // (benign, the mount effect's own publish follows) apart from
+      // "engine already being torn down underneath us" (not benign).
+      logHealthEvent('ensure_audio_published', { trigger, action: 'skipped_no_handle', transport: describeTransport(room) });
       return;
     }
     audioPublishInFlightRef.current = true;
@@ -1186,7 +1231,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // reacts to any of these by changing show behavior. Attached once per
   // room instance (room is stable for the life of this connection).
   useEffect(() => {
-    function onConnected() { setRoomConnectionState(room.state); logHealthEvent('room_connected', { state: room.state }); }
+    // Fix (b3) -- transport snapshots on the connection-lifecycle
+    // anchors. room_connected is where pcManager SHOULD exist (Room.
+    // connect() awaits waitForPCInitialConnection before emitting it),
+    // so a snapshot here plus one at director start brackets the window
+    // in which the engine is being torn down under us.
+    function onConnected() { setRoomConnectionState(room.state); logHealthEvent('room_connected', { state: room.state, transport: describeTransport(room) }); }
     function onReconnecting() { setRoomConnectionState(room.state); logHealthEvent('room_reconnecting', { state: room.state }); }
     function onReconnected() {
       setRoomConnectionState(room.state);
@@ -1199,7 +1249,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // (logged as 'already_published').
       ensureAudioPublished('room_reconnected');
     }
-    function onDisconnected(reason) { setRoomConnectionState(room.state); logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null }); }
+    function onDisconnected(reason) { setRoomConnectionState(room.state); logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null, transport: describeTransport(room) }); }
     function onConnectionStateChanged(state) { setRoomConnectionState(state); logHealthEvent('room_connection_state_changed', { state: String(state) }); }
 
     function trackDetail(pubOrTrack, participant) {
@@ -1236,7 +1286,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // Anchor point: this device's room state as observed at the moment
     // this listener attached (mount), so a rejoin's very first data point
     // doesn't depend on catching a live transition after the fact.
-    logHealthEvent('room_state_at_mount', { state: room.state });
+    logHealthEvent('room_state_at_mount', { state: room.state, transport: describeTransport(room) });
 
     return () => {
       room.off(RoomEvent.Connected, onConnected);
@@ -1436,7 +1486,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // audio as a side effect of fixing video-shot delivery. Not fixed in
   // this round by design; flagged so it isn't mistaken for a new bug
   // when observed during testing.
-  const publishRecoveryStateRef = useRef({ consecutiveFailures: 0, recoveryAttempted: false });
+  const publishRecoveryStateRef = useRef({ consecutiveFailures: 0, recoveryAttempted: false, automaticRecoveries: 0 });
   const [publishWarning, setPublishWarning] = useState(false);
   const [recoveringPublish, setRecoveringPublish] = useState(false);
 
@@ -1466,6 +1516,82 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       setRecoveringPublish(false);
     }
   }, [room, connToken, connServerUrl, ensureAudioPublished]);
+
+  // ─── Fix (b1): start-sequence pre-flight ────────────────────
+  // The first auto cut must never be the thing that DISCOVERS a poisoned
+  // publisher. Two consecutive fresh-session shows failed at the first
+  // cut ~7s after room_connected with 'PC manager is closed', which
+  // means (a) every recording opened with a recovery hole in it, and (b)
+  // the show's single automatic recovery was spent in its first ten
+  // seconds, leaving only the manual banner for the rest of the show.
+  //
+  // This probes the EXACT publishData path the director uses, before the
+  // director starts and before egress is told to record. A clean engine
+  // costs one already-connected round trip. A poisoned one is recovered
+  // here, pre-recording, where a reconnect costs nothing anyone is
+  // watching -- and, because attemptPublishRecovery builds a fresh
+  // RTCEngine, it clears the memoized publisherConnectionPromise that
+  // the SDK itself never clears (see lib/transportDiagnostics.js).
+  //
+  // Memoized on a ref, not just guarded: BOTH the director effect and
+  // the SHOW_LIVE/egress effect await this, and they must share one
+  // probe rather than each firing their own. Deliberately never rejects
+  // -- callers .then() it and proceed regardless, because failing to
+  // start the show is strictly worse than starting it with the warning
+  // banner up.
+  const preflightActiveRef = useRef(false);
+  const startPreflightRef = useRef(null);
+
+  const runStartPreflight = useCallback(() => {
+    if (startPreflightRef.current) return startPreflightRef.current;
+    const promise = (async () => {
+      preflightActiveRef.current = true;
+      logHealthEvent('start_preflight_begin', { transport: describeTransport(room) });
+      try {
+        try {
+          await probeWithTimeout(room);
+          logHealthEvent('start_preflight_outcome', {
+            outcome: 'clean',
+            recovered: false,
+            transport: describeTransport(room),
+          });
+          return { ok: true, recovered: false };
+        } catch (firstErr) {
+          logHealthEvent('start_preflight_probe_failed', {
+            error: String(firstErr?.message || firstErr),
+            transport: describeTransport(room),
+          });
+          await attemptPublishRecovery('preflight');
+          try {
+            await probeWithTimeout(room);
+            logHealthEvent('start_preflight_outcome', {
+              outcome: 'recovered',
+              recovered: true,
+              transport: describeTransport(room),
+            });
+            return { ok: true, recovered: true };
+          } catch (secondErr) {
+            logHealthEvent('start_preflight_outcome', {
+              outcome: 'failed',
+              recovered: true,
+              error: String(secondErr?.message || secondErr),
+              transport: describeTransport(room),
+            });
+            setPublishWarning(true);
+            return { ok: false, recovered: true };
+          }
+        }
+      } finally {
+        // The pre-flight's own probe failure is not the show's first
+        // failure -- start the show on a clean counter either way, so
+        // the in-show 3-failure threshold measures the SHOW.
+        publishRecoveryStateRef.current.consecutiveFailures = 0;
+        preflightActiveRef.current = false;
+      }
+    })();
+    startPreflightRef.current = promise;
+    return promise;
+  }, [room, attemptPublishRecovery]);
 
   // Timing accelerant (audio-reconnect round) -- a real capture showed 3
   // consecutive failures taking 53s wall-clock to accumulate, purely
@@ -1500,11 +1626,30 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     const unsubscribe = onPublishOutcome(({ success, connectionState }) => {
       const state = publishRecoveryStateRef.current;
+      // Fix (b1) -- while the pre-flight runs it OWNS the recovery
+      // decision. Its own probe failure would otherwise open an episode
+      // here, whose scheduled probes (2s/4s) would reach the threshold
+      // and fire a second, concurrent recovery straight into the one the
+      // pre-flight is already awaiting.
+      if (preflightActiveRef.current) return;
       if (success) {
         const hadFailures = state.consecutiveFailures > 0;
         state.consecutiveFailures = 0;
         setPublishWarning(false);
-        if (hadFailures) clearProbeTimers(); // real recovery happened on its own -- no need to probe
+        if (hadFailures) {
+          clearProbeTimers(); // real recovery happened on its own -- no need to probe
+          // Fix (b2) -- an episode that RESOLVES releases the automatic
+          // recovery for the next one. Previously recoveryAttempted was
+          // set once at 1524 and reset nowhere, so it was effectively
+          // once-per-mount: the first episode of a show consumed the
+          // entire automatic budget and every later episode fell
+          // straight through to the manual banner, however healthy the
+          // connection had been in between.
+          state.recoveryAttempted = false;
+          logHealthEvent('publish_episode_resolved', {
+            automaticRecoveriesUsed: state.automaticRecoveries,
+          });
+        }
         return;
       }
       const wasFirstFailure = state.consecutiveFailures === 0;
@@ -1521,7 +1666,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         return;
       }
       if (connectionState !== ConnectionState.Connected) return; // trigger is scoped to "connected but failing", not a visible disconnect
+      // Fix (b2) -- the per-episode reset above is bounded here. Without
+      // this cap, a connection that fails and resolves repeatedly could
+      // reconnect on its own forever, and every one of those interrupts
+      // the performer's audio.
+      if (state.automaticRecoveries >= MAX_AUTOMATIC_RECOVERIES) {
+        setPublishWarning(true);
+        logHealthEvent('publish_recovery_capped', {
+          automaticRecoveriesUsed: state.automaticRecoveries,
+          transport: describeTransport(room),
+        });
+        return;
+      }
       state.recoveryAttempted = true;
+      state.automaticRecoveries += 1;
       attemptPublishRecovery('auto');
     });
     return () => {
@@ -1721,7 +1879,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     if (!isMainPerformer) return undefined;
     async function onSignalConnected() {
       signalConnectedCountRef.current += 1;
-      logHealthEvent('signal_connected', { occurrence: signalConnectedCountRef.current });
+      logHealthEvent('signal_connected', {
+        occurrence: signalConnectedCountRef.current,
+        transport: describeTransport(room),
+      });
       await ensureAudioPublished('signal_connected');
       const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (pub?.isMuted && micOn) {
@@ -2566,8 +2727,19 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     ) {
       autoStartedRef.current = true;
       const reason = isFirstRun ? classifyDirectorStartReason(ROOM_NAME, role) : 'transition';
-      applyMode(mode); // engages whichever mode is currently selected (default 'auto')
-      logHealthEvent('director_loop_started', { reason });
+      // Fix (b1) -- the director does not start until the publisher path
+      // has been proven, or repaired. roomConnectionState === Connected
+      // demonstrably does NOT cover engine/publisher-transport
+      // readiness (see lib/transportDiagnostics.js's header); this does,
+      // because it exercises the same publishData every cut uses.
+      runStartPreflight().then((result) => {
+        applyMode(mode); // engages whichever mode is currently selected (default 'auto')
+        logHealthEvent('director_loop_started', {
+          reason,
+          preflight: result.ok ? (result.recovered ? 'recovered' : 'clean') : 'failed',
+          transport: describeTransport(room),
+        });
+      });
     }
     if (displayShowState === 'ended') {
       auto?.disable();
@@ -2590,8 +2762,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     if (!isMainPerformer) return;
     if (showState === 'live' && !showLiveBroadcastSentRef.current) {
       showLiveBroadcastSentRef.current = true;
-      send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_LIVE' })), {});
-      triggerEgress('start', ROOM_NAME, performanceMode); // Stage 4: directed portrait recording, same once-only guard as the broadcast above
+      // Fix (b1) -- SHOW_LIVE is itself a publishData, so it fails in a
+      // poisoned engine exactly the way a cut does; and starting the
+      // recording before the publisher is known-good is precisely what
+      // put the recovery hole INSIDE the recording. Both wait on the
+      // same memoized pre-flight the director effect uses, so this is
+      // one probe for the whole start sequence, not two.
+      runStartPreflight().then(() => {
+        send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_LIVE' })), {});
+        triggerEgress('start', ROOM_NAME, performanceMode); // Stage 4: directed portrait recording, same once-only guard as the broadcast above
+      });
     }
   }, [isMainPerformer, showState, send, performanceMode]);
 
