@@ -237,6 +237,72 @@ function attachAudioTrackHealthListeners(rawTrack, publishedTrack) {
 // which routes into recovery rather than into waiting forever.
 const PREFLIGHT_PROBE_TIMEOUT_MS = 8000;
 
+// Fix (b6.1) -- how long the pre-flight will wait for the room to reach
+// Connected before probing anyway. Generous: this is not a health
+// threshold, it's a backstop so a room that never connects can't hold
+// the show start open forever. A connect that hasn't landed in 30s has
+// problems the pre-flight was never going to solve.
+const PREFLIGHT_CONNECT_TIMEOUT_MS = 30000;
+
+// Fix (b6.1) -- resolves once the room is genuinely Connected.
+//
+// WHY THE PRE-FLIGHT OWNS THIS RATHER THAN ITS CALLERS: the 15:46 capture
+// showed the probe firing ~10s BEFORE room_connected, at pcState 'new'
+// with signalWs null. The director effect was correctly gated on
+// Connected, but the SHOW_LIVE/egress effect was not -- it fires on the
+// clock-derived showState alone -- and since runStartPreflight is
+// memoized, that ungated caller won the race and spent the one
+// pre-flight on a transport that did not exist yet.
+//
+// Probing then is not merely useless, it is ACTIVELY HARMFUL: with no
+// pcManager, ensureDataTransportConnected throws 'PC manager is closed',
+// and that rejection is memoized into publisherConnectionPromise for
+// that engine's whole life. The pre-flight became the thing that
+// poisoned the engine it was meant to protect.
+//
+// So the wait lives INSIDE the pre-flight, where every caller gets it
+// for free regardless of its own gating -- a caller that forgets to
+// gate is exactly the failure this round was.
+//
+// Never rejects: a timeout resolves with timedOut:true and the caller
+// proceeds, because not starting the show is worse than starting it
+// with the warning banner up.
+function waitForRoomConnected(room, timeoutMs = PREFLIGHT_CONNECT_TIMEOUT_MS) {
+  if (room?.state === ConnectionState.Connected) {
+    return Promise.resolve({ waited: false, timedOut: false });
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer;
+    function finish(timedOut) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      room?.off?.(RoomEvent.Connected, onConnected);
+      room?.off?.(RoomEvent.ConnectionStateChanged, onStateChanged);
+      resolve({ waited: true, timedOut });
+    }
+    function onConnected() {
+      finish(false);
+    }
+    // ConnectionStateChanged as well as Connected: RoomEvent.Connected
+    // only fires for an INITIAL connect. A room that reaches Connected
+    // via a reconnect emits Reconnected instead, and waiting on
+    // Connected alone would then stall here for the full timeout on a
+    // room that is actually fine.
+    function onStateChanged(state) {
+      if (state === ConnectionState.Connected) finish(false);
+    }
+    room?.on?.(RoomEvent.Connected, onConnected);
+    room?.on?.(RoomEvent.ConnectionStateChanged, onStateChanged);
+    timer = setTimeout(() => finish(true), timeoutMs);
+    // Re-check AFTER subscribing: Connected could have landed in the gap
+    // between the check at the top and the listener being attached, and
+    // that event is not replayed.
+    if (room?.state === ConnectionState.Connected) finish(false);
+  });
+}
+
 function probeWithTimeout(room) {
   let timer;
   const probe = publishHealthProbe(room);
@@ -1492,6 +1558,29 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const attemptPublishRecovery = useCallback(async (trigger) => {
     if (!connToken || !connServerUrl) return; // shouldn't happen once joined, but never throw into a click handler
+    // Fix (b6.3) -- a recovery fired while the room is not Connected
+    // cannot help and actively PRESERVES the damage. Confirmed in the
+    // SDK: Room.maybeCreateEngine() reuses the existing engine whenever
+    // it is `!isClosed`, and an engine that is mid-connect is not
+    // closed -- so disconnect()/connect() racing an in-flight connect
+    // hands the SAME engine, poisoned publisherConnectionPromise and
+    // all, to the connection that eventually succeeds. That is exactly
+    // how the 15:46 capture ended up Connected on an already-poisoned
+    // engine, with every later publishData replaying one 10-second-old
+    // rejection.
+    //
+    // Only a recovery that starts from Connected gets a clean engine:
+    // disconnect() closes it (isClosed true), so the following connect()
+    // constructs a genuinely new RTCEngine with a fresh memo.
+    if (room.state !== ConnectionState.Connected) {
+      logHealthEvent('publish_recovery_skipped', {
+        trigger,
+        reason: 'not_connected',
+        connectionState: String(room.state),
+        transport: describeTransport(room),
+      });
+      return;
+    }
     setRecoveringPublish(true);
     logHealthEvent('publish_recovery_attempt', { trigger, connectionState: room.state });
     try {
@@ -1546,7 +1635,39 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     if (startPreflightRef.current) return startPreflightRef.current;
     const promise = (async () => {
       preflightActiveRef.current = true;
-      logHealthEvent('start_preflight_begin', { transport: describeTransport(room) });
+      // Fix (b6.1/b6.4) -- wait for Connected BEFORE probing, and make
+      // the wait itself visible in the timeline. start_preflight_begin
+      // is deliberately emitted AFTER the wait resolves, so a healthy
+      // capture reads room_connected -> start_preflight_begin in that
+      // order; seeing it the other way round again means this gate has
+      // failed and nothing downstream should be trusted.
+      if (room?.state !== ConnectionState.Connected) {
+        logHealthEvent('start_preflight_waiting', {
+          roomState: room?.state ? String(room.state) : null,
+          transport: describeTransport(room),
+        });
+      }
+      const connectWait = await waitForRoomConnected(room);
+      logHealthEvent('start_preflight_begin', {
+        waited: connectWait.waited,
+        timedOut: connectWait.timedOut,
+        transport: describeTransport(room),
+      });
+      // Never connected within the backstop: probing now would repeat
+      // the exact mistake this fix exists to remove -- publishing into a
+      // transport that does not exist, poisoning the memo for whenever
+      // the connection DOES land. Bail without touching publishData, and
+      // let the show start with the warning banner.
+      if (connectWait.timedOut) {
+        logHealthEvent('start_preflight_outcome', {
+          outcome: 'skipped_not_connected',
+          recovered: false,
+          transport: describeTransport(room),
+        });
+        setPublishWarning(true);
+        preflightActiveRef.current = false;
+        return { ok: false, recovered: false };
+      }
       try {
         try {
           await probeWithTimeout(room);
@@ -2760,7 +2881,23 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const showLiveBroadcastSentRef = useRef(false);
   useEffect(() => {
     if (!isMainPerformer) return;
-    if (showState === 'live' && !showLiveBroadcastSentRef.current) {
+    // Fix (b6.2) -- `roomConnectionState === Connected` added. This
+    // effect keying on the clock-derived showState ALONE is the specific
+    // hole that let the pre-flight run 10s early: it fires the moment
+    // this device's own clock says live, which can be well before the
+    // room has connected, and it was the first caller into the memoized
+    // pre-flight.
+    //
+    // It is also the historical explanation for the poisonings that
+    // predate the pre-flight entirely -- SHOW_LIVE is a publishData, so
+    // every show was already firing an ungated publish straight into a
+    // possibly-still-connecting engine at exactly this moment. The
+    // pre-flight did not introduce that race; it inherited it, and made
+    // it legible.
+    //
+    // Correct on its own terms regardless: broadcasting SHOW_LIVE into a
+    // room that has not connected cannot reach anyone.
+    if (showState === 'live' && roomConnectionState === ConnectionState.Connected && !showLiveBroadcastSentRef.current) {
       showLiveBroadcastSentRef.current = true;
       // Fix (b1) -- SHOW_LIVE is itself a publishData, so it fails in a
       // poisoned engine exactly the way a cut does; and starting the
@@ -2773,7 +2910,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         triggerEgress('start', ROOM_NAME, performanceMode); // Stage 4: directed portrait recording, same once-only guard as the broadcast above
       });
     }
-  }, [isMainPerformer, showState, send, performanceMode]);
+    // roomConnectionState added (b6.2) so this re-evaluates the moment
+    // the connection lands -- without it the new gate would latch this
+    // effect off for a device that goes live before connecting, and
+    // SHOW_LIVE/egress would never fire at all.
+  }, [isMainPerformer, showState, send, performanceMode, roomConnectionState]);
 
   // Forced failover (SHOW_LIFECYCLE_SPEC.md L6-2): if the track behind
   // the slot's currently-shown targetIdentity mutes or drops mid-live,
