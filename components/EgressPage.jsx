@@ -52,6 +52,7 @@ import './reactions.css';
 import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
 import { ShotVideo } from './ShotRendering';
+import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 
 // Plain Ink fill, no text -- the live viewer's own placeholder shows
 // "waiting for performer..."/the "be right back" card, which is exactly
@@ -186,6 +187,79 @@ function EgressStage({ layout }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  // ─── Fix (a3): recorder-side telemetry ──────────────────────────
+  // Until now the egress browser logged nothing: when a recording came
+  // back wrong there was no record of what the RECORDER saw, only what
+  // the performer's device saw. Same fail-silent logger the app uses, and
+  // /api/health-events takes unauthenticated posts (service-role behind
+  // the route), so the headless browser can write directly. Keyed on
+  // room.name, matching the showId the performer devices log under, so
+  // both sides of a show land on one timeline.
+  useEffect(() => {
+    if (!room?.name) return;
+    initHealthLog({
+      showId: room.name,
+      participantIdentity: room.localParticipant?.identity || 'egress',
+      role: 'egress',
+    });
+  }, [room?.name, room?.localParticipant?.identity]);
+
+  // ─── Fix (a1/a3): the track pool is DYNAMIC ─────────────────────
+  // Cameras join and die mid-show, and a publish-recovery replaces the
+  // performer's participant wholesale (new identity, new SIDs). useTracks
+  // is already reactive to publish/unpublish/subscribe, so the pool is
+  // correct -- what was missing is that nothing observed it changing.
+  const poolSignature = useMemo(
+    () => tracks.map((t) => `${t.participant.identity}:${t.publication?.trackSid || ''}`).sort().join('|'),
+    [tracks]
+  );
+  useEffect(() => {
+    logHealthEvent('egress_track_pool_changed', {
+      trackCount: tracks.length,
+      identities: Array.from(new Set(tracks.map((t) => t.participant.identity))),
+    });
+    // poolSignature is the real dependency -- `tracks` is a fresh array
+    // every render, so depending on it would log on every render rather
+    // than on every real change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolSignature]);
+
+  // ─── Fix (a2): drop shot commands whose target has vanished ─────
+  // A SHOT_COMMAND carries a targetIdentity AND a framing transform. When
+  // that participant disappears, the fallback chain below correctly picks
+  // a different track -- but the stale `cmd` was still applied to it,
+  // cropping a NEW camera to a shot composed for the OLD one. Pruning
+  // means the replacement renders untransformed until the next real cut,
+  // which is the same "wide, not a wrong crop" default a fresh show gets.
+  useEffect(() => {
+    setActiveShot((prev) => {
+      const liveIdentities = new Set(tracks.map((t) => t.participant.identity));
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([slot, cmd]) => {
+        if (cmd?.targetIdentity && !liveIdentities.has(cmd.targetIdentity)) {
+          logHealthEvent('egress_stale_command_dropped', { slot, targetIdentity: cmd.targetIdentity });
+          changed = true;
+          return; // drop it
+        }
+        next[slot] = cmd;
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolSignature]);
+
+  // One stable handler per slot. Stable matters: ShotVideo's orphan-rescue
+  // effect lists onReselect as a dependency, and a fresh closure every
+  // render would re-run that effect on every unrelated render.
+  const reselectHandlers = useMemo(
+    () => ({
+      a: (detail) => logHealthEvent('egress_reselect', { ...detail, slot: 'a' }),
+      b: (detail) => logHealthEvent('egress_reselect', { ...detail, slot: 'b' }),
+    }),
+    []
+  );
+
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(tracks, letter);
     const cmd = activeShot[letter];
@@ -212,6 +286,7 @@ function EgressStage({ layout }) {
         activeTrackRef={chosen}
         command={cmd ?? null}
         placeholder={CLEAN_PLACEHOLDER}
+        onReselect={reselectHandlers[letter]}
       />
     );
   };

@@ -534,7 +534,10 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
 // toggle instead of a mount/unmount. Only the active layer ever receives
 // the live `command` -- an inactive layer is frozen at whatever
 // transform it last had (or untransformed, if it's never been active).
-export function ShotVideo({ candidates, activeTrackRef, command, placeholder }) {
+// `onReselect` (fix a3) is optional and observation-only -- EgressPage
+// passes it so a recording's timeline shows what the RECORDER saw at the
+// moment a track changed under it. Live viewers don't pass it.
+export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect }) {
   const candidateKeysSignature = candidates.map(trackKey).join('|');
 
   const [layerTracks, setLayerTracks] = useState(() => {
@@ -552,6 +555,23 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder }) 
         next.set(k, t);
         if (!prev.has(k)) changed = true;
       });
+      // Fix (a1) -- never shrink the pool to empty while we still have a
+      // layer painting. trackKey is `identity:trackSid`, so BOTH a track
+      // republish and a whole-participant replacement (a recovery mints a
+      // new identity: contestant-a-00436b79 -> contestant-a-a5e85693)
+      // retire every existing key at once. Dropping to an empty pool in
+      // that instant swaps a live picture for the flat Ink placeholder;
+      // keeping the outgoing layer mounted instead holds its last painted
+      // frame until a replacement arrives, which is the documented
+      // last-resort behaviour (performer main > live camfeed > hold last
+      // frame). Best-effort by nature: a genuinely dead MediaStreamTrack
+      // keeps its final frame in the <video> element, but if the SDK
+      // clears it we are no worse off than the placeholder we render
+      // today.
+      if (next.size === 0 && prev.size > 0) {
+        logCutDebug('[ShotVideo] candidate pool -> 0 track(s): holding last frame');
+        return prev;
+      }
       if (changed) {
         logCutDebug(`[ShotVideo] candidate pool -> ${next.size} track(s): ${Array.from(next.keys()).join(', ') || '(none)'}`);
       }
@@ -598,6 +618,39 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder }) 
       setDisplayedKey(key);
     }, delay);
   }, []);
+
+  // ─── Fix (a1): rescue an ORPHANED displayedKey ──────────────────
+  // THE blank-render bug. Every layer renders at opacity 0 unless its key
+  // === displayedKey, so if the displayed track leaves the pool -- a
+  // republish after a publish-recovery, a camera being unplugged, or a
+  // whole participant being replaced with a new identity -- displayedKey
+  // points at a layer that no longer exists and NOTHING is at opacity 1.
+  // Healthy tracks stay mounted and painting, invisibly, behind a blank
+  // frame. That is what put the recovery hole inside the recordings.
+  //
+  // Promote immediately rather than waiting for the normal gated handoff:
+  // the handoff exists to avoid cutting to a layer before it has painted,
+  // but there is nothing to protect here -- the alternative is not a
+  // slightly-early picture, it is no picture at all.
+  //
+  // Promoting to `activeKey` first inherits the CALLER's preference order
+  // (renderSlot resolves targetIdentity -> the slot's own performer ->
+  // first available), so "performer main > any live camfeed" lives in one
+  // place and is not duplicated into this generic component.
+  useEffect(() => {
+    if (displayedKey === null || layerTracks.has(displayedKey)) return;
+    const fallbackKey = layerTracks.has(activeKey)
+      ? activeKey
+      : layerTracks.keys().next().value ?? null;
+    if (fallbackKey == null) return; // pool is empty; the hold-last-frame guard above owns this case
+    if (pendingSwapTimerRef.current) {
+      clearTimeout(pendingSwapTimerRef.current);
+      pendingSwapTimerRef.current = null;
+    }
+    logCutDebug(`[ShotVideo] displayed layer ${displayedKey} left the pool -> promoting ${fallbackKey}`);
+    onReselect?.({ reason: 'displayed_track_gone', from: displayedKey, to: fallbackKey });
+    setDisplayedKey(fallbackKey);
+  }, [displayedKey, layerTracks, activeKey, onReselect]);
 
   if (layerTracks.size === 0) return placeholder;
 
