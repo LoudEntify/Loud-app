@@ -181,3 +181,59 @@ Real-device/browser test evidence this month vs. build/sandbox-only:
 **Not tested in any form**:
 - Show-state security exposure (open `shows` RLS) — a known, accepted gap, not something to "test" so much as harden later.
 - `?contestant=a|b` token bypass — known reachable, not attempted as an actual exploit in this audit.
+
+---
+
+## F. Incident account — the audio-only recordings / poisoned publisher saga (2026-08-18 → 08-21)
+
+Added 2026-08-21, after the fix was verified in production. Kept because the *shape* of this investigation is the reusable lesson, not just its conclusion: four separate hypotheses were disproven before the real cause was found, and two of them were disproven only by reading the SDK's own compiled source rather than trusting its documentation or release notes.
+
+### F.1 Symptom as first reported
+
+Production recordings came back **audio-only — no usable video** for both solo and versus layouts, starting ~2026-08-20. The same pipeline had produced correct recordings on 08-18. Three merges landed on `main` in that window: desktop portrait layout, cue director, and the Accounts & Identity arc.
+
+### F.2 Hypotheses raised and killed, in order
+
+1. **Desktop CSS leaking into the egress template.** Killed: the egress render path renders at 1080x1920 (above the `min-width: 1025px` desktop breakpoint), but none of the new desktop rules touch classes the egress DOM uses, and `EgressPage.jsx` had not changed since 08-14.
+2. **LiveKit-side configuration drift.** Killed: the dashboard records for a working 08-18 egress and a failing 08-21 egress are configuration-identical — same `customBaseUrl`, same 1080x1920, same request shape, both `COMPLETE`.
+3. **Token/auth regression from the Accounts arc** (the `?contestant` bypass closure, role gating). Killed **structurally**: `components/EgressPage.jsx:258-276` reads `url`/`token` from `useSearchParams()` — LiveKit's Egress service mints its own recorder token and appends it. The egress template *never calls* `/api/token`, sends no cookie and no `Authorization` header. Our token changes cannot reach it. Corroborated positively: room-composite egress captures the headless browser's own audio output, so audio in the file proves the page loaded, connected, and subscribed. A token failure yields a **silent** file, not an audio-only one.
+4. **Identity-format change breaking egress track matching.** Killed: `app/api/performer/claim-slot/route.js:80` still mints `contestant-${slot}-${uuid8}`, prefix deliberately preserved; `tracksForSlot` (`components/EgressPage.jsx:90-97`) still matches. Confirmed in the *deployed* bundle, not just source.
+
+### F.3 Actual root cause
+
+**An ungated `publishData` at the go-live moment, racing the room connection.**
+
+The SHOW_LIVE broadcast effect (`components/LiveDemo.jsx`, the `showLiveBroadcastSentRef` effect) gated only on `isMainPerformer && showState === 'live'` — the *clock-derived* state — with **no connection gate**. It therefore fired the moment the device's own clock said "live", which in practice was up to ten seconds before `room_connected`.
+
+`SHOW_LIVE` is itself a `publishData`. Publishing before the publisher transport exists hits an absent `pcManager`, and that is where the LiveKit SDK turns a transient race into a permanent outage:
+
+- `RTCEngine.ensureDataTransportConnected()` throws `UnexpectedConnectionState('PC manager is closed')` when `engine.pcManager` is falsy (`livekit-client` 2.21.0, `dist/livekit-client.esm.mjs`).
+- `RTCEngine.ensurePublisherConnected()` **memoizes** that attempt in `publisherConnectionPromise` and **never clears it on rejection**. The only reset is inside `pcManager.onStateChange` — which can never fire for an attempt made when `pcManager` never existed.
+- `cleanupPeerConnections()` nulls `pcManager` but does **not** clear the memo.
+- `Room.maybeCreateEngine()` reuses the existing engine whenever it is `!isClosed`, and a **mid-connect engine is not closed** — so a recovery (`disconnect()`/`connect()`) fired while a connect is still in flight hands the *same poisoned engine* to the connection that eventually succeeds.
+
+Net effect: one early publish poisons every subsequent `publishData` on that connection **for the life of the connection**. Every directed cut fails. The recording therefore captures audio (subscribed, unaffected) with a video layer that never receives a shot command — the reported symptom.
+
+This also explains why the failure looked deterministic rather than racy: it was the same line of code, at the same moment, every show.
+
+### F.4 Why it presented as "new" on 08-20
+
+It was not new. The ungated SHOW_LIVE publish predates all three merges. What changed is that the Accounts arc moved the performer onto the `claim-slot` path, altering start-sequence timing enough to make the race land consistently on the losing side. The earlier investigation's instinct — "the variable is what production served the headless browser" — was correct in method but pointed at the wrong layer: the variable was *when* the artist's device published, not what the recorder was served.
+
+### F.5 Fixes shipped
+
+- **`1361fb1` (b3)** — `lib/transportDiagnostics.js`: a fully defensive snapshot of publisher-transport readiness (`hasPcManager`, `publisherPromiseSet`, `verifyTransport`, `pcState`, ICE states, signal WS). Reads SDK-internal fields deliberately, isolated in one file, degrading to `{available:false}` rather than ever throwing on the show path. Wired into `room_connected`, `room_state_at_mount`, `room_disconnected`, `signal_connected`, `director_loop_started`, `shot_publish_failure`, and `ensure_audio_published`. **This instrumentation is what found the real cause** — `connectionState` alone reads `"connected"` throughout the poisoned case and could never distinguish it from a network fault.
+- **`fe85802` (b1, b2)** — a pre-flight probe that exercises the exact `publishData` path before the director starts and before egress is told to record, so a poisoned engine is detected and repaired pre-recording; plus `recoveryAttempted` reset per *episode* rather than per *mount* (it had been set once and reset nowhere, so the first bad moment of a show consumed its entire automatic-recovery budget).
+- **`943b83e` (b6)** — the actual root fix. The connection wait moved *inside* `runStartPreflight` (a caller that forgets to gate is exactly what went wrong); the SHOW_LIVE/egress effect gated on `roomConnectionState === Connected`; and `attemptPublishRecovery` made to refuse to run unless Connected, so a recovery can never race a connect and inherit the poisoned engine.
+
+**Interim regression worth recording honestly**: the b1 pre-flight, before b6 sequenced it, ran ~10s early and *became* the poisoning publish itself — it made the pre-existing race worse before it made it better. It also made it legible, which is how the root cause was found.
+
+### F.6 Verification
+
+Production show 2026-08-21 16:37, against deployment `dpl_69VoQ9KQfEX83wQ3N4MR33g3GdxC` (commit `943b83e`): `room_connected` 16:37:14.885 → `start_preflight_begin` +1ms → `outcome:"clean"` (52ms probe) → `director_loop_started {preflight:"clean"}` → video published → **zero publish failures, zero recoveries across the whole show**. Egress recording pending final playback confirmation at time of writing.
+
+### F.7 Process lessons
+
+1. **A local commit with a green build is not shipped.** One verification show was wasted running against a 16h-old deployment because the fix was committed but never pushed or deployed. Deploys here are manual `vercel --prod`. The standing rule now is: push → deploy → confirm alias → **grep the served bundle for the change, and inspect the minified region around the changed call site to confirm wiring**, before asking anyone to run a verification show.
+2. **Don't ship a dependency upgrade alongside the fix under test.** The `livekit-client` 2.22.0 trial was deliberately parked on branch `b5-livekit-2.22` so the verification show measured b6 alone.
+3. **Read the SDK, don't trust its release notes.** 2.22.0's notes advertise "recover broken publish paths", which sounds like this bug. Reading the source showed `ensurePublisherConnected` is byte-identical to 2.21.0 — the memo bug is unfixed, and the pre-flight remains load-bearing.
