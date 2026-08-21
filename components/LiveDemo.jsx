@@ -403,6 +403,10 @@ export default function LiveDemo() {
   // QR) the cascade effect below already does on real fullscreen entry --
   // just without genuine OS-level fullscreen alongside it.
   const [maximized, setMaximized] = useState(false);
+  // Fix (1d) -- set once, by RoomInner, when the show reaches 'ended'.
+  // Gates the `video` prop below so nothing can republish the camera.
+  const [broadcastEnded, setBroadcastEnded] = useState(false);
+  const handleBroadcastEnded = useCallback(() => setBroadcastEnded(true), []);
   const canUseFullscreenApi =
     typeof document !== 'undefined' &&
     !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
@@ -1001,7 +1005,25 @@ export default function LiveDemo() {
   // claimed slot letter publishes video; only the known non-performer
   // sentinels ('viewer', camfeed-prefixed handled separately above)
   // don't.
-  const publishesVideo = conn.assignedRole !== 'viewer';
+  // Fix (1d) -- once the broadcast has ended, the `video` prop goes false
+  // so LiveKitRoom cannot put the camera back on air. RoomInner's own
+  // unpublish (above) is the immediate, authoritative stop; this is what
+  // makes it STAY stopped, because LiveKitRoom re-asserts the prop by
+  // calling setCameraEnabled(!!video) on every SignalConnected -- so any
+  // reconnect after End Show would otherwise silently resume
+  // transmission. Exactly the same class of hole as fix (1b) for audio.
+  //
+  // Lifted out of RoomInner via a callback rather than read from
+  // `showState` here, because a versus show's NON-director performer
+  // only learns the show ended from the SHOW_ENDED broadcast, which this
+  // outer component's clock-derived state never sees.
+  //
+  // Consequence worth naming: LiveKitRoom's own setCameraEnabled(false)
+  // also stops the local camera device shortly after. Acceptable here --
+  // the show is over and the ended card is showing. Keeping the camera
+  // alive locally while off air is the broadcast window's job
+  // (docs/BUILD_AUDIT_2026-08.md G.1), not this fix's.
+  const publishesVideo = conn.assignedRole !== 'viewer' && !broadcastEnded;
   // Camfeed phones are propped to film the artist -- rear by default.
   // The artist's own device defaults to front so they can see themselves.
   const defaultFacingMode = isCamFeedRole ? 'environment' : 'user';
@@ -1057,6 +1079,7 @@ export default function LiveDemo() {
             sessionToken={sessionToken}
             connToken={conn.token}
             connServerUrl={conn.url}
+            onBroadcastEnded={handleBroadcastEnded}
           />
         </LiveKitRoom>
       </div>
@@ -1142,7 +1165,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
 
@@ -2240,7 +2263,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const audioStoppedForEndRef = useRef(false);
   useEffect(() => {
-    if (!isMainPerformer) return;
+    // Fix (1d) -- runs for EVERY publishing role, not just the main
+    // performer. Camfeed devices publish camera too, and they learn the
+    // show ended from the same SHOW_ENDED broadcast, so a main-performer-
+    // only guard would leave every extra camera transmitting after End
+    // Show. The audio half below simply finds nothing on a camfeed (they
+    // are video-only by construction) and no-ops.
+    if (role === 'viewer') return;
     if (displayShowState !== 'ended' || audioStoppedForEndRef.current) return;
     audioStoppedForEndRef.current = true;
     (async () => {
@@ -2252,13 +2281,32 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           await room.localParticipant.unpublishTrack(handle.processedTrack);
         }
         logHealthEvent('audio_stopped_on_show_end', { hadPublication: !!pub });
+
+        // Fix (1d) -- the camera keeps TRANSMITTING after End Show for the
+        // same reason the mic did: nothing stopped it. Viewers merely stop
+        // rendering it (the ended card replaces the stage), which is not
+        // the same thing as being off air.
+        //
+        // `stopOnUnpublish: false` -- stop the transmission, leave the
+        // local MediaStreamTrack alive. Stopping transmission and stopping
+        // the DEVICE are two different operations, and this is the first
+        // place that distinction is drawn explicitly in the code. It is
+        // the same distinction the planned broadcast window is built on
+        // (docs/BUILD_AUDIT_2026-08.md G.1): camera fully functional
+        // locally, zero publishing outside Go Live -> End Show.
+        const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+        if (camPub?.track) {
+          await room.localParticipant.unpublishTrack(camPub.track, false);
+        }
+        onBroadcastEnded?.();
+        logHealthEvent('video_stopped_on_show_end', { hadPublication: !!camPub });
       } catch (err) {
         // Never let this throw into the ended transition -- the mute
         // above has almost certainly already taken the audio off air.
         logHealthEvent('audio_stopped_on_show_end', { action: 'failed', error: String(err?.message || err) });
       }
     })();
-  }, [isMainPerformer, displayShowState, room]);
+  }, [role, displayShowState, room]);
 
   // 'ended' has no other fallback path: L1's polling stops once the
   // cache reaches 'soundcheck', and from there the clock derives 'live'

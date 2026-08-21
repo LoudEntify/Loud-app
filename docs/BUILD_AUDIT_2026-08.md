@@ -230,10 +230,47 @@ It was not new. The ungated SHOW_LIVE publish predates all three merges. What ch
 
 ### F.6 Verification
 
-Production show 2026-08-21 16:37, against deployment `dpl_69VoQ9KQfEX83wQ3N4MR33g3GdxC` (commit `943b83e`): `room_connected` 16:37:14.885 → `start_preflight_begin` +1ms → `outcome:"clean"` (52ms probe) → `director_loop_started {preflight:"clean"}` → video published → **zero publish failures, zero recoveries across the whole show**. Egress recording pending final playback confirmation at time of writing.
+Production show 2026-08-21 16:37, against deployment `dpl_69VoQ9KQfEX83wQ3N4MR33g3GdxC` (commit `943b83e`): `room_connected` 16:37:14.885 → `start_preflight_begin` +1ms → `outcome:"clean"` (52ms probe) → `director_loop_started {preflight:"clean"}` → video published → **zero publish failures, zero recoveries across the whole show**.
+
+**Recording CONFIRMED** on playback: video present from second zero through to the end. This closes the original symptom that opened the investigation on 08-18 — the audio-only recordings — and the saga with it.
+
+Subsequently re-verified on `livekit-client` 2.22.0 (commit `2a0f4dd`): pre-flight clean, zero recoveries. The upgrade does not fix the memo bug (see F.7.3), so b1/b6 remain load-bearing; it was landed for its adjacent publish-path recovery work.
 
 ### F.7 Process lessons
 
 1. **A local commit with a green build is not shipped.** One verification show was wasted running against a 16h-old deployment because the fix was committed but never pushed or deployed. Deploys here are manual `vercel --prod`. The standing rule now is: push → deploy → confirm alias → **grep the served bundle for the change, and inspect the minified region around the changed call site to confirm wiring**, before asking anyone to run a verification show.
 2. **Don't ship a dependency upgrade alongside the fix under test.** The `livekit-client` 2.22.0 trial was deliberately parked on branch `b5-livekit-2.22` so the verification show measured b6 alone.
 3. **Read the SDK, don't trust its release notes.** 2.22.0's notes advertise "recover broken publish paths", which sounds like this bug. Reading the source showed `ensurePublisherConnected` is byte-identical to 2.21.0 — the memo bug is unfixed, and the pre-flight remains load-bearing.
+
+---
+
+## G. Planned architecture & backlog
+
+Added 2026-08-21. Design decisions taken but not yet built, in intended build order.
+
+### G.1 Broadcast window — local-only mode outside the show window
+
+**Planned for: the show-scheduling round.** Foreshadowed by fix 1d (End Show now unpublishes the camera track, not just the audio one) and by the observation that stopping *transmission* and stopping the *device* are two different things.
+
+**The rule**: publishing to LiveKit happens **only** between Go Live and End Show. Outside that window the artist's device is fully functional locally — camera preview, mic, the whole Web Audio graph, meters, effects, soundcheck monitoring — with **zero** tracks published and, ideally, no room connection at all.
+
+**Rationale**:
+- **Cost.** LiveKit is billed on connected participants and published minutes. Today a performer who joins early to check levels burns credits for the whole pre-show period. Under a broadcast window, credits are spent only on the actual show.
+- **Product.** Artists get unlimited tech-check — mic check, framing, effects tuning, backing-track levels — at no marginal cost, which makes "arrive early and get comfortable" the encouraged behaviour rather than an expensive one.
+- **Privacy.** It makes the End Show audio/camera leaks (fixes 1a-1d) structurally impossible rather than individually patched: if publishing only ever happens inside the window, there is no "still transmitting after the show" state to leak from.
+
+**Boundary note**: the b6 pre-flight gates the **transmission boundary**, not tech-check start. Tech-check needs no publisher transport at all, so it must not wait on — or be blocked by — the pre-flight. The pre-flight belongs exactly where it is now: at Go Live, immediately before the first publish.
+
+**Open design questions**: whether the device connects to the room at all during tech-check (no-connect is cheapest but loses the pre-show presence signal); how a versus show's second performer is represented before either goes live; and what the artist sees at the moment the window opens.
+
+### G.2 B-Roll (PRD row 14) — sequenced AFTER fix (a) and fix (c)
+
+Currently disabled in the shot panel. Scope: artists upload up to **10 clips**, **auto-muted at upload**, playable as a **director-cuttable source** during a live show, and **cueable in cue sheets like any other shot**.
+
+**Why it lands after fix (a)**: B-roll introduces a video source that appears and disappears mid-show — exactly the dynamic-track case fix (a) is being built to handle. Egress re-selection must treat a B-roll source as just another candidate, which is only true once (a)'s re-selection is generalised rather than performer/camfeed-specific.
+
+**Design questions for its own plan round**:
+- **Playback/publish mechanism** — client-side clip playback into a published canvas or video track (`captureStream`) vs. alternatives (a second participant identity publishing the clip; server-side injection). Each has different implications for sync, egress, and whether the clip survives a publisher reconnect.
+- **Storage** — reuse the existing recordings bucket, with whatever access model that implies for playback during a live show.
+- **9:16 handling** — clips will not all be portrait; needs the same portrait-crop-aware treatment `ShotTransformFrame` already applies to camera sources, or an explicit letterbox policy.
+- **Auto-mute contract** — muted at upload; whether an artist can ever un-mute a clip mid-show, and what that means for the published audio mix (it would have to join the graph at `outputBus`, like the backing track).
