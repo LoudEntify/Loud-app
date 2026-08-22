@@ -1207,6 +1207,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // instance feeding every selection on this device.
   const ineligibleTracks = useIneligibleTracks(room, tracks);
 
+  // Finding A -- selection telemetry on the LIVE client, not just the
+  // recorder. The previous round wired this only into EgressPage, so
+  // when the registry silently blacklisted the other performer there was
+  // nothing in the timeline showing a re-selection had happened at all;
+  // the diagnosis had to come from reading code. Stable identity so
+  // ShotVideo's rescue effect doesn't re-run on unrelated renders.
+  const handleReselect = useCallback((detail) => {
+    logHealthEvent('shot_reselect', detail);
+  }, []);
+
   // Fix (b), SHOW-1 diagnosis round -- the director-start trigger below
   // must gate on the ROOM actually being connected, not just on
   // displayShowState reaching 'live'. Phase 1 audit + the health_events
@@ -2642,7 +2652,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} />
       </div>
     );
   };
