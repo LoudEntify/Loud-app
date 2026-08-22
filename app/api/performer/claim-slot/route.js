@@ -65,10 +65,35 @@ export async function POST(request) {
     }
 
     const normalizedEmail = auth.user.email.trim().toLowerCase();
-    const warning =
-      slotRow.claimed_by_email && slotRow.claimed_by_email !== normalizedEmail
-        ? `This code was already claimed by ${slotRow.claimed_by_email} -- joining anyway.`
-        : null;
+
+    // Codes are ACCOUNT-BOUND (first-claim-wins). This used to warn and
+    // let the claim through -- "joining anyway" -- which is where the
+    // degraded sessions came from: the artist got a real performer token
+    // and broadcast, but every downstream piece of state derived from
+    // the account/slot pairing was inconsistent (missing peer
+    // thumbnails, stale derivations). A half-valid session is worse than
+    // a rejected one, because it looks like it worked.
+    //
+    // Rejected BEFORE any session or media setup: no LiveKit token is
+    // minted, no session_token is rotated, no ownership or participant
+    // row is written. Nothing below this line runs for a mismatch.
+    //
+    // NOTE: this overrides MULTI_PERFORMER_SPEC.md's earlier locked
+    // decision to allow a warned re-claim by a different email. That
+    // decision predates accounts existing at all; with real auth, an
+    // account mismatch is an authorization failure, not a warning.
+    if (slotRow.claimed_by_email && slotRow.claimed_by_email !== normalizedEmail) {
+      console.warn('[claim-slot] rejected: code bound to another account', {
+        showId,
+        slot: slotRow.slot,
+        requestedBy: normalizedEmail,
+      });
+      return NextResponse.json(
+        { error: 'This code is registered to another account. Sign in with the account it was issued to.' },
+        { status: 403 }
+      );
+    }
+    const warning = null;
 
     // Fresh random identity per connection, never derived from name/email
     // -- two devices claiming the same code (e.g. a genuine rejoin after

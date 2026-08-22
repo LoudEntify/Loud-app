@@ -89,20 +89,16 @@ function signalRecordingReady() {
 // Mirrors renderSlot's own tracksForSlot (LiveDemo.jsx) -- same filter,
 // same reasoning (a muted participant is unavailable the same as one
 // who never published, per SHOW_LIFECYCLE_SPEC.md L6-1).
-// `ineligible` (Finding 1) is the liveness registry's blacklist -- dead
-// tracks, and revived ones still inside their probation window. Applied
-// HERE, at selection, so `chosen` and ShotVideo's layer pool can never
-// disagree about what is available; them disagreeing is what made the
-// promotion oscillate.
-function tracksForSlot(tracks, letter, ineligible) {
-  return filterEligible(
-    tracks.filter(
-      (t) =>
-        (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-          t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-        !t.publication?.isMuted
-    ),
-    ineligible
+// Deliberately NOT filtered by liveness (Test 4 ruling) -- this is the
+// RENDERING pool, and a dead camera has to stay in it so an explicit cut
+// to it can be honoured rather than silently re-picked. renderSlot below
+// derives the live subset for every automatic fallback.
+function tracksForSlot(tracks, letter) {
+  return tracks.filter(
+    (t) =>
+      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
+        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
+      !t.publication?.isMuted
   );
 }
 
@@ -274,7 +270,14 @@ function EgressStage({ layout }) {
   );
 
   const renderSlot = (letter) => () => {
-    const candidates = tracksForSlot(tracks, letter, ineligibleTracks);
+    // Test 4 ruling -- the recorder must reach the SAME resolution the
+    // artist and viewers see, so it uses the identical split: the full
+    // pool for honouring an explicit cut, the live subset for every
+    // automatic fallback. A recording that quietly substituted a live
+    // camera for the one the director actually cut to would no longer be
+    // a record of the performance that happened.
+    const candidates = tracksForSlot(tracks, letter);
+    const eligible = filterEligible(candidates, ineligibleTracks);
     const cmd = activeShot[letter];
     // Same fallback chain as RoomInner's own renderSlot: an explicit
     // targetIdentity match first, then the slot's own performer, then
@@ -290,8 +293,10 @@ function EgressStage({ layout }) {
       : undefined;
     const chosen =
       matched ||
-      candidates.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
+      eligible.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
+      eligible[0] ||
       candidates[0];
+    const activeImpaired = !!chosen && !eligible.includes(chosen);
 
     return (
       <ShotVideo
@@ -300,6 +305,9 @@ function EgressStage({ layout }) {
         command={cmd ?? null}
         placeholder={CLEAN_PLACEHOLDER}
         onReselect={reselectHandlers[letter]}
+        // No lostOverlay: the recorder holds the frozen frame with no
+        // status text, same rule as CLEAN_PLACEHOLDER.
+        activeImpaired={activeImpaired}
       />
     );
   };

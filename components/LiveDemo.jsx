@@ -2432,20 +2432,27 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // default event set -- verified against @livekit/components-core's
   // source, not assumed), so this filter alone is enough to make
   // availability live, no separate event subscription needed.
-  // Finding 1 -- the same liveness blacklist the recorder applies. The
-  // promotion flapping was reported against the recording, but this is
-  // shared selection logic and the live stage had the identical hole: a
-  // dead camera's publication lingering in the list makes it selectable
-  // again the instant it reappears, with nothing damping the transition.
+  // Test 4 ruling -- eligibility now differs BY PURPOSE, which is the
+  // distinction the previous version collapsed.
+  //
+  // tracksForSlot is the RENDERING set and is deliberately NOT filtered
+  // by liveness. A dead camera has to stay in the candidate pool, or a
+  // deliberate manual cut to it cannot be honoured and the selection
+  // oscillates between the dead frame and a live camera -- which is the
+  // bug. One stable resolution per selection.
+  //
+  // eligibleForSlot is the AUTOMATIC set. The auto director must never
+  // choose an impaired feed for itself.
   const tracksForSlot = useCallback((letter) =>
-    filterEligible(
-      tracks.filter((t) =>
-        (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-          t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-        !t.publication?.isMuted
-      ),
-      ineligibleTracks
-    ), [tracks, ineligibleTracks]);
+    tracks.filter((t) =>
+      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
+        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
+      !t.publication?.isMuted
+    ), [tracks]);
+
+  const eligibleForSlot = useCallback((letter) =>
+    filterEligible(tracksForSlot(letter), ineligibleTracks),
+    [tracksForSlot, ineligibleTracks]);
 
   // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
   // performer slots CURRENTLY PRESENT (a published camera track exists
@@ -2587,14 +2594,26 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(letter);
+    const eligible = filterEligible(candidates, ineligibleTracks);
     const cmd = activeShot[letter];
+    // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
+    // that feed is impaired. The artist cut there on purpose; the answer
+    // is a stable frozen frame with the CAMERA LOST treatment until they
+    // cut away or it revives, not a silent re-pick. Searched against the
+    // unfiltered pool for exactly that reason.
     const matched = cmd?.targetIdentity
       ? candidates.find((t) => t.participant.identity === cmd.targetIdentity)
       : undefined;
+    // Every non-explicit path prefers LIVE feeds -- this is what stops
+    // auto/fallback from ever landing on a dead camera by itself. The
+    // final `candidates[0]` is a last resort for when nothing is live at
+    // all, where a frozen frame beats an empty stage.
     const chosen =
       matched ||
-      candidates.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
+      eligible.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
+      eligible[0] ||
       candidates[0];
+    const activeImpaired = !!chosen && !eligible.includes(chosen);
 
     // DEBUG (bug 2 investigation) -- viewer-side only (role === 'viewer';
     // the director already has other debug coverage). Shows exactly what
@@ -2652,7 +2671,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} />
       </div>
     );
   };
@@ -2739,6 +2758,26 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     tracksRef.current = tracks;
   }, [tracks]);
 
+  // Test 4 ruling -- the AUTOMATIC track list. Mirrors the liveness
+  // blacklist into a ref for the same reason tracksRef exists: the
+  // director's callbacks must read live data without `tracks` or the
+  // blacklist becoming dependencies that would recreate the engine on
+  // every camera hiccup.
+  //
+  // autoTrackList() is what every automatic resolution runs against, so
+  // the auto director can never choose an impaired feed for itself. A
+  // HUMAN tap deliberately resolves against the unfiltered list instead
+  // -- cutting to a camera that has died is allowed, and answered with a
+  // stable frozen frame plus the CAMERA LOST treatment.
+  const ineligibleRef = useRef(ineligibleTracks);
+  useEffect(() => {
+    ineligibleRef.current = ineligibleTracks;
+  }, [ineligibleTracks]);
+  const autoTrackList = useCallback(
+    () => filterEligible(tracksRef.current, ineligibleRef.current),
+    []
+  );
+
   // Auto-director: created once per (room, role) and survives camera
   // churn -- see tracksRef/activeShotRef above for why tracks/activeShot
   // aren't dependencies. Only the director's own device creates one
@@ -2783,9 +2822,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // vertigo) onto the command's params field -- autoDirector never sets
   // this either.
   const buildAndFireCommand = useCallback((shotKey, decisionSource, meta = {}) => {
-    const roles = availableRoles(role, tracksRef.current);
+    // Test 4 ruling -- the ONE gate that separates the two cases, and it
+    // keys on who decided. Auto and cue resolve against live feeds only;
+    // a human tap resolves against everything, so a deliberate cut to a
+    // dead camera reaches renderSlot as an explicit targetIdentity and
+    // is honoured there rather than silently re-picked.
+    const isAutomatic = decisionSource !== 'human';
+    const sourceTracks = isAutomatic ? autoTrackList() : tracksRef.current;
+    const roles = availableRoles(role, sourceTracks);
     const sourceRole = meta.sourceRole ?? resolveSourceRole(meta.framingHint || shotKey, roles);
-    const targetIdentity = resolveTargetIdentity(tracksRef.current, role, sourceRole);
+    const targetIdentity = resolveTargetIdentity(sourceTracks, role, sourceRole);
     const command = buildShotCommand({
       showId: ROOM_NAME,
       slot: role,
@@ -2829,7 +2875,9 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   ), [buildAndFireCommand]);
 
   const getAutoAvailableShots = useCallback(() => {
-    const roles = availableRoles(role, tracksRef.current);
+    // Live feeds only -- auto must never offer itself a shot whose
+    // camera is impaired (Test 4 ruling).
+    const roles = availableRoles(role, autoTrackList());
     return Object.keys(SHOT_TYPES).filter((k) => {
       const src = SHOT_TYPES[k].source;
       if (src === 'currentOrSelected') return roles.length > 0;
@@ -2844,10 +2892,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // roles/tracks itself, and without a second resolver: same
   // resolveSourceRole + resolveTargetIdentity Item 1 already fixed.
   const resolveAutoFeed = useCallback((shotKey) => {
-    const roles = availableRoles(role, tracksRef.current);
+    // Live feeds only, both for role availability and for the concrete
+    // identity -- otherwise auto's own same-feed comparison could decide
+    // to "cut" to a camera that is already dead (Test 4 ruling).
+    const live = autoTrackList();
+    const roles = availableRoles(role, live);
     const sourceRole = resolveSourceRole(shotKey, roles);
-    return resolveTargetIdentity(tracksRef.current, role, sourceRole);
-  }, [role]);
+    return resolveTargetIdentity(live, role, sourceRole);
+  }, [role, autoTrackList]);
 
   // What's ACTUALLY showing for this slot right now -- reflects the last
   // command from ANY source (auto or human), not just auto's own last
@@ -2904,7 +2956,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     return createCueDirector({
       sheet: cueSheet,
       fireShot: fireCueShot,
-      getAvailableRoles: () => availableRoles(role, tracksRef.current),
+      // Cue playback is automation too -- live feeds only, so a cue
+      // naming a camera that has since died takes cueDirector's existing
+      // cue_fallback path instead of cutting to a dead feed.
+      getAvailableRoles: () => availableRoles(role, autoTrackList()),
       getPlayerState: getBackingTrackState,
       // Same suspend()/resume() pair onExclusiveMode already drives for
       // staccato -- cue playback is another exclusive mode, not a

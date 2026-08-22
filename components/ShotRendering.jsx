@@ -541,7 +541,12 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
 // `onReselect` (fix a3) is optional and observation-only -- EgressPage
 // passes it so a recording's timeline shows what the RECORDER saw at the
 // moment a track changed under it. Live viewers don't pass it.
-export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect, lostOverlay }) {
+// `activeImpaired` (Test 4 ruling) -- the caller has deliberately
+// selected a feed that is currently dead. The answer is ONE stable
+// resolution: hold the frozen frame with the lost treatment until the
+// artist cuts away or the camera revives. Explicitly NOT a re-pick --
+// silently substituting a live camera is the oscillation this replaces.
+export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect, lostOverlay, activeImpaired }) {
   const candidateKeysSignature = candidates.map(trackKey).join('|');
 
   const [layerTracks, setLayerTracks] = useState(() => {
@@ -635,6 +640,11 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
   // first available), so "performer main > any live camfeed" lives in one
   // place and is not duplicated into this generic component.
   useEffect(() => {
+    // Test 4 ruling -- do NOT rescue away from a deliberately-selected
+    // dead feed. The orphan rescue exists for a displayed track that
+    // vanished on its own; promoting here would re-introduce exactly the
+    // dead-frame/live-camera oscillation this ruling outlaws.
+    if (activeImpaired) return;
     if (displayedKey === null || layerTracks.has(displayedKey)) return;
     const fallbackKey = layerTracks.has(activeKey)
       ? activeKey
@@ -647,7 +657,7 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
     logCutDebug(`[ShotVideo] displayed layer ${displayedKey} left the pool -> promoting ${fallbackKey}`);
     onReselect?.({ reason: 'displayed_track_gone', from: displayedKey, to: fallbackKey });
     setDisplayedKey(fallbackKey);
-  }, [displayedKey, layerTracks, activeKey, onReselect]);
+  }, [displayedKey, layerTracks, activeKey, onReselect, activeImpaired]);
 
   // ─── Fix (a2): real freeze-frame ────────────────────────────────
   // Snapshot the displayed layer to a canvas on a slow interval WHILE it
@@ -691,8 +701,11 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
   // instead -- freeze is the documented last resort, after "performer
   // main > any live camfeed".
   useEffect(() => {
-    setShowFrozen(layerTracks.size === 0 && hasFrozenFrameRef.current);
-  }, [layerTracks]);
+    // Two ways to end up on the frozen frame, and they are different
+    // situations: nothing live is left to show at all, OR the caller has
+    // deliberately selected a feed that is currently dead (Test 4).
+    setShowFrozen(hasFrozenFrameRef.current && (layerTracks.size === 0 || !!activeImpaired));
+  }, [layerTracks, activeImpaired]);
 
   // Nothing has ever painted for this slot -- a genuinely blank start,
   // where the placeholder is the right answer.
