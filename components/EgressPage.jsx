@@ -53,6 +53,7 @@ import VersusSplit from './VersusSplit';
 import SpotlightStage from './SpotlightStage';
 import { ShotVideo } from './ShotRendering';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
 
 // Plain Ink fill, no text -- the live viewer's own placeholder shows
 // "waiting for performer..."/the "be right back" card, which is exactly
@@ -88,12 +89,20 @@ function signalRecordingReady() {
 // Mirrors renderSlot's own tracksForSlot (LiveDemo.jsx) -- same filter,
 // same reasoning (a muted participant is unavailable the same as one
 // who never published, per SHOW_LIFECYCLE_SPEC.md L6-1).
-function tracksForSlot(tracks, letter) {
-  return tracks.filter(
-    (t) =>
-      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-      !t.publication?.isMuted
+// `ineligible` (Finding 1) is the liveness registry's blacklist -- dead
+// tracks, and revived ones still inside their probation window. Applied
+// HERE, at selection, so `chosen` and ShotVideo's layer pool can never
+// disagree about what is available; them disagreeing is what made the
+// promotion oscillate.
+function tracksForSlot(tracks, letter, ineligible) {
+  return filterEligible(
+    tracks.filter(
+      (t) =>
+        (t.participant.identity.startsWith(`contestant-${letter}-`) ||
+          t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
+        !t.publication?.isMuted
+    ),
+    ineligible
   );
 }
 
@@ -103,6 +112,10 @@ function tracksForSlot(tracks, letter) {
 function EgressStage({ layout }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
+  // Finding 1 -- liveness registry with revival probation. See
+  // lib/trackLiveness.js for why reappearing in the list is not enough
+  // to become selectable again.
+  const ineligibleTracks = useIneligibleTracks(room, tracks);
   const [activeShot, setActiveShot] = useState({});
   const signaledRef = useRef(false);
 
@@ -261,7 +274,7 @@ function EgressStage({ layout }) {
   );
 
   const renderSlot = (letter) => () => {
-    const candidates = tracksForSlot(tracks, letter);
+    const candidates = tracksForSlot(tracks, letter, ineligibleTracks);
     const cmd = activeShot[letter];
     // Same fallback chain as RoomInner's own renderSlot: an explicit
     // targetIdentity match first, then the slot's own performer, then
@@ -317,6 +330,13 @@ function EgressStage({ layout }) {
           activeSlot={activePerformerSlot}
           slots={presentSlots}
           renderSlot={renderSlot}
+          // Finding 4, egress half -- SpotlightStage's default is a
+          // literal "Reconnecting performer A…" string, which for the
+          // RECORDER means that text gets burned into the footage the
+          // moment the active performer's tracks drop (which End Show
+          // now deliberately causes, per fix 1d). Same rule as
+          // CLEAN_PLACEHOLDER: no readable status text in a recording.
+          reconnectingPlaceholder={CLEAN_PLACEHOLDER}
         />
       ) : (
         <VersusSplit

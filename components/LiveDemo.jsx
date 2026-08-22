@@ -29,6 +29,7 @@ import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, canGoLive } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { describeTransport } from '../lib/transportDiagnostics';
+import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
 import { signUp, signIn } from '../lib/supabaseAuth';
 import './reactions.css';
 
@@ -42,6 +43,40 @@ const ROOM_NAME = 'pilot-room';
 // be able to loop on it indefinitely. Past this count the performer
 // keeps the manual banner and nothing reconnects on its own.
 const MAX_AUTOMATIC_RECOVERIES = 3;
+
+// Fix (a2c) -- the "camera lost" treatment shown over a frozen last
+// frame, LIVE SURFACES ONLY. The egress template deliberately passes no
+// lostOverlay and gets the bare frozen frame: readable status text baked
+// into a recording is exactly what that template exists to exclude.
+// Deliberately subtle -- a held frame with a quiet label reads as "this
+// feed dropped", where a full-bleed error card would read as "the show
+// broke".
+const CAMERA_LOST_OVERLAY = (
+  <div
+    style={{
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 16,
+      display: 'flex',
+      justifyContent: 'center',
+    }}
+  >
+    <span
+      style={{
+        fontSize: 11,
+        letterSpacing: '0.08em',
+        color: 'rgba(253, 255, 252, 0.75)',
+        background: 'rgba(1, 22, 39, 0.55)',
+        border: '1px solid rgba(46, 196, 182, 0.3)',
+        borderRadius: 999,
+        padding: '4px 10px',
+      }}
+    >
+      CAMERA LOST
+    </span>
+  </div>
+);
 
 // Portrait is the output target always (Stage 1 of the portrait capture
 // work) -- requested uniformly, for every source, not just phones.
@@ -1168,6 +1203,9 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
+  // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
+  // instance feeding every selection on this device.
+  const ineligibleTracks = useIneligibleTracks(room, tracks);
 
   // Fix (b), SHOW-1 diagnosis round -- the director-start trigger below
   // must gate on the ROOM actually being connected, not just on
@@ -2384,12 +2422,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // default event set -- verified against @livekit/components-core's
   // source, not assumed), so this filter alone is enough to make
   // availability live, no separate event subscription needed.
+  // Finding 1 -- the same liveness blacklist the recorder applies. The
+  // promotion flapping was reported against the recording, but this is
+  // shared selection logic and the live stage had the identical hole: a
+  // dead camera's publication lingering in the list makes it selectable
+  // again the instant it reappears, with nothing damping the transition.
   const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) =>
-      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-      !t.publication?.isMuted
-    ), [tracks]);
+    filterEligible(
+      tracks.filter((t) =>
+        (t.participant.identity.startsWith(`contestant-${letter}-`) ||
+          t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
+        !t.publication?.isMuted
+      ),
+      ineligibleTracks
+    ), [tracks, ineligibleTracks]);
 
   // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
   // performer slots CURRENTLY PRESENT (a published camera track exists
@@ -2596,7 +2642,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} />
       </div>
     );
   };

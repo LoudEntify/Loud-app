@@ -26,7 +26,7 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react';
 // removes the z-index collision with .stage-mic-cam that was silently
 // swallowing every tap on a tile (the actual root cause, confirmed via
 // elementsFromPoint before this fix, not guessed).
-export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching, collapsed, onToggleCollapse }) {
+export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching, collapsed, onToggleCollapse, reconnectingPlaceholder }) {
   const activePresent = slots.includes(activeSlot);
   const others = slots.filter((s) => s !== activeSlot);
 
@@ -36,9 +36,16 @@ export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch
         {activePresent ? (
           renderSlot(activeSlot)()
         ) : (
-          <div className="spotlight-reconnecting">
-            <span>Reconnecting {activeSlot ? `performer ${activeSlot.toUpperCase()}` : ''}…</span>
-          </div>
+          // `reconnectingPlaceholder` (Finding 4, egress half) overrides
+          // the text entirely. EgressPage passes the clean Ink fill: this
+          // string is UI chrome, and burning "Reconnecting performer A…"
+          // into a recording is exactly what the egress template exists
+          // to prevent. Live surfaces keep the default.
+          reconnectingPlaceholder ?? (
+            <div className="spotlight-reconnecting">
+              <span>Reconnecting {activeSlot ? `performer ${activeSlot.toUpperCase()}` : ''}…</span>
+            </div>
+          )
         )}
       </div>
       {others.length > 0 && (

@@ -503,6 +503,10 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
 
   return (
     <div
+      // Fix (a2) -- how ShotVideo's freeze-frame snapshot finds the
+      // currently-displayed layer's <video> element without threading a
+      // second ref out of every layer.
+      data-layer-key={layerKey}
       style={{
         position: 'absolute',
         inset: 0,
@@ -537,7 +541,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
 // `onReselect` (fix a3) is optional and observation-only -- EgressPage
 // passes it so a recording's timeline shows what the RECORDER saw at the
 // moment a track changed under it. Live viewers don't pass it.
-export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect }) {
+export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect, lostOverlay }) {
   const candidateKeysSignature = candidates.map(trackKey).join('|');
 
   const [layerTracks, setLayerTracks] = useState(() => {
@@ -555,23 +559,16 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
         next.set(k, t);
         if (!prev.has(k)) changed = true;
       });
-      // Fix (a1) -- never shrink the pool to empty while we still have a
-      // layer painting. trackKey is `identity:trackSid`, so BOTH a track
-      // republish and a whole-participant replacement (a recovery mints a
-      // new identity: contestant-a-00436b79 -> contestant-a-a5e85693)
-      // retire every existing key at once. Dropping to an empty pool in
-      // that instant swaps a live picture for the flat Ink placeholder;
-      // keeping the outgoing layer mounted instead holds its last painted
-      // frame until a replacement arrives, which is the documented
-      // last-resort behaviour (performer main > live camfeed > hold last
-      // frame). Best-effort by nature: a genuinely dead MediaStreamTrack
-      // keeps its final frame in the <video> element, but if the SDK
-      // clears it we are no worse off than the placeholder we render
-      // today.
-      if (next.size === 0 && prev.size > 0) {
-        logCutDebug('[ShotVideo] candidate pool -> 0 track(s): holding last frame');
-        return prev;
-      }
+      // REMOVED (Finding 1/2): the previous round kept the outgoing layer
+      // mounted when the pool would go empty, as a best-effort way to
+      // hold its last frame. Two things were wrong with it. It FAILED its
+      // device test -- a torn-down track clears the element, so the
+      // result was a dark blank, not a held frame (Finding 2). And it
+      // kept dead tracks in the pool indefinitely, which fed the
+      // promotion flapping (Finding 1) by leaving a corpse permanently
+      // eligible. The real freeze-frame below replaces it: the last frame
+      // is captured to a canvas WHILE the track is alive, so nothing
+      // needs to stay mounted after it dies.
       if (changed) {
         logCutDebug(`[ShotVideo] candidate pool -> ${next.size} track(s): ${Array.from(next.keys()).join(', ') || '(none)'}`);
       }
@@ -652,10 +649,78 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
     setDisplayedKey(fallbackKey);
   }, [displayedKey, layerTracks, activeKey, onReselect]);
 
-  if (layerTracks.size === 0) return placeholder;
+  // ─── Fix (a2): real freeze-frame ────────────────────────────────
+  // Snapshot the displayed layer to a canvas on a slow interval WHILE it
+  // is alive. This has to be continuous: at the moment a track dies the
+  // element has already been cleared, so there is nothing left to read
+  // then -- which is exactly why the previous best-effort hold rendered
+  // a dark blank instead of a held frame.
+  //
+  // 1Hz at full capture resolution is cheap (one drawImage per second)
+  // and keeps the frozen frame sharp enough to sit in a recording.
+  const containerRef = useRef(null);
+  const frozenCanvasRef = useRef(null);
+  const hasFrozenFrameRef = useRef(false);
+  const [showFrozen, setShowFrozen] = useState(false);
+
+  useEffect(() => {
+    if (displayedKey === null) return undefined;
+    const id = setInterval(() => {
+      const container = containerRef.current;
+      const canvas = frozenCanvasRef.current;
+      if (!container || !canvas) return;
+      const layerEl = container.querySelector(`[data-layer-key="${CSS.escape(displayedKey)}"] video`);
+      if (!layerEl || layerEl.readyState < 2 || !layerEl.videoWidth) return;
+      if (canvas.width !== layerEl.videoWidth || canvas.height !== layerEl.videoHeight) {
+        canvas.width = layerEl.videoWidth;
+        canvas.height = layerEl.videoHeight;
+      }
+      try {
+        canvas.getContext('2d')?.drawImage(layerEl, 0, 0, canvas.width, canvas.height);
+        hasFrozenFrameRef.current = true;
+      } catch {
+        // drawImage can throw on a torn-down element mid-teardown --
+        // never let a snapshot attempt break rendering.
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [displayedKey]);
+
+  // Show the frozen frame exactly when there is nothing live left to
+  // show. With a fallback available the orphan-rescue above promotes it
+  // instead -- freeze is the documented last resort, after "performer
+  // main > any live camfeed".
+  useEffect(() => {
+    setShowFrozen(layerTracks.size === 0 && hasFrozenFrameRef.current);
+  }, [layerTracks]);
+
+  // Nothing has ever painted for this slot -- a genuinely blank start,
+  // where the placeholder is the right answer.
+  if (layerTracks.size === 0 && !hasFrozenFrameRef.current) return placeholder;
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+      {/* Always mounted so the snapshot target exists before it is
+          needed; only visible once every live layer is gone. */}
+      <canvas
+        ref={frozenCanvasRef}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          zIndex: showFrozen ? 2 : -1,
+          opacity: showFrozen ? 1 : 0,
+        }}
+      />
+      {/* lostOverlay is passed by LIVE surfaces only. The egress template
+          passes nothing and gets the bare frozen frame: readable status
+          text baked into the footage is precisely what that template
+          exists to exclude (see CLEAN_PLACEHOLDER in EgressPage.jsx). */}
+      {showFrozen && lostOverlay ? (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none' }}>{lostOverlay}</div>
+      ) : null}
       {Array.from(layerTracks.entries()).map(([key, tRef]) => (
         <ShotFadeLayer
           key={key}
