@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CameraRotate, VideoCamera, VideoCameraSlash } from '@phosphor-icons/react';
 import AudioDeckPanel from './AudioDeckPanel';
 import EmptyState from './EmptyState';
+import RehearsalRoom from './RehearsalRoom';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
@@ -15,16 +16,25 @@ const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
 
-// KIT CHECK -- the artist's whole rig, running locally, connected to
-// nothing.
+// KIT CHECK -- the artist's whole rig, running locally.
 //
-// THIS IS THE CAMERA-OWNERSHIP INVERSION, done where it matters. There
-// is no LiveKitRoom on this page: the camera is acquired here by an
-// explicit getUserMedia call, attached to an element we own, flipped and
-// stopped by us, and released by us. No LiveKit token is minted, no
-// room is joined, nothing is published. An artist can sit here tuning
-// for an hour and it costs nothing, which is the entire point of the
-// broadcast window (docs/BUILD_AUDIT_2026-08.md G.1).
+// THIS IS THE CAMERA-OWNERSHIP INVERSION, done where it matters. The
+// camera is acquired here by an explicit getUserMedia call, attached to
+// an element we own, flipped and stopped by us, and released by us. No
+// LiveKit token is minted, no room is joined, nothing is published. An
+// artist can sit here tuning for an hour and it costs nothing, which is
+// the entire point of the broadcast window (BUILD_AUDIT_2026-08.md G.1).
+//
+// ⚠️ ONE EXCEPTION, and it is opt-in: ADD CAMERA. Pairing a second
+// device and seeing the composed view genuinely requires moving video
+// between two machines, which cannot be done without a transport. That
+// path mounts components/RehearsalRoom.jsx, which DOES connect -- to a
+// capped rehearsal room, never the show room. The badge at the top of
+// this page changes the moment it does, because the value of this page
+// is the artist knowing what state they are in.
+//
+// This comment previously claimed there was no LiveKitRoom on this page.
+// That stopped being true when Add Camera landed, so it says so.
 //
 // The audio graph is unchanged from the live path -- createPilotAudioTrack
 // was always local-only (getUserMedia + Web Audio), which is why the
@@ -49,6 +59,36 @@ export default function KitCheck() {
   const [upcoming, setUpcoming] = useState(null);
   const [now, setNow] = useState(() => Date.now());
   const [countdown, setCountdown] = useState(null); // seconds remaining, or null
+
+  // ── Add Camera (the documented LiveKit exception) ──────────
+  const [rehearsal, setRehearsal] = useState(null); // pairing session, or null
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState('');
+
+  async function addCamera() {
+    setPairError('');
+    setPairBusy(true);
+    try {
+      const res = await fetch('/api/camfeed/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ slot: 'a', show_id: upcoming?.id || null }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setPairError(body.error || 'Could not start a pairing session.'); return; }
+      // Hand the camera over BEFORE connecting: Kit Check owns it
+      // locally, the rehearsal room needs to publish it, and two owners
+      // of one device produces a black tile.
+      stopCamera();
+      setRehearsal(body);
+    } finally {
+      setPairBusy(false);
+    }
+  }
+
+  function endRehearsal() {
+    setRehearsal(null);
+  }
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -186,10 +226,19 @@ export default function KitCheck() {
         </div>
 
         {/* The promise, stated plainly and where it can be checked. */}
-        <div style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 10.5, letterSpacing: '0.06em', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 999, padding: '5px 12px' }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: TEAL }} />
-          NOT CONNECTED — NOTHING IS BEING SENT
-        </div>
+        {/* This badge is a promise, so it has to track reality. The
+            moment a rehearsal room is up, it stops claiming otherwise. */}
+        {rehearsal ? (
+          <div style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 10.5, letterSpacing: '0.06em', color: '#ff9f1c', border: '1px solid #ff9f1c', borderRadius: 999, padding: '5px 12px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff9f1c' }} />
+            REHEARSAL ROOM OPEN — CONNECTED
+          </div>
+        ) : (
+          <div style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 10.5, letterSpacing: '0.06em', color: TEAL, border: `1px solid ${TEAL}`, borderRadius: 999, padding: '5px 12px' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: TEAL }} />
+            NOT CONNECTED — NOTHING IS BEING SENT
+          </div>
+        )}
 
         {upcoming && (
           <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)' }}>
@@ -231,10 +280,46 @@ export default function KitCheck() {
                 {facingMode === 'user' ? 'FRONT' : 'REAR'}
               </button>
             </div>
+
+            {/* ── ADD CAMERA ──────────────────────────────────
+                The one thing in Kit Check that connects. Opt-in, bounded
+                and labelled, because the whole value of this page is the
+                artist knowing they are costing nothing -- and a feature
+                that quietly broke that would poison the rest of it. */}
+            <div style={{ marginTop: 16, border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Add a camera</div>
+              <div style={{ fontSize: 11.5, color: 'rgba(1,22,39,0.55)', marginTop: 6, lineHeight: 1.55 }}>
+                Pair a phone as a second camera and see the composed view. Moving video between two devices
+                needs a connection, so this is the <strong>one part of Kit Check that goes online</strong> —
+                a rehearsal room, capped at 20 minutes, separate from your show.
+              </div>
+
+              {pairError && <div style={{ fontSize: 12, color: '#e71d36', marginTop: 8 }}>{pairError}</div>}
+
+              {!rehearsal ? (
+                <button type="button" onClick={addCamera} disabled={pairBusy} style={{ ...btn(false), marginTop: 12 }}>
+                  {pairBusy ? 'STARTING…' : 'ADD CAMERA'}
+                </button>
+              ) : (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>PAIRING CODE</div>
+                  <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: '0.16em', marginTop: 4 }}>{rehearsal.code}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(1,22,39,0.55)', marginTop: 6, lineHeight: 1.5 }}>
+                    On the other phone, open <strong>{typeof window !== 'undefined' ? window.location.origin : ''}/cam/pair</strong> and enter this code.
+                    It works once, and expires in 10 minutes.
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* ── Audio + cues ────────────────────────────────── */}
+          {/* ── Composed view / audio + cues ────────────────── */}
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
+            {rehearsal && (
+              <div style={{ marginBottom: 18 }}>
+                <RehearsalRoom session={rehearsal} onEnd={endRehearsal} />
+              </div>
+            )}
             {!audioNodes && (
               <div style={{ border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: 16 }}>
                 <div style={{ fontSize: 13, fontWeight: 700 }}>Audio</div>

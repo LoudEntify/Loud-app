@@ -24,6 +24,11 @@ function ageFrom(dob) {
   return age;
 }
 
+// Platform minimum age. Single source for the client-side check and
+// the copy beneath the date field; the server enforces it independently
+// (see the DB constraint in docs/age_policy_migration.sql).
+export const MIN_AGE = 18;
+
 const labelStyle = { fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)', fontWeight: 700, marginBottom: 4 };
 
 const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '13px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' };
@@ -112,12 +117,15 @@ export default function Auth() {
         setError('Date of birth is required.');
         return;
       }
-      // Age is DERIVED here and never stored -- see DECISIONS.md. 13 is
-      // the floor every major platform uses and the one any later
-      // payout/age gate will build on.
+      // Age is DERIVED here and never stored -- see DECISIONS.md.
+      //
+      // 18+, not 13+. This is standing launch policy, not a preference:
+      // paid voting mechanics, UK Online Safety Act exposure and
+      // safeguarding all land on the same floor. Self-declaration is
+      // sufficient at this stage; formal age assurance is a later phase.
       const age = ageFrom(dateOfBirth);
-      if (age === null || age < 13) {
-        setError('You must be at least 13 to create an account.');
+      if (age === null || age < MIN_AGE) {
+        setError(`You must be at least ${MIN_AGE} to create an account.`);
         return;
       }
       if (age > 120) {
@@ -258,6 +266,9 @@ export default function Auth() {
                   onChange={(e) => setDateOfBirth(e.target.value)}
                   style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
                 />
+                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
+                  Loudentify is {MIN_AGE}+.
+                </div>
               </div>
 
               <div>
