@@ -56,18 +56,28 @@ select
   (select count(*) from shows)               as shows,
   (select count(*) from cue_sheets)          as cue_sheets;
 
--- ─── STEP 2: detach the three non-cascading references ────────
--- shows.artist_id, show_slots.claimed_by_user_id and cue_sheets.artist_id
--- reference auth.users with no cascade rule, so the delete in step 3
--- fails with a foreign-key violation unless these are cleared first.
-update shows          set artist_id          = null where artist_id          is not null;
-update show_slots     set claimed_by_user_id = null where claimed_by_user_id is not null;
-update cue_sheets     set artist_id          = null where artist_id          is not null;
-
--- ─── STEP 3: delete every account ─────────────────────────────
--- Wrapped in a transaction so you can inspect the count and ROLLBACK if
--- it looks wrong. Change `rollback` to `commit` when you are sure.
+-- ─── STEPS 2+3: detach, then delete — ONE atomic block ────────
+--
+-- HOW TO RUN THIS:
+--   1. Select this whole block and run it AS IS. It ends in `rollback`,
+--      so nothing is saved -- you just get to see the count.
+--   2. Check `users_remaining` reads 0.
+--   3. Change the LAST LINE from `rollback;` to `commit;`.
+--   4. Run the whole block again. Now it persists.
+--
+-- Steps 2 and 3 are deliberately inside ONE transaction. The three
+-- UPDATEs below have to happen first -- shows.artist_id,
+-- show_slots.claimed_by_user_id and cue_sheets.artist_id reference
+-- auth.users with no cascade rule, so the delete fails with a
+-- foreign-key violation without them -- but if they sat outside the
+-- transaction they would commit on the dry run, detaching ownership
+-- from your shows even though you had not deleted anything yet. A dry
+-- run that changes data is not a dry run.
 begin;
+
+  update shows      set artist_id          = null where artist_id          is not null;
+  update show_slots set claimed_by_user_id = null where claimed_by_user_id is not null;
+  update cue_sheets set artist_id          = null where artist_id          is not null;
 
   delete from auth.users;
 
