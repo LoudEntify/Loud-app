@@ -15,6 +15,32 @@
 --   * Files in Storage. Deleting a database row does not delete the
 --     object it points at. Recordings, B-roll and avatars will still be
 --     sitting in the bucket, now orphaned. See step 4.
+--   * LiveKit egress. Egress is NOT a Supabase account and has no row in
+--     auth.users. Its LiveKit identity is minted by LiveKit's own egress
+--     service, and its only Supabase touch is the ANONYMOUS client
+--     reading a `shows` row (components/EgressPage.jsx). The S3
+--     credentials it writes recordings with are Storage keys in project
+--     settings, not user rows. Nothing here affects its ability to
+--     record.
+--
+-- ⚠️ BUT NOTE WHAT EGRESS PRODUCED ⚠️
+--   Recording ROWS are owned by an artist -- app/api/recordings/sync
+--   stamps them with `artist_id = auth.uid()`, and that column cascades.
+--   So deleting every account deletes every recording row, including
+--   from shows egress recorded, while the MP4 files themselves remain in
+--   the bucket with nothing describing them. Same for broll_clips.
+--
+--   To keep them: note the storage paths first (step 0 below), then
+--   re-run "Sync recordings" from the dashboard once you have a fresh
+--   account -- that route scans the bucket and re-creates rows. Verify
+--   that works for your files BEFORE committing step 3 if those
+--   recordings matter.
+--
+-- ─── STEP 0: inventory what you are about to orphan ───────────
+-- select r.id, r.title, r.storage_path, r.recorded_at, r.visibility
+--   from recordings r order by r.recorded_at desc;
+-- -- Save this output somewhere. After step 3 these rows are gone and
+-- -- storage_path is the only way back to the files.
 --   * shows / show_slots / cue_sheets rows. Those reference auth.users
 --     WITHOUT `on delete cascade`, so they would BLOCK the delete
 --     outright. Step 2 detaches them; step 5 clears them if you want a
