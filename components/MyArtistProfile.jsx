@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import ArtistProfilePublic from './ArtistProfilePublic';
 import EmptyState from './EmptyState';
+import AuthButton from './AuthButton';
 import { getSession } from '../lib/supabaseAuth';
 
 // `/artist` used to render a fully invented artist (Neon Meridian) with
@@ -45,8 +46,11 @@ export default function MyArtistProfile() {
 
   return (
     <>
-      <div style={{ padding: '16px 40px 0', fontSize: 11, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)' }}>
-        THIS IS YOUR PUBLIC PAGE — <Link href="/settings" style={{ color: '#2ec4b6' }}>EDIT PROFILE</Link>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '16px 40px 0' }}>
+        <div style={{ fontSize: 11, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)' }}>
+          THIS IS YOUR PUBLIC PAGE — <Link href="/settings" style={{ color: '#2ec4b6' }}>EDIT PROFILE</Link>
+        </div>
+        <AuthButton />
       </div>
       <ArtistProfilePublic artistId={userId} />
     </>

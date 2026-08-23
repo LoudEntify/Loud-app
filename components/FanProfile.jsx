@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import EmptyState from './EmptyState';
+import AuthButton from './AuthButton';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import { Bell, GearSix } from '@phosphor-icons/react';
 import AvatarRing from './AvatarRing';
@@ -64,6 +65,7 @@ export default function FanProfile() {
             <Link href="/settings" style={{ width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(1,22,39,0.06)', textDecoration: 'none' }}>
               <GearSix size={16} color={INK} />
             </Link>
+            <AuthButton compact />
           </div>
         </div>
 
