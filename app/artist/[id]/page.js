@@ -1,15 +1,20 @@
-import ArtistProfilePublic from '../../../components/ArtistProfilePublic';
-import PageShell from '../../../components/PageShell';
+import { Suspense } from 'react';
+import ProfileSurface from '../../../components/ProfileSurface';
 
 export const metadata = {
-  title: 'Artist Profile · Loudentify pilot',
-  description: 'Public artist profile',
+  title: 'Profile · Loudentify',
+  description: 'Artist profile',
 };
 
-export default function ArtistPublicPage({ params }) {
+// ONE route, two modes. The owner gets their console here; everyone else
+// gets the storefront at the SAME url. Which one you see is decided by
+// who you are, not by which link you followed.
+export default function ArtistProfileRoute({ params }) {
   return (
-    <PageShell active="profile">
-      <ArtistProfilePublic artistId={params.id} />
-    </PageShell>
+    <main>
+      <Suspense fallback={null}>
+        <ProfileSurface artistId={params.id} />
+      </Suspense>
+    </main>
   );
 }

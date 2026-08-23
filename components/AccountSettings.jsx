@@ -42,6 +42,36 @@ export default function AccountSettings() {
   const [saveError, setSaveError] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const fileInputRef = useRef(null);
+  // Viewer -> artist upgrade. Goes through a server route rather than a
+  // direct profile update so there is one place to add the checks this
+  // will eventually need (terms, age, verification).
+  const [upgrading, setUpgrading] = useState(false);
+  const [stageName, setStageName] = useState('');
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState('');
+
+  async function becomeArtist() {
+    setUpgradeError('');
+    if (!stageName.trim()) { setUpgradeError('Pick a stage name.'); return; }
+    setUpgradeBusy(true);
+    try {
+      const res = await fetch('/api/profile/become-artist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ stage_name: stageName.trim(), genres, bio }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setUpgradeError(body.error || 'Could not upgrade this account.'); return; }
+      // Straight to the console they just unlocked -- landing back on a
+      // settings page after an upgrade hides the thing that changed.
+      window.location.href = `/artist/${session.user.id}`;
+    } catch {
+      setUpgradeError('Could not upgrade this account.');
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
 
   useEffect(() => {
     let cancelled = false;
@@ -197,9 +227,64 @@ export default function AccountSettings() {
             <div style={{ fontSize: 13, color: INK }}>
               Signed in as an <strong>{isArtist ? 'artist' : 'viewer'}</strong> account
             </div>
-            <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
-              Account type is set at signup and can&apos;t be changed here.
-            </div>
+            {isArtist ? (
+              <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
+                You have the full artist console on your profile.
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.55)', marginTop: 8, lineHeight: 1.55 }}>
+                  Becoming an artist keeps everything you already have — same account, same wallet,
+                  same history — and adds scheduling, Kit Check, recordings and B-roll to your profile.
+                  It can&apos;t be undone for now.
+                </div>
+
+                {!upgrading ? (
+                  <button
+                    type="button"
+                    onClick={() => { setUpgrading(true); setStageName(displayName || ''); }}
+                    style={{ marginTop: 12, padding: '10px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: TEAL, background: 'transparent', border: `1px solid ${TEAL}`, cursor: 'pointer' }}
+                  >
+                    BECOME AN ARTIST
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)', fontWeight: 700, marginBottom: 4 }}>STAGE NAME</div>
+                      <input
+                        value={stageName}
+                        onChange={(e) => setStageName(e.target.value)}
+                        placeholder="How you appear on stage"
+                        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '11px 12px', fontSize: 13, color: INK, outline: 'none', fontFamily: 'inherit' }}
+                      />
+                      <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
+                        Your handle @{profile?.username || '…'} stays the same — artists and fans share one namespace.
+                      </div>
+                    </div>
+
+                    {upgradeError && <div style={{ fontSize: 12, color: '#e71d36' }}>{upgradeError}</div>}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={becomeArtist}
+                        disabled={upgradeBusy}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: '#fdfffc', background: INK, border: 'none', cursor: upgradeBusy ? 'default' : 'pointer', opacity: upgradeBusy ? 0.6 : 1 }}
+                      >
+                        {upgradeBusy ? 'UPGRADING…' : 'CONFIRM'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setUpgrading(false); setUpgradeError(''); }}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                      >
+                        CANCEL
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
