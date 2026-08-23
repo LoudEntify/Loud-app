@@ -6,6 +6,7 @@ import { Bell, GearSix } from '@phosphor-icons/react';
 import ImagePlaceholder from './ImagePlaceholder';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import EmptyState from './EmptyState';
+import ScheduleShow from './ScheduleShow';
 import { getSupabase } from '../lib/supabaseClient';
 
 const INK = '#011627';
@@ -136,30 +137,16 @@ export default function ArtistDashboard() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, marginTop: 24, flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 160px', border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', padding: '14px 16px' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>FOLLOWERS</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: INK, marginTop: 4 }}>84.2K</div>
-          </div>
-          <div style={{ flex: '1 1 160px', border: '1px solid rgba(255,159,28,0.4)', boxShadow: '0 0 12px rgba(255,159,28,0.15)', clipPath: 'polygon(0 0,100% 0,100% 100%,calc(100% - 8px) 100%,0 100%)', padding: '14px 16px' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.08em', color: 'rgba(255,159,28,0.8)' }}>TOKENS EARNED</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: INK, marginTop: 4 }}>312K</div>
-          </div>
-          <div style={{ flex: '1 1 160px', border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(0 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%)', padding: '14px 16px' }}>
-            <div style={{ fontSize: 9, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>SIGNAL</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: INK, marginTop: 4 }}>8,420</div>
-          </div>
-        </div>
+        {/* Fake stats removed: FOLLOWERS 84.2K / TOKENS EARNED 312K /
+            SIGNAL 8,420 were invented. Nothing counts followers, tokens
+            or "signal" yet, so there is nothing honest to put here --
+            and inventing an artist's reach is the one number they would
+            most reasonably act on. */}
 
         <div style={{ marginTop: 26 }}>
-          <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>START A SHOW</span>
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, maxWidth: 480 }}>
-            <Link href="/" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', padding: '16px 0', background: 'rgba(46,196,182,0.12)', boxShadow: '0 0 14px rgba(46,196,182,0.25)', borderRadius: 999 }}>
-              <span style={{ fontSize: 12, letterSpacing: '0.1em', fontWeight: 700, color: TEAL }}>SOLO</span>
-            </Link>
-            <Link href="/" style={{ flex: 1, textDecoration: 'none', textAlign: 'center', padding: '16px 0', background: 'rgba(231,29,54,0.12)', boxShadow: '0 0 14px rgba(231,29,54,0.25)', borderRadius: 999 }}>
-              <span style={{ fontSize: 12, letterSpacing: '0.1em', fontWeight: 700, color: RED }}>VERSUS</span>
-            </Link>
+          <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SHOWS</span>
+          <div style={{ marginTop: 12 }}>
+            <ScheduleShow />
           </div>
         </div>
 
