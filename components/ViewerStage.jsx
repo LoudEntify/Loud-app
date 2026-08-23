@@ -58,7 +58,8 @@ export default function ViewerStage({
         )}
 
         <TopBar
-          label={isVersus ? 'LIVE · VERSUS' : 'LIVE'}
+          label="LIVE"
+          performanceMode={performanceMode}
           maximized={maximized}
           onToggleMaximize={onToggleMaximize}
         />

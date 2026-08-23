@@ -546,7 +546,7 @@ function ShotFadeLayer({ trackRef, command, placeholder, instant, displayed, zIn
 // resolution: hold the frozen frame with the lost treatment until the
 // artist cuts away or the camera revives. Explicitly NOT a re-pick --
 // silently substituting a live camera is the oscillation this replaces.
-export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect, lostOverlay, activeImpaired }) {
+export function ShotVideo({ candidates, activeTrackRef, command, placeholder, onReselect, lostOverlay, activeImpaired, showEnded }) {
   const candidateKeysSignature = candidates.map(trackKey).join('|');
 
   const [layerTracks, setLayerTracks] = useState(() => {
@@ -674,7 +674,7 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
   const [showFrozen, setShowFrozen] = useState(false);
 
   useEffect(() => {
-    if (displayedKey === null) return undefined;
+    if (displayedKey === null || showEnded) return undefined;
     const id = setInterval(() => {
       const container = containerRef.current;
       const canvas = frozenCanvasRef.current;
@@ -694,7 +694,7 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [displayedKey]);
+  }, [displayedKey, showEnded]);
 
   // Show the frozen frame exactly when there is nothing live left to
   // show. With a fallback available the orphan-rescue above promotes it
@@ -704,8 +704,15 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
     // Two ways to end up on the frozen frame, and they are different
     // situations: nothing live is left to show at all, OR the caller has
     // deliberately selected a feed that is currently dead (Test 4).
-    setShowFrozen(hasFrozenFrameRef.current && (layerTracks.size === 0 || !!activeImpaired));
-  }, [layerTracks, activeImpaired]);
+    //
+    // Round C -- but NEVER once the show has ended. A frozen last frame
+    // of a performer is a live-show affordance ("this feed dropped, hold
+    // the picture"); after End Show it is just the performance still
+    // sitting on screen when the ended state should own it.
+    setShowFrozen(
+      !showEnded && hasFrozenFrameRef.current && (layerTracks.size === 0 || !!activeImpaired)
+    );
+  }, [layerTracks, activeImpaired, showEnded]);
 
   // Nothing has ever painted for this slot -- a genuinely blank start,
   // where the placeholder is the right answer.

@@ -204,6 +204,12 @@ export default function BroadcastStage({
             switching={switchingPerformer}
             collapsed={feedsCollapsed}
             onToggleCollapse={onToggleFeedsCollapsed}
+            // Round C -- without this the component can only see "the
+            // active performer's tracks are gone" and always guesses
+            // "Reconnecting", so End Show reads as a dropout. That is
+            // now certain rather than unlikely, because End Show
+            // deliberately unpublishes.
+            showEnded={showEnded}
           />
         ) : (
           <VersusSplit
@@ -213,7 +219,7 @@ export default function BroadcastStage({
           />
         )}
 
-        <TopBar label="YOU'RE LIVE" maximized={maximized} onToggleMaximize={onToggleMaximize} />
+        <TopBar label="YOU'RE LIVE" performanceMode={performanceMode} maximized={maximized} onToggleMaximize={onToggleMaximize} />
       </div>
 
       {/* Build 3c -- mic-cam + the deck's own toggle/divider/wrapper are

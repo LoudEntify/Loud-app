@@ -53,11 +53,16 @@ const MAX_AUTOMATIC_RECOVERIES = 3;
 // broke".
 const CAMERA_LOST_OVERLAY = (
   <div
+    // Fix (D) -- top-centre, not the bottom band. The bottom is
+    // contested by the control cluster, the feeds strip and the deck,
+    // and the pill was landing on top of the controls. Top-centre is the
+    // one horizontal band with nothing else in it: the topbar owns the
+    // corners, not the middle.
     style={{
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: 16,
+      top: 56,
       display: 'flex',
       justifyContent: 'center',
     }}
@@ -355,6 +360,42 @@ function probeWithTimeout(room) {
       );
     }),
   ]).finally(() => clearTimeout(timer));
+}
+
+// Round C -- the artist's own camera after End Show: alive locally,
+// publishing nothing. Covers the stage so no cross-feeds remain on
+// screen (the ruling: ended state only), and sits below the lifecycle
+// banners so the ended messaging still reads on top.
+//
+// Attaches the retained LocalVideoTrack directly rather than going
+// through VideoTrack/TrackReference: this track is deliberately no
+// longer published, so it has no publication for a TrackReference to
+// point at.
+function EndedSelfView({ track }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!track || !el) return undefined;
+    track.attach(el);
+    return () => {
+      try {
+        track.detach(el);
+      } catch {
+        // detach on an already-torn-down element is not worth throwing over
+      }
+    };
+  }, [track]);
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 8, background: '#011627', overflow: 'hidden' }}>
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+    </div>
+  );
 }
 
 function classifyDirectorStartReason(showId, role) {
@@ -1058,7 +1099,14 @@ export default function LiveDemo() {
   // the show is over and the ended card is showing. Keeping the camera
   // alive locally while off air is the broadcast window's job
   // (docs/BUILD_AUDIT_2026-08.md G.1), not this fix's.
-  const publishesVideo = conn.assignedRole !== 'viewer' && !broadcastEnded;
+  // Round C -- broadcastEnded NO LONGER gates this. Gating the `video`
+  // prop made LiveKitRoom call setCameraEnabled(false), which stops the
+  // camera DEVICE, and the ruling is that each artist keeps their own
+  // local self-view after the show with zero publishing. Transmission is
+  // stopped explicitly instead (unpublishTrack with stopOnUnpublish
+  // false, in the ended effect), and re-asserted on SignalConnected so
+  // LiveKitRoom cannot put it back on air.
+  const publishesVideo = conn.assignedRole !== 'viewer';
   // Camfeed phones are propped to film the artist -- rear by default.
   // The artist's own device defaults to front so they can see themselves.
   const defaultFacingMode = isCamFeedRole ? 'environment' : 'user';
@@ -2112,6 +2160,22 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       if (pub?.isMuted && !showEndedRef.current) {
         pub.unmute();
       }
+      // Round C -- LiveKitRoom's own SignalConnected handler calls
+      // setCameraEnabled(!!video), and `video` stays truthy after the
+      // show so the camera DEVICE keeps running for the local self-view.
+      // That means any reconnect would put the camera back ON AIR. Take
+      // it off again, immediately, without stopping the device.
+      if (showEndedRef.current) {
+        const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+        if (camPub?.track) {
+          try {
+            await room.localParticipant.unpublishTrack(camPub.track, false);
+            logHealthEvent('video_reunpublished_after_end', {});
+          } catch (err) {
+            logHealthEvent('video_reunpublished_after_end', { action: 'failed', error: String(err?.message || err) });
+          }
+        }
+      }
     }
     room.on(RoomEvent.SignalConnected, onSignalConnected);
     return () => room.off(RoomEvent.SignalConnected, onSignalConnected);
@@ -2222,10 +2286,50 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     setFacingMode(next);
   }, [facingMode, room]);
 
+  // Round C -- LEAVE must release the DEVICES, not just the room.
+  // room.disconnect() alone tears down the connection but can leave the
+  // underlying MediaStreamTracks running, which is what keeps the camera
+  // light on after someone has left. Same privacy class as the End Show
+  // audio leak: "nobody is receiving it" is not the same as "the camera
+  // is off", and the light is what the artist actually trusts.
+  //
+  // Explicit stop() on every local track, plus the Web Audio graph's own
+  // raw input, because the processed track published to LiveKit is a
+  // MediaStreamDestination -- stopping it does NOT release the
+  // microphone that feeds the graph.
+  const releaseLocalDevices = useCallback(() => {
+    try {
+      room.localParticipant?.trackPublications?.forEach((pub) => {
+        try {
+          pub.track?.stop();
+        } catch {
+          // one bad track must not prevent the others being released
+        }
+      });
+    } catch {
+      // never let cleanup throw out of a leave/failure path
+    }
+    try {
+      const handle = audioHandleRef.current;
+      handle?.rawStream?.getTracks?.().forEach((t) => t.stop());
+      handle?.processedTrack?.stop?.();
+      handle?.audioContext?.close?.();
+    } catch {
+      // same
+    }
+    try {
+      endedSelfViewTrack?.stop?.();
+    } catch {
+      // same
+    }
+    logHealthEvent('local_devices_released', {});
+  }, [room, endedSelfViewTrack]);
+
   const leaveCall = useCallback(() => {
+    releaseLocalDevices();
     room.disconnect();
     setLeft(true);
-  }, [room]);
+  }, [room, releaseLocalDevices]);
 
   // SHOW_LIVE/SHOW_ENDED receipt (SHOW_LIFECYCLE_SPEC.md 3a/L3) -- belt-
   // and-braces sync for clients whose own cached `show` row hasn't
@@ -2284,7 +2388,21 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // (see the L1 polling fix) -- so treat EITHER the local derivation OR
   // a SHOW_LIVE/SHOW_ENDED receipt as authoritative, per 3a. 'ended'
   // wins over everything else; it's the only terminal state.
-  const displayShowState = receivedShowEnded
+  // Round C / Finding 3 -- `showState === 'ended'` is now terminal here
+  // too, not just a received SHOW_ENDED.
+  //
+  // THE BUG: data messages are not echoed to their sender, so the artist
+  // who clicks End Show never receives their own SHOW_ENDED. On their
+  // client receivedShowEnded stayed false while receivedShowLive was
+  // true (set from the OTHER performer's SHOW_LIVE in a versus show) --
+  // and receivedShowLive sat AHEAD of showState in this chain. So the
+  // one person who ended the show was the one client that never left
+  // 'live': stale LIVE banner, live END SHOW button, and SpotlightStage
+  // reading the now-unpublished feeds as "Reconnecting performer A…".
+  //
+  // The comment below always said 'ended' wins over everything because
+  // it is the only terminal state. This makes the code agree with it.
+  const displayShowState = receivedShowEnded || showState === 'ended'
     ? 'ended'
     : receivedShowLive
       ? 'live'
@@ -2309,6 +2427,9 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     showEndedRef.current = displayShowState === 'ended';
   }, [displayShowState]);
 
+  // Round C -- the artist's own camera track, retained after the show
+  // ends so their self-view keeps working while nothing transmits.
+  const [endedSelfViewTrack, setEndedSelfViewTrack] = useState(null);
   const audioStoppedForEndRef = useRef(false);
   useEffect(() => {
     // Fix (1d) -- runs for EVERY publishing role, not just the main
@@ -2344,6 +2465,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // locally, zero publishing outside Go Live -> End Show.
         const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
         if (camPub?.track) {
+          // Round C -- retain the track BEFORE unpublishing so the
+          // artist keeps a local self-view. stopOnUnpublish:false leaves
+          // the MediaStreamTrack running; only the transmission stops.
+          setEndedSelfViewTrack(camPub.track);
           await room.localParticipant.unpublishTrack(camPub.track, false);
         }
         onBroadcastEnded?.();
@@ -2397,6 +2522,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // broadcasts SHOW_ENDED for other clients -- receiving that broadcast
   // is L3's job, not built yet.
   const endShow = useCallback(() => {
+    // Round C -- flip THIS client immediately. Belt-and-braces alongside
+    // the terminal-state fix in displayShowState: sending SHOW_ENDED
+    // must transition the sender too, and it cannot rely on the
+    // optimistic row update alone (a versus co-performer's earlier
+    // SHOW_LIVE receipt used to outrank it).
+    setReceivedShowEnded(true);
     onShowUpdate?.((prev) => (prev ? { ...prev, state: 'ended' } : prev));
     onShowWriteErrorChange?.(null);
     // Same reasoning as Go Live: not awaited, resolves in the background,
@@ -2671,7 +2802,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} showEnded={displayShowState === 'ended'} />
       </div>
     );
   };
@@ -3278,6 +3409,9 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           show has ended. Performers/camfeed devices are unaffected --
           always rendered, exactly as before. */}
       {(role !== 'viewer' || displayShowState === 'live') && <RoomAudioRenderer />}
+      {displayShowState === 'ended' && endedSelfViewTrack && (
+        <EndedSelfView track={endedSelfViewTrack} />
+      )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
       {notice && <div className="stage-notice">{notice}</div>}

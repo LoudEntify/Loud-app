@@ -880,7 +880,32 @@ button {
   text-shadow: var(--text-halo);
 }
 
+/* Show-type badge (Solo / Versus) -- same status group as the LIVE
+   label, both roles, every breakpoint. Outline rather than a filled
+   chip: this is persistent context, not an alert, and it sits directly
+   beside the pulsing LIVE dot which already owns the attention in this
+   corner. Teal border + text-halo is the same treatment
+   .live-show-rail-card and .comments-toggle-btn use, so it reads as part
+   of the existing system rather than a new language. */
+.stage-showtype-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid rgba(46, 196, 182, 0.5);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #2ec4b6;
+  text-shadow: var(--text-halo);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 @media (min-width: 1025px) {
+  .stage-showtype-badge {
+    font-size: 8px;
+  }
+
   .stage-live-label {
     font-size: 10px;
   }

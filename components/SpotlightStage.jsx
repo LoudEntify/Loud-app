@@ -26,7 +26,7 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react';
 // removes the z-index collision with .stage-mic-cam that was silently
 // swallowing every tap on a tile (the actual root cause, confirmed via
 // elementsFromPoint before this fix, not guessed).
-export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching, collapsed, onToggleCollapse, reconnectingPlaceholder }) {
+export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching, collapsed, onToggleCollapse, reconnectingPlaceholder, showEnded }) {
   const activePresent = slots.includes(activeSlot);
   const others = slots.filter((s) => s !== activeSlot);
 
@@ -43,7 +43,17 @@ export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch
           // to prevent. Live surfaces keep the default.
           reconnectingPlaceholder ?? (
             <div className="spotlight-reconnecting">
-              <span>Reconnecting {activeSlot ? `performer ${activeSlot.toUpperCase()}` : ''}…</span>
+              {/* Finding 4, live half -- an absent active performer means
+                  two completely different things depending on whether the
+                  show is over. Without showEnded this component can only
+                  see "their tracks are gone" and always guessed
+                  "reconnecting", so End Show read to the other performer
+                  as A having dropped out. */}
+              <span>
+                {showEnded
+                  ? 'Show ended'
+                  : `Reconnecting ${activeSlot ? `performer ${activeSlot.toUpperCase()}` : ''}…`}
+              </span>
             </div>
           )
         )}
