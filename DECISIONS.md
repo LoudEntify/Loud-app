@@ -43,3 +43,29 @@ Every judgment call made without you, with a one-line reason. Newest section at 
 - **The countdown overlay doesn't block.** 50% opacity and `pointer-events: none`, so the artist can still see and fix their framing during the final 60 seconds — which is exactly when they'd want to.
 - **Kit Check releases the camera and mic before handing over to the live page.** Two owners of one device is how you get a black frame on stage.
 - **More fake stats found and removed** while wiring this in: FOLLOWERS 84.2K, TOKENS EARNED 312K, SIGNAL 8,420 on the dashboard.
+
+## 5. B-roll
+
+- **Clips live in the existing recordings bucket under `broll/`.** No second bucket and no second access model to keep in sync — B-roll inherits the private-bucket + signed-URL posture recordings already have.
+- **Owner-only, no public visibility flag.** B-roll is working material, not published content.
+- **Caps are shown before the picker, not after the upload.** 100MB/clip, 500MB/artist, with a quota bar that turns orange past 80% so the ceiling is visible before it blocks anything.
+- **A failed row insert deletes the uploaded object.** Storage and the table can never disagree about what exists.
+- **Live playback into the broadcast is NOT built** — see the summary. Upload, manage, delete and quota are real.
+
+## 6. Recordings grid
+
+- **Poster frames come from the real file** — a muted `<video>` seeked ~1s in via a media fragment — so there is no separate thumbnail pipeline to build, store or invalidate.
+- **Signed URLs are fetched sequentially.** A handful of recordings; firing N signing requests at once buys nothing on an already-rendered page.
+
+## 7. Share + clip range
+
+- **Sharing requires public, and the toggle is on the share page.** A share link to a private recording dead-ends for everyone it's sent to; making them go back to the dashboard to fix that is a trap.
+- **`/watch/[id]` is a server component** so `generateMetadata` produces real preview cards. It reads under RLS, so a private recording can't leak its title through an unfurl.
+- **Instagram is a copy-link button that says so.** Instagram has no web share endpoint; any "share to Instagram" button on the web is a copy-link button in costume.
+- **Clip export is visibly not switched on.** The range picker is real and wired; the export needs a background job runner this stack doesn't have. A button that appears to work and silently does nothing is worse than an honest note.
+
+## 8. Wallet
+
+- **Balance is summed from the ledger, never stored.** A stored balance and a ledger can disagree, and when they do the artist is looking at a number nobody can reconstruct.
+- **There is no insert policy on `wallet_transactions`.** Nothing client-side can credit a balance. Real money movement will write through a service-role route.
+- **Purchase tiers with dollar prices removed.** A price tag that can't be paid invites a fan to try and hit nothing.

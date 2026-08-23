@@ -34,6 +34,11 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const trackHash = searchParams.get('track_hash') || '';
   const artistEmail = normalizeEmail(searchParams.get('artist_email'));
+  // Named cue sheets: `name` selects one sheet from the artist's library
+  // for this track. Omitting it lists every sheet they have for the
+  // track, which is what the picker needs. `list=1` forces list mode.
+  const name = (searchParams.get('name') || '').trim();
+  const listMode = searchParams.get('list') === '1' || !name;
 
   if (!TRACK_HASH_RE.test(trackHash)) {
     return NextResponse.json({ error: 'Invalid track_hash' }, { status: 400 });
@@ -44,22 +49,32 @@ export async function GET(request) {
 
   try {
     const admin = getSupabaseAdmin();
-    const { data, error } = await admin
+    const query = admin
       .from('cue_sheets')
-      .select('id, track_hash, artist_email, track_label, fallback_behaviour, cues, updated_at')
+      .select('id, track_hash, artist_email, name, track_label, fallback_behaviour, cues, updated_at')
       .eq('track_hash', trackHash)
-      .eq('artist_email', artistEmail)
-      .maybeSingle();
+      .eq('artist_email', artistEmail);
+
+    // One sheet by name, or the whole library for this track.
+    const { data: rows, error } = listMode
+      ? await query.order('updated_at', { ascending: false })
+      : await query.eq('name', name).limit(1);
 
     if (error) {
       console.error('[cue-sheets] fetch failed:', error);
       return NextResponse.json({ error: 'Fetch failed' }, { status: 500 });
     }
+    const list = rows || [];
+    // Backwards compatible on purpose: existing callers (AudioDeckPanel's
+    // cue-sheet load) read `sheet` and know nothing about names, so list
+    // mode still returns the most recently updated sheet as `sheet` and
+    // adds `sheets` alongside for the new picker.
+    const data = listMode ? (list[0] ?? null) : (list[0] ?? null);
 
     // No sheet for this track/artist yet is a normal state (a freshly
     // loaded track that's never been authored against), not an error --
     // 200 with a null sheet, not 404.
-    return NextResponse.json({ sheet: data ?? null });
+    return NextResponse.json({ sheet: data ?? null, sheets: list });
   } catch (err) {
     console.error('[cue-sheets] request failed:', err);
     return NextResponse.json(
@@ -108,15 +123,19 @@ export async function POST(request) {
         {
           track_hash: trackHash,
           artist_email: artistEmail,
+          // Defaults to 'Default' so a save from a client that predates
+          // named sheets still lands on a real, selectable row rather
+          // than a null-named one.
+          name: (body.name || 'Default').trim() || 'Default',
           artist_id: auth.user.id,
           track_label: trackLabel,
           fallback_behaviour: fallbackBehaviour,
           cues,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'track_hash,artist_email' }
+        { onConflict: 'track_hash,artist_email,name' }
       )
-      .select('id, track_hash, artist_email, artist_id, track_label, fallback_behaviour, cues, updated_at')
+      .select('id, track_hash, artist_email, artist_id, name, track_label, fallback_behaviour, cues, updated_at')
       .single();
 
     if (error) {

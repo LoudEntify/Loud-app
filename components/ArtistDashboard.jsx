@@ -7,6 +7,7 @@ import ImagePlaceholder from './ImagePlaceholder';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import EmptyState from './EmptyState';
 import ScheduleShow from './ScheduleShow';
+import BRollLibrary from './BRollLibrary';
 import { getSupabase } from '../lib/supabaseClient';
 
 const INK = '#011627';
@@ -31,6 +32,10 @@ export default function ArtistDashboard() {
   const [syncing, setSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState('');
   const [playingId, setPlayingId] = useState(null);
+  // Signed URLs used purely as poster frames. Fetched once per recording
+  // after the list loads -- signing is cheap and these expire on their
+  // own, so there is nothing to invalidate.
+  const [posterUrls, setPosterUrls] = useState({});
   const [playingUrl, setPlayingUrl] = useState(null);
 
   useEffect(() => {
@@ -59,7 +64,30 @@ export default function ArtistDashboard() {
       .select('*')
       .eq('artist_id', artistId)
       .order('recorded_at', { ascending: false });
-    if (!error) setRecordings(data || []);
+    if (!error) {
+      setRecordings(data || []);
+      loadPosters(data || []);
+    }
+  }
+
+  async function loadPosters(list) {
+    const s = await getSession();
+    if (!s) return;
+    // Sequential on purpose: a handful of recordings, and firing N
+    // signing requests at once buys nothing on a page that has already
+    // rendered its layout.
+    for (const rec of list) {
+      try {
+        const res = await fetch(`/api/recordings/${rec.id}/url`, {
+          headers: { Authorization: `Bearer ${s.access_token}` },
+        });
+        if (!res.ok) continue;
+        const { url } = await res.json();
+        if (url) setPosterUrls((prev) => ({ ...prev, [rec.id]: url }));
+      } catch {
+        // a missing poster is cosmetic -- the card still works
+      }
+    }
   }
 
   async function toggleVisibility(recording) {
@@ -150,6 +178,10 @@ export default function ArtistDashboard() {
           </div>
         </div>
 
+        <div style={{ marginTop: 30 }}>
+          <BRollLibrary />
+        </div>
+
         <div style={{ display: 'flex', gap: 32, marginTop: 30, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 320px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -166,7 +198,13 @@ export default function ArtistDashboard() {
               )}
             </div>
             {syncNotice && <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.5)', marginTop: 6 }}>{syncNotice}</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {/* Thumbnail grid, not a list. A recording is a visual
+                thing -- a row of filenames makes an artist open three of
+                them to find the one they meant. Poster frames come from
+                the real file (a muted <video> seeked ~1s in via a media
+                fragment), so there is no separate thumbnail pipeline to
+                build or keep in sync. */}
+            <div style={{ marginTop: 12 }}>
               {!session && (
                 <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Sign in as an artist to view your recordings.</div>
               )}
@@ -174,38 +212,71 @@ export default function ArtistDashboard() {
                 <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>
               )}
               {session && !recordingsLoading && recordings.length === 0 && (
-                <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>No recordings yet -- try Sync recordings after a show.</div>
+                <EmptyState
+                  compact
+                  title="No recordings yet"
+                  body="After a show, hit Sync recordings and your footage lands here."
+                />
               )}
-              {recordings.map((rec) => {
-                const on = rec.visibility === 'public';
-                return (
-                  <div key={rec.id}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', padding: '9px 12px' }}>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 12 }}>
+                {recordings.map((rec) => {
+                  const on = rec.visibility === 'public';
+                  const poster = posterUrls[rec.id];
+                  return (
+                    <div key={rec.id} style={{ border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', overflow: 'hidden' }}>
                       <div
                         onClick={() => handlePlay(rec)}
-                        style={{ width: 44, height: 32, flexShrink: 0, clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)', overflow: 'hidden', cursor: 'pointer' }}
+                        style={{ position: 'relative', height: 116, background: 'rgba(1,22,39,0.06)', cursor: 'pointer', overflow: 'hidden' }}
                       >
-                        <ImagePlaceholder label={playingId === rec.id ? 'Stop' : 'Play'} />
+                        {poster ? (
+                          // eslint-disable-next-line jsx-a11y/media-has-caption
+                          <video
+                            src={`${poster}#t=1`}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <ImagePlaceholder label="VOD" />
+                        )}
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', color: '#fdfffc', background: 'rgba(1,22,39,0.55)', padding: '4px 9px', borderRadius: 999 }}>
+                            {playingId === rec.id ? 'STOP' : 'PLAY'}
+                          </span>
+                        </div>
                       </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
+
+                      <div style={{ padding: '10px 11px' }}>
                         <div style={{ fontSize: 12.5, color: INK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rec.title}</div>
-                        <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)' }}>{new Date(rec.recorded_at).toLocaleDateString()}</div>
+                        <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 2 }}>{new Date(rec.recorded_at).toLocaleDateString()}</div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
+                          <div
+                            onClick={() => toggleVisibility(rec)}
+                            style={{ width: 38, height: 20, flexShrink: 0, cursor: 'pointer', position: 'relative', background: on ? 'rgba(46,196,182,0.15)' : 'rgba(1,22,39,0.06)', border: `1px solid ${on ? 'rgba(46,196,182,0.5)' : 'rgba(1,22,39,0.15)'}`, clipPath: 'polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)' }}
+                          >
+                            <div style={{ position: 'absolute', top: 2, width: 14, height: 14, background: on ? TEAL : 'rgba(1,22,39,0.4)', left: on ? 20 : 2, transition: 'left 0.2s ease', boxShadow: on ? '0 0 8px rgba(46,196,182,0.6)' : 'none' }} />
+                          </div>
+                          <span style={{ fontSize: 8.5, letterSpacing: '0.06em', color: on ? TEAL : 'rgba(1,22,39,0.4)' }}>{on ? 'PUBLIC' : 'PRIVATE'}</span>
+                          <Link
+                            href={`/share/${rec.id}`}
+                            style={{ marginLeft: 'auto', fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, textDecoration: 'none' }}
+                          >
+                            SHARE
+                          </Link>
+                        </div>
                       </div>
-                      <div
-                        onClick={() => toggleVisibility(rec)}
-                        style={{ width: 38, height: 20, flexShrink: 0, cursor: 'pointer', position: 'relative', background: on ? 'rgba(46,196,182,0.15)' : 'rgba(1,22,39,0.06)', border: `1px solid ${on ? 'rgba(46,196,182,0.5)' : 'rgba(1,22,39,0.15)'}`, clipPath: 'polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)' }}
-                      >
-                        <div style={{ position: 'absolute', top: 2, width: 14, height: 14, background: on ? TEAL : 'rgba(1,22,39,0.4)', left: on ? 20 : 2, transition: 'left 0.2s ease', boxShadow: on ? '0 0 8px rgba(46,196,182,0.6)' : 'none' }} />
-                      </div>
-                      <span style={{ fontSize: 8.5, letterSpacing: '0.06em', color: on ? TEAL : 'rgba(1,22,39,0.4)', width: 34 }}>{on ? 'PUBLIC' : 'PRIVATE'}</span>
+
+                      {playingId === rec.id && playingUrl && (
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        <video controls autoPlay src={playingUrl} style={{ width: '100%' }} />
+                      )}
                     </div>
-                    {playingId === rec.id && playingUrl && (
-                      // eslint-disable-next-line jsx-a11y/media-has-caption
-                      <video controls autoPlay src={playingUrl} style={{ width: '100%', marginTop: 6, borderRadius: 4 }} />
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
 
