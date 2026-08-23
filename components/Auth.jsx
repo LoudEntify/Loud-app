@@ -1,14 +1,30 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { signUp, signIn } from '../lib/supabaseAuth';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { signUp, signIn, getSession, getProfile, validateUsername, isUsernameAvailable, normaliseUsername } from '../lib/supabaseAuth';
+import { countryOptions } from '../lib/countries';
+import GenreSelect from './GenreSelect';
 import { setAccountType } from '../lib/mockAccount';
 import './reactions.css';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
+
+// Age is derived from DOB at validation time and never persisted --
+// storing an integer age means storing a number that is wrong tomorrow.
+function ageFrom(dob) {
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age;
+}
+
+const labelStyle = { fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)', fontWeight: 700, marginBottom: 4 };
 
 const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '13px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' };
 
@@ -33,16 +49,46 @@ const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transp
 // starts with genres: [] and picks them later via Settings.
 export default function Auth() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Where to land after a successful auth. Defaults per role, but a
+  // ?next= (set by RequireAuth) wins so a shared show link survives the
+  // detour through this page.
+  const nextParam = searchParams?.get('next') || '';
   const [mode, setMode] = useState('login');
   const [role, setRole] = useState('fan');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [country, setCountry] = useState('');
+  const [genres, setGenres] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   const isSignup = mode === 'signup';
+
+  function destinationFor(dbRole) {
+    if (nextParam && nextParam.startsWith('/')) return nextParam;
+    return dbRole === 'artist' ? '/dashboard' : '/discover';
+  }
+
+  // Already signed in? Don't show a login form. Runs once on mount; the
+  // redirect is `replace` so Back doesn't bounce them straight here again.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const session = await getSession();
+      if (cancelled || !session?.user) return;
+      const { profile } = await getProfile(session.user.id);
+      if (cancelled) return;
+      router.replace(destinationFor(profile?.role));
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function continueAction() {
     setError('');
@@ -50,6 +96,43 @@ export default function Auth() {
     if (!email.trim() || !password) {
       setError('Email and password are required.');
       return;
+    }
+
+    if (isSignup) {
+      if (!fullName.trim()) {
+        setError('Full name is required.');
+        return;
+      }
+      const usernameProblem = validateUsername(username);
+      if (usernameProblem) {
+        setError(`${role === 'artist' ? 'Stage name' : 'Username'}: ${usernameProblem}`);
+        return;
+      }
+      if (!dateOfBirth) {
+        setError('Date of birth is required.');
+        return;
+      }
+      // Age is DERIVED here and never stored -- see DECISIONS.md. 13 is
+      // the floor every major platform uses and the one any later
+      // payout/age gate will build on.
+      const age = ageFrom(dateOfBirth);
+      if (age === null || age < 13) {
+        setError('You must be at least 13 to create an account.');
+        return;
+      }
+      if (age > 120) {
+        setError('Check the date of birth.');
+        return;
+      }
+      if (!country) {
+        setError('Select a country.');
+        return;
+      }
+      const free = await isUsernameAvailable(username);
+      if (!free) {
+        setError(`That ${role === 'artist' ? 'stage name' : 'username'} is taken.`);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -60,7 +143,14 @@ export default function Auth() {
           email: email.trim(),
           password,
           role: dbRole,
-          displayName: displayName.trim() || email.trim(),
+          // display_name is what renders on the stage; default it to the
+          // handle rather than the raw email, which nobody wants shown.
+          displayName: displayName.trim() || normaliseUsername(username),
+          fullName: fullName.trim(),
+          username,
+          dateOfBirth,
+          country,
+          genres,
         });
         if (result.error) {
           setError(result.error.message || 'Sign up failed.');
@@ -72,7 +162,7 @@ export default function Auth() {
           return;
         }
         setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
-        router.push(dbRole === 'artist' ? '/dashboard' : '/profile');
+        router.push(destinationFor(dbRole));
       } else {
         const result = await signIn({ email: email.trim(), password });
         if (result.error) {
@@ -81,7 +171,7 @@ export default function Auth() {
         }
         const dbRole = result.profile?.role;
         setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
-        router.push(dbRole === 'artist' ? '/dashboard' : '/profile');
+        router.push(destinationFor(dbRole));
       }
     } finally {
       setSubmitting(false);
@@ -93,7 +183,7 @@ export default function Auth() {
       <div style={{ width: '100%', maxWidth: 380 }}>
 
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: '-0.01em' }}>Neon Meridian</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: '-0.01em' }}>Loudentify</div>
           <span style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.4)' }}>LIVE MUSIC PLATFORM</span>
         </div>
 
@@ -131,13 +221,63 @@ export default function Auth() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
-              <input
-                placeholder="Display name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                style={inputStyle}
-              />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+              <div>
+                <div style={labelStyle}>FULL NAME</div>
+                <input
+                  placeholder="Your full name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                {/* One column, two labels. Artists think in stage names,
+                    fans think in usernames -- but a single namespace is
+                    what stops the two colliding once handles are public. */}
+                <div style={labelStyle}>{role === 'artist' ? 'STAGE NAME' : 'USERNAME'}</div>
+                <input
+                  placeholder={role === 'artist' ? 'How you appear on stage' : 'Pick a handle'}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
+                  {username ? `loudentify.com/@${normaliseUsername(username)}` : 'Lowercase letters, numbers and underscores.'}
+                </div>
+              </div>
+
+              <div>
+                <div style={labelStyle}>DATE OF BIRTH</div>
+                <input
+                  type="date"
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <div style={labelStyle}>COUNTRY</div>
+                <select
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                >
+                  <option value="">Select a country</option>
+                  {countryOptions().map((c) => (
+                    <option key={c.code} value={c.code}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div style={labelStyle}>GENRES <span style={{ fontWeight: 400, letterSpacing: 0 }}>(optional)</span></div>
+                <GenreSelect value={genres} onChange={setGenres} />
+              </div>
             </div>
           </>
         )}
