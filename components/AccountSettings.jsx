@@ -50,6 +50,31 @@ export default function AccountSettings() {
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeError, setUpgradeError] = useState('');
 
+  // Downgrade. Two-step by construction: the consequences are listed and
+  // a second, explicit confirm is required. A one-click role flip that
+  // silently hides an artist's public work would be indefensible.
+  const [downgrading, setDowngrading] = useState(false);
+  const [downgradeBusy, setDowngradeBusy] = useState(false);
+  const [downgradeError, setDowngradeError] = useState('');
+
+  async function becomeViewer() {
+    setDowngradeError('');
+    setDowngradeBusy(true);
+    try {
+      const res = await fetch('/api/profile/become-viewer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) { setDowngradeError(body.error || 'Could not switch your account.'); return; }
+      window.location.href = '/profile';
+    } catch {
+      setDowngradeError('Could not switch your account.');
+    } finally {
+      setDowngradeBusy(false);
+    }
+  }
+
   async function becomeArtist() {
     setUpgradeError('');
     if (!stageName.trim()) { setUpgradeError('Pick a stage name.'); return; }
@@ -228,9 +253,55 @@ export default function AccountSettings() {
               Signed in as an <strong>{isArtist ? 'artist' : 'viewer'}</strong> account
             </div>
             {isArtist ? (
-              <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
-                You have the full artist console on your profile.
-              </div>
+              <>
+                <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
+                  You have the full artist console on your profile.
+                </div>
+
+                {!downgrading ? (
+                  <button
+                    type="button"
+                    onClick={() => setDowngrading(true)}
+                    style={{ marginTop: 12, padding: '10px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                  >
+                    SWITCH TO A VIEWER ACCOUNT
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 12, border: '1px solid rgba(231,29,54,0.4)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: INK }}>Switch to a viewer account?</div>
+                    <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12, color: 'rgba(1,22,39,0.65)', lineHeight: 1.7 }}>
+                      <li>Your public recordings become <strong>private</strong>. Nothing is deleted.</li>
+                      <li>Any <strong>upcoming shows are cancelled</strong>, and anyone holding a slot is told.</li>
+                      <li>Your <strong>wallet balance and history are untouched</strong>.</li>
+                      <li>Your stage name, B-roll and cue sheets are <strong>kept</strong>.</li>
+                      <li>The artist console disappears from your profile.</li>
+                    </ul>
+                    <div style={{ fontSize: 11.5, color: 'rgba(1,22,39,0.55)', marginTop: 10, lineHeight: 1.55 }}>
+                      You can switch back any time with Become an artist, and everything returns as you left it.
+                    </div>
+
+                    {downgradeError && <div style={{ fontSize: 12, color: '#e71d36', marginTop: 10 }}>{downgradeError}</div>}
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={becomeViewer}
+                        disabled={downgradeBusy}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: '#fdfffc', background: '#e71d36', border: 'none', cursor: downgradeBusy ? 'default' : 'pointer', opacity: downgradeBusy ? 0.6 : 1 }}
+                      >
+                        {downgradeBusy ? 'SWITCHING…' : 'YES, SWITCH TO VIEWER'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDowngrading(false); setDowngradeError(''); }}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                      >
+                        KEEP MY ARTIST ACCOUNT
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.55)', marginTop: 8, lineHeight: 1.55 }}>

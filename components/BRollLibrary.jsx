@@ -79,34 +79,21 @@ export default function BRollLibrary() {
 
     setBusy(true);
     try {
-      const supabase = getSupabase();
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `broll/${session.user.id}/${Date.now()}-${safeName}`;
+      // Uploads go through the service-role route now. The browser has no
+      // write access to either the bucket or the table -- see
+      // app/api/broll/upload for why the direct-from-client version was
+      // always going to be refused.
+      const form = new FormData();
+      form.append('file', file);
 
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
-        contentType: file.type,
-        upsert: false,
+      const res = await fetch('/api/broll/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: form,
       });
-      if (upErr) {
-        setError(upErr.message || 'Upload failed.');
-        return;
-      }
-
-      const { error: rowErr } = await supabase.from('broll_clips').insert({
-        artist_id: session.user.id,
-        storage_path: path,
-        title: file.name.replace(/\.[^.]+$/, ''),
-        size_bytes: file.size,
-      });
-      if (rowErr) {
-        // Roll the object back so storage and the table cannot disagree
-        // about what exists.
-        await supabase.storage.from(BUCKET).remove([path]);
-        setError(
-          /relation .* does not exist|schema cache/i.test(rowErr.message || '')
-            ? 'B-roll needs docs/broll_migration.sql to be run first.'
-            : (rowErr.message || 'Could not save that clip.')
-        );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || 'Upload failed.');
         return;
       }
 
@@ -121,9 +108,13 @@ export default function BRollLibrary() {
     setError('');
     setBusy(true);
     try {
-      const supabase = getSupabase();
-      await supabase.storage.from(BUCKET).remove([clip.storage_path]);
-      await supabase.from('broll_clips').delete().eq('id', clip.id);
+      const res = await fetch('/api/broll/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ id: clip.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body.error || 'Could not delete that clip.'); return; }
       await load(session.user.id);
     } finally {
       setBusy(false);

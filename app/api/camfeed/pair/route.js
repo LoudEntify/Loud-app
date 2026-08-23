@@ -105,19 +105,30 @@ export async function POST(request) {
     const code = code6();
     const expiresAt = new Date(Date.now() + PAIRING_TTL_MS).toISOString();
 
-    const { error: insErr } = await admin.from('camfeed_pairings').insert({
-      show_id: body.show_id || null,
+    // show_id is OMITTED rather than sent as null when there is no
+    // upcoming show. A rehearsal is not tied to a show -- an artist
+    // should be able to pair a camera before scheduling anything -- and
+    // omitting lets a column default apply if one is ever added.
+    const pairingRow = {
       slot,
       code,
       created_by: auth.user.id,
       expires_at: expiresAt,
-    });
+    };
+    if (body.show_id) pairingRow.show_id = body.show_id;
+
+    const { error: insErr } = await admin.from('camfeed_pairings').insert(pairingRow);
     if (insErr) {
       console.error('[camfeed/pair] insert failed:', insErr);
+      // The real Postgres message goes back to the client. A generic
+      // "Could not create a pairing code" is what cost a test sitting:
+      // the actual cause was a NOT NULL on show_id, which the message
+      // would have named immediately. Nothing here is sensitive -- it is
+      // the caller's own failed write.
       return NextResponse.json(
         { error: /relation .* does not exist|schema cache/i.test(insErr.message || '')
             ? 'Camera pairing needs docs/show_access_migration.sql to be run first.'
-            : 'Could not create a pairing code.' },
+            : `Could not create a pairing code — ${insErr.message}` },
         { status: 500 }
       );
     }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getSupabase } from '../lib/supabaseClient';
-import { getSession } from '../lib/supabaseAuth';
+import { getSession, getProfile } from '../lib/supabaseAuth';
 import EmptyState from './EmptyState';
 import {
   isWindowOpen,
@@ -41,6 +41,11 @@ const labelStyle = { fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,3
 // that opens a connection, and it cannot be pressed before the window.
 export default function ScheduleShow() {
   const [session, setSession] = useState(null);
+  // Needed to populate shows.artist_name -- a pre-accounts denormalised
+  // column that is still read by the recordings-sync title builder and
+  // the viewer holding screen. Identity comes from artist_id now, but
+  // leaving that column empty would quietly break both of them.
+  const [artistName, setArtistName] = useState('');
   const [shows, setShows] = useState(null);
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
@@ -79,8 +84,13 @@ export default function ScheduleShow() {
       const s = await getSession();
       if (cancelled) return;
       setSession(s);
-      if (s?.user) await load(s.user.id);
-      else setShows([]);
+      if (s?.user) {
+        const { profile } = await getProfile(s.user.id);
+        if (!cancelled) setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
+        await load(s.user.id);
+      } else {
+        setShows([]);
+      }
     })();
     return () => { cancelled = true; };
   }, [load]);
@@ -105,12 +115,17 @@ export default function ScheduleShow() {
         state: 'scheduled',
         title: form.title.trim() || null,
         performance_mode: form.mode,
+        // Legacy column, populated rather than left null -- see the
+        // artistName note above.
+        artist_name: artistName || 'Artist',
       });
       if (err) {
+        // Show the real database message. A generic string here is what
+        // turned a one-line constraint failure into a test sitting.
         setError(
           /column .* does not exist|schema cache/i.test(err.message || '')
             ? 'Scheduling needs docs/scheduling_migration.sql to be run first.'
-            : (err.message || 'Could not schedule that show.')
+            : `Could not schedule that show — ${err.message || 'unknown error'}`
         );
         return;
       }
