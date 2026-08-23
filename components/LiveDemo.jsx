@@ -435,7 +435,6 @@ export default function LiveDemo() {
   // overwrites role with whatever slot the server's code check
   // resolves, once a claim actually succeeds.
   const [role, setRole] = useState('viewer'); // 'viewer' | 'performer' | 'a' | 'b' (post-claim only) | 'camfeed-a' | 'camfeed-b'
-  const [performerCode, setPerformerCode] = useState('');
   // Accounts & Identity Day 1 -- artist login/signup branch at the gate.
   // gateAudience is the new top-level choice: 'viewer' keeps the
   // existing anonymous form (below) byte-for-byte; 'artist' is the new
@@ -717,43 +716,40 @@ export default function LiveDemo() {
     handleJoin();
   }
 
-  // Stage 3 (MULTI_PERFORMER_SPEC.md) -- replaces handleJoin for the
-  // performer path entirely. Deliberately does NOT call /api/token:
-  // /api/performer/claim-slot mints its own LiveKit AccessToken, gated
-  // on the code rather than the client asserting a slot letter. Reuses
-  // handleGoLive's optimistic soundcheck write since a performer join
-  // is still a "go live" action either way.
+  // PERFORMER CODES ARE RETIRED (post-wipe access ruling).
+  //
+  // Solo: the scheduling artist's ACCOUNT is the authorization -- logged
+  // in, owns this show, inside the window. There is no code anywhere in
+  // this path any more.
+  // Versus: slot B is bound by accepting an invite at /join/[token]; by
+  // the time that performer reaches this screen the binding already
+  // exists, so they are recognised by account too.
+  //
+  // Both go through /api/performer/join-show, which re-checks ownership,
+  // invite binding and the broadcast window SERVER-side -- the button
+  // state here is a courtesy, not the rule.
   async function handleClaimAndGoLive() {
     setError('');
     setNotice('');
     if (goLiveDisabledReason) return;
-    if (!performerCode.trim()) {
-      setError('Enter your performer code.');
-      return;
-    }
     if (!artistSession) {
-      setError('Sign in as an artist to claim a slot.');
+      setError('Sign in to go live.');
       return;
     }
     try {
-      const res = await fetch('/api/performer/claim-slot', {
+      const res = await fetch('/api/performer/join-show', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // claim-slot now verifies this server-side (lib/verifyArtistAuth.js)
-          // and derives claimed_by_email from it -- email is no longer sent
-          // in the body at all.
           Authorization: `Bearer ${artistSession.access_token}`,
         },
         body: JSON.stringify({
           show_id: show?.id,
-          code: performerCode.trim(),
           participantId,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Code not recognized');
-      if (data.warning) setNotice(data.warning);
+      if (!res.ok) throw new Error(data.error || 'Could not join this show');
 
       if (show && show.state === 'scheduled') {
         setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
@@ -1007,12 +1003,9 @@ export default function LiveDemo() {
             // only through this branch now instead of a dropdown option.
             <>
               <p style={{ color: 'rgba(253, 255, 252, 0.7)', fontSize: 13 }}>Signed in as {name || email}</p>
-              <input
-                placeholder="performer code"
-                value={performerCode}
-                onChange={(e) => setPerformerCode(e.target.value)}
-                style={fieldStyle}
-              />
+              {/* No code field. Your account IS the authorization for a
+                  solo show, and a versus opponent is already bound to
+                  slot B by the time they reach this screen. */}
               <button
                 onClick={handleClaimAndGoLive}
                 disabled={!!goLiveDisabledReason}
@@ -1022,7 +1015,7 @@ export default function LiveDemo() {
                   cursor: goLiveDisabledReason ? 'not-allowed' : 'pointer',
                 }}
               >
-                Claim &amp; Go Live
+                Go Live
               </button>
               {goLiveDisabledReason && (
                 <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>{goLiveDisabledReason}</p>

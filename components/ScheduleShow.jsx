@@ -46,6 +46,12 @@ export default function ScheduleShow() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ title: '', date: '', time: '', mode: 'solo' });
+  // Versus invites, keyed by show id. Minted on demand rather than at
+  // schedule time -- an artist may schedule a versus show days before
+  // they know who they are facing.
+  const [invites, setInvites] = useState({});
+  const [inviteBusy, setInviteBusy] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
 
   // One-second clock so the countdown and the GO LIVE button flip on
   // their own, without the artist reloading at the critical moment.
@@ -112,6 +118,22 @@ export default function ScheduleShow() {
       await load(session.user.id);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function createInvite(show) {
+    setInviteBusy(show.id);
+    try {
+      const res = await fetch('/api/performer/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ show_id: show.id }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setError(body.error || 'Could not create an invite.'); return; }
+      setInvites((prev) => ({ ...prev, [show.id]: `${window.location.origin}/join/${body.inviteToken}` }));
+    } finally {
+      setInviteBusy(null);
     }
   }
 
@@ -266,7 +288,8 @@ export default function ScheduleShow() {
             .map((s) => {
               const open = isWindowOpen(s, now);
               return (
-                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)' }}>
+                <div key={s.id} style={{ padding: '11px 13px', border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, color: INK, fontWeight: 600 }}>{s.title || 'Untitled show'}</div>
                     <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>
@@ -285,6 +308,41 @@ export default function ScheduleShow() {
                   }}>
                     {open ? 'WINDOW OPEN' : humanCountdown(msUntilWindow(s, now)).toUpperCase()}
                   </span>
+                </div>
+
+                  {/* Versus needs a second performer, and that is now an
+                      invite bound to an account rather than a code
+                      anyone holding the string could use. */}
+                  {(s.performance_mode === 'versus') && !open && (
+                    <div style={{ marginTop: 8 }}>
+                      {invites[s.id] ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'rgba(1,22,39,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {invites[s.id]}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard?.writeText(invites[s.id]); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }}
+                            style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer' }}
+                          >
+                            {copiedId === s.id ? 'COPIED' : 'COPY'}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => createInvite(s)}
+                          disabled={inviteBusy === s.id}
+                          style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'transparent', border: `1px solid ${TEAL}`, padding: '7px 11px', cursor: 'pointer' }}
+                        >
+                          {inviteBusy === s.id ? 'CREATING…' : 'INVITE OPPONENT'}
+                        </button>
+                      )}
+                      <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 5 }}>
+                        Single use. Whoever accepts it while logged in takes slot B, and it stops working.
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

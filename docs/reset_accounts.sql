@@ -36,15 +36,16 @@
 --   that works for your files BEFORE committing step 3 if those
 --   recordings matter.
 --
+--   * shows / show_slots / cue_sheets rows. Those reference auth.users
+--     WITHOUT `on delete cascade`, so they would BLOCK the delete
+--     outright. Step 2 detaches them; step 5 clears them if you want a
+--     true clean slate.
+--
 -- ─── STEP 0: inventory what you are about to orphan ───────────
 -- select r.id, r.title, r.storage_path, r.recorded_at, r.visibility
 --   from recordings r order by r.recorded_at desc;
 -- -- Save this output somewhere. After step 3 these rows are gone and
 -- -- storage_path is the only way back to the files.
---   * shows / show_slots / cue_sheets rows. Those reference auth.users
---     WITHOUT `on delete cascade`, so they would BLOCK the delete
---     outright. Step 2 detaches them; step 5 clears them if you want a
---     true clean slate.
 
 -- ─── STEP 1: look before you leap ─────────────────────────────
 -- Run this FIRST, on its own. It changes nothing.
@@ -96,12 +97,12 @@ rollback;
 --    where bucket_id = 'recordings'
 --    order by created_at desc;
 --
--- Then, if you want them gone (this is also irreversible):
+--   select distinct bucket_id from storage.objects;
 --
---   delete from storage.objects where bucket_id = 'recordings';
---
--- Avatars live under their own prefix/bucket depending on how you set it
--- up — check `select distinct bucket_id from storage.objects;` first.
+-- ⚠️ DELETING FILES IS NOT A SQL JOB. Storage has a `protect_delete`
+-- trigger, so `delete from storage.objects` is REJECTED -- confirmed the
+-- hard way. Remove files from the Storage section of the Supabase
+-- dashboard, or via the storage API / CLI. Never from the SQL editor.
 
 -- ─── STEP 5: OPTIONAL true clean slate ────────────────────────
 -- Step 2 left shows/slots/cue_sheets in place with null owners. That is
@@ -109,11 +110,13 @@ rollback;
 -- ownerless and will still appear in Discover. If you want them gone
 -- too, run this AFTER step 3 is committed:
 --
+--   -- ORDER MATTERS: participants references shows, so participants
+--   -- must go first or the shows delete fails on a foreign key.
 --   delete from cue_sheets;
 --   delete from show_slots;
---   delete from shows;
---   delete from health_events;
 --   delete from participants;
+--   delete from health_events;
+--   delete from shows;
 
 -- ─── VERIFICATION ─────────────────────────────────────────────
 -- 1. Everything is empty:
