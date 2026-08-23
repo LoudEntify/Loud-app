@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Bell, GearSix } from '@phosphor-icons/react';
 import ImagePlaceholder from './ImagePlaceholder';
-import { getSession } from '../lib/supabaseAuth';
+import { getSession, getProfile } from '../lib/supabaseAuth';
+import EmptyState from './EmptyState';
 import { getSupabase } from '../lib/supabaseClient';
 
 const INK = '#011627';
@@ -13,22 +14,17 @@ const TEAL = '#2ec4b6';
 const ORANGE = '#ff9f1c';
 const RED = '#e71d36';
 
-// Mock data only -- the artist studio home. Both SOLO and VERSUS route
-// into the existing "/" join flow, same as everywhere else that lacks a
-// real per-show broadcast route.
-const SUPPORTERS = [
-  { rank: '01', name: 'kayla_v', amount: '4,200', tag: 'PAID' },
-  { rank: '02', name: 'benji', amount: '3,150', tag: 'PAID' },
-  { rank: '03', name: 'mira.wav', amount: '1,980', tag: 'FREE' },
-  { rank: '04', name: 'dro', amount: '1,410', tag: 'PAID' },
-  { rank: '05', name: 'wesley', amount: '980', tag: 'FREE' },
-];
+// The artist studio home. The five invented supporters with invented
+// paid/free tiers and invented token amounts that used to sit here are
+// gone -- inventing revenue is the single fastest way to make an artist
+// distrust every other number on this page.
 
 export default function ArtistDashboard() {
   // Accounts & Identity Day 2 -- real recordings library, replacing the old
   // CLIP_DEFS mock (same toggle-switch visual it already had, now backed by
   // the `recordings` table instead of local-only state).
   const [session, setSession] = useState(null);
+  const [profileName, setProfileName] = useState('Your studio');
   const [recordings, setRecordings] = useState([]);
   const [recordingsLoading, setRecordingsLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -42,7 +38,11 @@ export default function ArtistDashboard() {
       const s = await getSession();
       if (cancelled) return;
       setSession(s);
-      if (s) await fetchRecordings(s.user.id);
+      if (s) {
+        const { profile } = await getProfile(s.user.id);
+        if (!cancelled && profile) setProfileName(profile.display_name || profile.username || 'Your studio');
+        await fetchRecordings(s.user.id);
+      }
       setRecordingsLoading(false);
     }
     load();
@@ -123,7 +123,7 @@ export default function ArtistDashboard() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
             <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.5)' }}>STUDIO</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: INK, marginTop: 4 }}>Neon Meridian</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: INK, marginTop: 4 }}>{profileName}</div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <Link href="/notifications" style={{ width: 38, height: 38, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, background: 'rgba(1,22,39,0.06)', textDecoration: 'none' }}>
@@ -224,15 +224,12 @@ export default function ArtistDashboard() {
 
           <div style={{ flex: '1 1 320px' }}>
             <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>TOP SUPPORTERS</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
-              {SUPPORTERS.map((s) => (
-                <div key={s.rank} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', border: '1px solid rgba(1,22,39,0.08)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)' }}>
-                  <span style={{ fontSize: 11, color: 'rgba(1,22,39,0.4)', width: 16 }}>{s.rank}</span>
-                  <span style={{ flex: 1, fontSize: 12.5, color: INK }}>{s.name}</span>
-                  <span style={{ fontSize: 9, letterSpacing: '0.06em', color: s.tag === 'PAID' ? ORANGE : 'rgba(1,22,39,0.5)', border: `1px solid ${s.tag === 'PAID' ? 'rgba(255,159,28,0.5)' : 'rgba(1,22,39,0.2)'}`, padding: '3px 7px', clipPath: 'polygon(4px 0,100% 0,100% 100%,0 100%,0 4px)' }}>{s.tag}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: INK }}>{s.amount}</span>
-                </div>
-              ))}
+            <div style={{ marginTop: 12 }}>
+              <EmptyState
+                compact
+                title="No supporters yet"
+                body="Once fans send tokens during your shows, your top supporters appear here."
+              />
             </div>
           </div>
         </div>

@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MagnifyingGlass } from '@phosphor-icons/react';
 import ImagePlaceholder from './ImagePlaceholder';
 import AvatarRing from './AvatarRing';
+import EmptyState from './EmptyState';
+import { getSupabase } from '../lib/supabaseClient';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -12,32 +14,57 @@ const TEAL = '#2ec4b6';
 const ORANGE = '#ff9f1c';
 const RED = '#e71d36';
 
-// Mock data only -- no discovery/search backend exists yet for this pilot.
-const LIVE_SHOWS = [
-  { id: 'live-1', format: 'VERSUS', title: 'Neon Meridian vs Solstice Blue', viewers: '2,140' },
-  { id: 'live-2', format: 'SOLO', title: 'Afterglow: Kilo Wave', viewers: '860' },
-  { id: 'live-3', format: 'VERSUS', title: 'Rhea Cross vs Tempo Nine', viewers: '1,320' },
-  { id: 'live-4', format: 'SOLO', title: 'Marlin Grace unplugged', viewers: '410' },
-];
-
-const GENRES = ['ALL', 'RAP', 'R&B', 'AFROBEATS', 'GOSPEL', 'POP'];
-
-const ARTISTS = [
-  { id: 'art-1', name: 'Neon Meridian', verified: true, stat: '8,420 signal', genre: 'POP' },
-  { id: 'art-2', name: 'Kilo Wave', verified: false, stat: '3,110 signal', genre: 'RAP' },
-  { id: 'art-3', name: 'Rhea Cross', verified: true, stat: '12,880 signal', genre: 'R&B' },
-  { id: 'art-4', name: 'Tempo Nine', verified: false, stat: '1,940 signal', genre: 'AFROBEATS' },
-  { id: 'art-5', name: 'Marlin Grace', verified: true, stat: '5,230 signal', genre: 'GOSPEL' },
-  { id: 'art-6', name: 'Solstice Blue', verified: true, stat: '9,760 signal', genre: 'POP' },
-];
+// Real data only. Six invented artists with invented "signal" counts and
+// four invented live shows used to live here.
+//
+// Artists come from `profiles` where role='artist' -- the public-artist
+// read policy already exposes exactly those rows. Live shows come from
+// `shows`; a row is live when its state is 'soundcheck' and slated_at
+// has passed, which is the same derivation lib/showState.js uses (it is
+// duplicated as a query filter here rather than imported because this is
+// a database filter, not a client-side state machine).
+//
+// Genre filter chips are built from the genres actually present on real
+// artist rows, so the filter can never offer a genre nobody performs.
+// Follower/"signal" counts are absent, not zeroed -- nothing counts them
+// yet, and a wall of "0 signal" reads as a dead platform rather than as
+// an unmeasured one.
 
 export default function DiscoverFeed() {
   const [activeGenre, setActiveGenre] = useState('ALL');
   const [query, setQuery] = useState('');
+  const [artists, setArtists] = useState(null);
+  const [liveShows, setLiveShows] = useState(null);
 
-  const filteredArtists = ARTISTS.filter((a) => {
-    const matchesGenre = activeGenre === 'ALL' || a.genre === activeGenre;
-    const matchesQuery = a.name.toLowerCase().includes(query.trim().toLowerCase());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      try {
+        const [{ data: artistRows }, { data: showRows }] = await Promise.all([
+          supabase.from('profiles').select('id, display_name, username, genres, avatar_url').eq('role', 'artist').limit(120),
+          // select('*') deliberately: title/performance_mode arrive with the
+          // scheduling migration, and naming them before it runs would 400
+          // the whole query. Read defensively below instead.
+          supabase.from('shows').select('*').eq('state', 'soundcheck').limit(20),
+        ]);
+        if (cancelled) return;
+        setArtists(artistRows || []);
+        const now = Date.now();
+        setLiveShows((showRows || []).filter((sh) => new Date(sh.slated_at).getTime() <= now));
+      } catch {
+        if (!cancelled) { setArtists([]); setLiveShows([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const genreChips = ['ALL', ...Array.from(new Set((artists || []).flatMap((a) => a.genres || []))).sort()];
+
+  const filteredArtists = (artists || []).filter((a) => {
+    const name = a.display_name || a.username || '';
+    const matchesGenre = activeGenre === 'ALL' || (a.genres || []).includes(activeGenre);
+    const matchesQuery = name.toLowerCase().includes(query.trim().toLowerCase());
     return matchesGenre && matchesQuery;
   });
 
@@ -64,10 +91,10 @@ export default function DiscoverFeed() {
             <span style={{ fontSize: 11, letterSpacing: '0.12em', color: INK }}>LIVE NOW</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginTop: 14 }}>
-            {LIVE_SHOWS.map((show) => (
+            {(liveShows || []).map((show) => (
               <Link
                 key={show.id}
-                href="/"
+                href="/live"
                 style={{ textDecoration: 'none', display: 'block', position: 'relative', overflow: 'hidden', clipPath: 'polygon(14px 0,100% 0,100% 100%,0 100%,0 14px)', border: '1px solid rgba(1,22,39,0.1)', color: 'inherit' }}
               >
                 <div style={{ position: 'relative', height: 130 }}>
@@ -76,20 +103,26 @@ export default function DiscoverFeed() {
                     <div style={{ width: 5, height: 5, borderRadius: '50%', background: RED, boxShadow: `0 0 6px ${RED}` }} />
                     <span style={{ fontSize: 9, letterSpacing: '0.1em', color: RED }}>LIVE</span>
                   </div>
-                  <div style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, letterSpacing: '0.06em', color: INK, background: 'rgba(253,255,252,0.6)', padding: '3px 7px' }}>{show.format}</div>
+                  <div style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, letterSpacing: '0.06em', color: INK, background: 'rgba(253,255,252,0.6)', padding: '3px 7px' }}>
+                    {show.performance_mode === 'versus' ? 'VERSUS' : 'SOLO'}
+                  </div>
                 </div>
                 <div style={{ padding: '10px 12px' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: INK, lineHeight: 1.25 }}>{show.title}</div>
-                  <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.5)', marginTop: 4 }}>{show.viewers} watching</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: INK, lineHeight: 1.25 }}>{show.title || 'Live show'}</div>
                 </div>
               </Link>
             ))}
           </div>
+          {liveShows !== null && liveShows.length === 0 && (
+            <div style={{ marginTop: 14 }}>
+              <EmptyState compact title="Nobody is live right now" body="Scheduled shows appear here the moment they start." />
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 32, gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {GENRES.map((label) => {
+            {genreChips.map((label) => {
               const active = label === activeGenre;
               return (
                 <button
@@ -121,26 +154,35 @@ export default function DiscoverFeed() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 22 }}>
-          {filteredArtists.map((artist) => (
-            <Link
-              key={artist.id}
-              href="/artist"
-              style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 14, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: '12px 14px', color: 'inherit' }}
-            >
-              <AvatarRing name={artist.name} size={72} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14.5, fontWeight: 600, color: INK }}>{artist.name}</span>
-                  {artist.verified && (
-                    <span style={{ fontSize: 8, letterSpacing: '0.06em', color: TEAL, background: 'rgba(46,196,182,0.12)', border: '1px solid rgba(46,196,182,0.5)', padding: '2px 5px' }}>V</span>
+          {filteredArtists.map((artist) => {
+            const name = artist.display_name || artist.username || 'Artist';
+            return (
+              <Link
+                key={artist.id}
+                href={`/artist/${artist.id}`}
+                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 14, border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: '12px 14px', color: 'inherit' }}
+              >
+                <AvatarRing name={name} size={72} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600, color: INK }}>{name}</div>
+                  {artist.username && (
+                    <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>@{artist.username}</div>
+                  )}
+                  {(artist.genres || []).length > 0 && (
+                    <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.4)', marginTop: 2 }}>{(artist.genres || []).join(' · ')}</div>
                   )}
                 </div>
-                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>{artist.stat} &middot; {artist.genre}</div>
-              </div>
-            </Link>
-          ))}
-          {filteredArtists.length === 0 && (
-            <div style={{ fontSize: 13, color: 'rgba(1,22,39,0.4)', padding: '12px 2px' }}>No artists match &ldquo;{query}&rdquo;.</div>
+              </Link>
+            );
+          })}
+          {artists !== null && filteredArtists.length === 0 && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EmptyState
+                compact
+                title={query ? `No artists match “${query}”` : 'No artists yet'}
+                body={query ? 'Try a different search.' : 'Artist accounts appear here as they sign up.'}
+              />
+            </div>
           )}
         </div>
 

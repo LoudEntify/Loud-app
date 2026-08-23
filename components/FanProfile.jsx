@@ -1,6 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import EmptyState from './EmptyState';
+import { getSession, getProfile } from '../lib/supabaseAuth';
 import { Bell, GearSix } from '@phosphor-icons/react';
 import AvatarRing from './AvatarRing';
 
@@ -9,28 +12,45 @@ const PORCELAIN = '#fdfffc';
 const ORANGE = '#ff9f1c';
 const RED = '#e71d36';
 
-// Mock data only -- single hardcoded fan identity (Jordan Reyes), same
-// mock user Account Settings edits and Auth signs in as.
-const FAVORITES = [
-  { id: 'fav-1', name: 'Neon Meridian' },
-  { id: 'fav-2', name: 'Kilo Wave' },
-  { id: 'fav-3', name: 'Rhea Cross' },
-  { id: 'fav-4', name: 'Tempo Nine' },
-  { id: 'fav-5', name: 'Solstice Blue' },
-];
+// Real identity only. The hardcoded fan (Jordan Reyes) and their five
+// invented favourite artists are gone.
+//
+// Stats are ABSENT rather than zeroed: shows-watched and reactions-sent
+// are not counted anywhere yet, and printing "0" claims a measurement
+// that isn't happening. Favourites have no backing table yet either, so
+// that panel states plainly what it will hold.
 
 export default function FanProfile() {
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const session = await getSession();
+      if (cancelled || !session?.user) return;
+      const { profile: p } = await getProfile(session.user.id);
+      if (!cancelled) setProfile(p);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const name = profile?.display_name || profile?.full_name || 'Your profile';
+  const handle = profile?.username ? `@${profile.username}` : 'no handle yet';
+  const genreLabel = (profile?.genres || [])[0];
+
   return (
     <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px 60px' }}>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <AvatarRing name="Jordan Reyes" size={82} gradient="linear-gradient(135deg,#2ec4b6,#17847a)" />
+            <AvatarRing name={name} size={82} gradient="linear-gradient(135deg,#2ec4b6,#17847a)" />
             <div>
-              <div style={{ fontSize: 21, fontWeight: 700, color: INK }}>Jordan Reyes</div>
-              <span style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>@jordanreyes &middot; FAN</span>
-              <div style={{ marginTop: 8, display: 'inline-block', fontSize: 9.5, letterSpacing: '0.06em', color: ORANGE, background: 'rgba(255,159,28,0.1)', border: '1px solid rgba(255,159,28,0.5)', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)', padding: '4px 9px' }}>PREFERS AFROBEATS</div>
+              <div style={{ fontSize: 21, fontWeight: 700, color: INK }}>{name}</div>
+              <span style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>{handle} &middot; FAN</span>
+              {genreLabel && (
+                <div style={{ marginTop: 8, display: 'inline-block', fontSize: 9.5, letterSpacing: '0.06em', color: ORANGE, background: 'rgba(255,159,28,0.1)', border: '1px solid rgba(255,159,28,0.5)', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)', padding: '4px 9px' }}>PREFERS {genreLabel.toUpperCase()}</div>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -49,30 +69,21 @@ export default function FanProfile() {
 
         <div style={{ display: 'flex', gap: 24, marginTop: 32, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div style={{ flex: 1, border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', padding: '14px 16px' }}>
-                <div style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>SHOWS WATCHED</div>
-                <div style={{ fontSize: 22, fontWeight: 600, color: INK, marginTop: 4 }}>142</div>
-              </div>
-              <div style={{ flex: 1, border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(0 0,100% 0,100% 100%,calc(100% - 8px) 100%,0 100%)', padding: '14px 16px' }}>
-                <div style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>REACTIONS SENT</div>
-                <div style={{ fontSize: 22, fontWeight: 600, color: INK, marginTop: 4 }}>3,904</div>
-              </div>
-            </div>
             <Link href="/messages" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0', background: 'rgba(1,22,39,0.06)', borderRadius: 999 }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: INK }}>MESSAGES</span>
             </Link>
           </div>
 
           <div style={{ flex: '1.4 1 320px' }}>
-            <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>TOP 5 FAVORITE ARTISTS</span>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginTop: 14 }}>
-              {FAVORITES.map((fav) => (
-                <Link key={fav.id} href="/artist" style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <AvatarRing name={fav.name} size={92} />
-                  <span style={{ fontSize: 8.5, color: 'rgba(1,22,39,0.6)', textAlign: 'center' }}>{fav.name}</span>
-                </Link>
-              ))}
+            <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>FAVOURITE ARTISTS</span>
+            <div style={{ marginTop: 14 }}>
+              <EmptyState
+                compact
+                title="No favourites yet"
+                body="Artists you follow will appear here."
+                action="FIND ARTISTS"
+                actionHref="/discover"
+              />
             </div>
           </div>
         </div>

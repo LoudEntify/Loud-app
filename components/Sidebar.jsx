@@ -88,7 +88,7 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
           </button>
         )}
         <div className="sidebar-header">
-          <div className="sidebar-title">Neon Meridian</div>
+          <div className="sidebar-title">Loudentify</div>
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
         </div>
         <div className="sidebar-nav">

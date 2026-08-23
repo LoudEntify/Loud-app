@@ -13,13 +13,12 @@ const TEAL = '#2ec4b6';
 // treats VOD playback as its own full-bleed surface like the live viewer.
 // The scrub bar and dual-cam split are static -- there's no real seekable
 // media here, just the archived-chat framing.
-const COMMENTS = [
-  { user: 'kayla_v', text: 'this beat is insane', indent: 0, isReply: false, textColor: PORCELAIN },
-  { user: 'dro', text: '"drop the bass NOW"', indent: 18, isReply: true, textColor: TEAL },
-  { user: 'mira.wav', text: 'kilo wave camera work is clean', indent: 0, isReply: false, textColor: PORCELAIN },
-  { user: 'benji', text: 'go loud lets get it', indent: 0, isReply: false, textColor: PORCELAIN },
-  { user: 'wesley', text: '"that transition was crazy"', indent: 18, isReply: true, textColor: TEAL },
-];
+// Archived chat is EMPTY, not invented. Live comments are not persisted
+// anywhere yet (they exist only in memory over the data channel during a
+// show), so there is nothing real to replay -- and five fake fans
+// cheering a recording is exactly the kind of fabricated activity this
+// round removed everywhere else.
+const COMMENTS = [];
 
 export default function VODPlayback() {
   return (
@@ -66,6 +65,9 @@ export default function VODPlayback() {
             <div style={{ width: 32, height: 3, background: 'rgba(253,255,252,0.2)' }} />
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '4px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {COMMENTS.length === 0 && (
+              <div style={{ fontSize: 11, color: 'rgba(253,255,252,0.35)', padding: '8px 2px' }}>No archived chat for this recording.</div>
+            )}
             {COMMENTS.map((c, i) => (
               <div key={i} style={{ display: 'flex', gap: 6, paddingLeft: c.indent }}>
                 {c.isReply && <div style={{ color: 'rgba(253,255,252,0.35)', fontSize: 12, lineHeight: 1.4, flexShrink: 0 }}>&#8627;</div>}
