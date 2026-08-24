@@ -6,38 +6,60 @@ own room, recorded into its own room, watched by someone who followed a
 link to it. Until this passes, "scheduled shows" is a form, not a
 feature.
 
-**Preview:** https://loud-8ngyk06dc-korey-alashe.vercel.app
-(branch `feature/overnight-product-round`, commit `ab266cf`, preview
+**Preview:** https://loud-lh1ehflyp-korey-alashe.vercel.app
+(branch `feature/overnight-product-round`, commit `109a5f2`, preview
 target — not production, not merged to main.)
 
-**Verified before writing this:** the served `/live` bundle on that
-deployment contains zero occurrences of `pilot-room` and does contain
-the new resolution path (`get("show")`, `performer/join-show`,
-`room_name`). That is a bundle check, not a behaviour check — everything
-below is still a prediction from reading code until you run it.
+**Verified before handing this back (round 2, after the crash):**
 
-**No migration this round.** Nothing in this change adds or alters a
-column. `health_events.show_id` and `shot_commands.show_id` are both
-`text` and already carry a room name, which is why per-show rooms need
-no schema change. You can skip the usual pre-flight SQL ritual — but if
-you want the one-line confirmation, `select count(*) from shows;` is
-enough to prove you're pointed at the right database.
+- `/live?show=<uuid>` **loaded and rendered** on this deployment via the
+  protection bypass — no client-side exception — and redirected to
+  `/auth?next=%2Flive%3Fshow%3D<uuid>`, i.e. the show id survives the
+  login detour. Screenshot-equivalent: the page title is "Log in ·
+  Loudentify" and the URL carries the encoded `next`.
+- The crash site itself, checked **in the deployed minified artifact**:
+  in the old chunk the dependency-array reference sat 827 bytes *before*
+  its declaration (the TDZ that threw `Cannot access 'tP' before
+  initialization`); in the new chunk the declaration is 656 bytes
+  *before* the use. Same code path, order inverted.
+- `npm run check:tdz` is green across `app/`, `components/` and `lib/`.
+- `/api/token` with no `room` returns 400 `{"error":"room is required"}`
+  on the live deployment — the pilot-room default is gone at runtime,
+  not just in the bundle.
+
+**What I still cannot verify myself, stated plainly:** reaching
+`RoomInner` — the component that crashed — requires being signed in, and
+I'm not able to enter a password into a login form. So the crash fix is
+proven by the artifact and the static check, not by my having stood on
+the stage. Step 2 below is still the first time a human sees it work.
+
+**One migration, and run it first:**
+`docs/notifications_conflict_target_migration.sql`. It fixes the
+reminders 400 — the existing unique index is *partial*, which `ON
+CONFLICT` cannot infer. The file explains the whole diagnosis and carries
+its own verification query. Idempotent; safe to run twice.
+
+Nothing else in this round touches the schema. `health_events.show_id`
+and `shot_commands.show_id` are both `text` and already carry a room
+name, which is why per-show rooms need no change of their own.
 
 ---
 
 ## Before you start
 
-1. **Preview access.** An anonymous request to the preview URL redirects
-   to Vercel's SSO — Deployment Protection is on. Whatever device you
-   test from needs to be signed in to Vercel in that browser, same as
-   previous rounds. If your phone isn't, say so and I'll either disable
-   protection for previews or mint a bypass link before you start.
-2. **Two accounts.** The viewer half genuinely needs a second one —
+1. **Preview access.** Protection Bypass for Automation is enabled now,
+   so the URL opens directly on any device — no Vercel login needed.
+2. **You will have to log into Loudentify again on this URL.** Every
+   deploy mints a new origin, and the Supabase session lives in that
+   origin's local storage. That is a preview-URL artefact, not the bug
+   from last round — the bug was being asked *twice on the same origin*,
+   once by `/auth` and again by the live page itself.
+3. **Two accounts.** The viewer half genuinely needs a second one —
    `/live` requires an account for everyone now, performer or audience.
    A second browser (or a private window) signed in as a viewer account
    is enough; it does not need to be a second physical device, though
    using one is a better test.
-3. **Nothing to clean up first.** The old `pilot-room` row can stay
+4. **Nothing to clean up first.** The old `pilot-room` row can stay
    where it is. Nothing reads it any more, and leaving it in place is
    itself a small check: if a show ever lands in it again, something
    regressed.
@@ -65,27 +87,42 @@ title) — you'll want its `room_name` in Step 6. It should look like
 ## Step 2 — Kit Check, and the window opening under you
 
 **Do:** Tap KIT CHECK. Start the camera, start the audio. Stay on the
-page and let the clock cross T-30 without touching anything.
+page through T-30 (the window opening) and on toward showtime, without
+touching anything.
 
-**Expect:**
+**Expect — and this is the changed behaviour:**
 - The badge reads NOT CONNECTED — NOTHING IS BEING SENT the whole time.
-- At T-30 the countdown overlay appears: YOUR WINDOW IS OPEN, 60, GOING
-  LIVE, at half opacity with your own framing visible underneath.
-- The countdown runs to zero on its own.
+- **At T-30, nothing happens.** The header line changes to "window is
+  open. You're on at 7:45pm, and this page hands you over 60 seconds
+  before that" — but no countdown, no handover. Last round the 60
+  seconds started here, which is why you were thrown on stage four
+  minutes early. You now get the whole window in Kit Check.
+- **At T-60s** the overlay appears: YOU'RE ON IN, 60, GOING LIVE, at half
+  opacity with your own framing visible underneath.
+- It reaches zero **at showtime**, not before. Worth glancing at a clock
+  at that moment — that alignment is Finding 2's actual pass condition.
+- Bonus check if you have the patience: leave and re-enter Kit Check at
+  ~T-20s. It should show **20**, not a fresh 60.
 
 **This is the moment the last test broke.** What should happen now:
 
 **Expect (the fix):**
 - You land on `/live?show=<the id of the show you scheduled>`.
+- **No crash.** Last round this was "Application error: a client-side
+  exception has occurred" — a temporal-dead-zone `ReferenceError` that
+  had been latent in `RoomInner` since 23 Aug and that nobody could
+  reach until the entry gate came down.
 - **No login form. No password. No email field. No "are you here to
   watch or to perform". No solo/versus picker.** A brief
   "CONNECTING YOU TO THE SHOW…" and then the broadcast stage.
-- You are on stage, publishing, with the soundcheck banner up (the show
-  is in soundcheck until the slated time passes).
+- You are on stage, publishing. Because the handover now lands at
+  showtime rather than half an hour early, the soundcheck banner may
+  flip to live almost immediately — that's correct, not a glitch.
 
-**If a sign-in screen appears at all, stop and screenshot it** — that is
-the exact failure this round exists to kill, and I want to see which
-screen it is before touching anything else.
+**If either a sign-in screen or an application error appears, stop and
+screenshot it.** Those are the two failures this round exists to kill and
+I want to see which one before touching anything else. If it's a crash,
+the console line matters more than the screenshot.
 
 ---
 
@@ -180,13 +217,18 @@ recorded.
 
 ## What I could not verify myself
 
-- **Nothing in this round was exercised in a browser on my end.** Local
-  dev has no Supabase or LiveKit credentials (`.env.local` holds only a
-  Vercel OIDC token), so every screen below the resolution logic is
-  reasoning from code plus a bundle grep on the deployed preview.
+- **Everything behind the login is unexercised on my end.** I can load
+  the preview (bypass) but not sign in — entering a password into a form
+  isn't something I'll do — so Kit Check, the stage, the director and
+  End Show are all still reasoning from code plus the artifact checks
+  listed at the top. Local dev is no help either: `.env.local` holds only
+  a Vercel OIDC token, no Supabase or LiveKit credentials.
 - **The versus path is unexercised.** The invite → slot B → `/live?show=`
   flow is threaded the same way and should work, but this script tests
   solo end to end. Worth its own sitting once solo passes.
+- **The reminders 400 fix is unverified until the migration runs.** The
+  diagnosis is solid (a partial index can't be an `ON CONFLICT` target)
+  but "the SQL did what it says" is your query to run, not mine.
 - **The 60-second countdown → auto-entry handoff is the single riskiest
   moment** and the one I most want a screenshot of either way. If it
   works, that's the platform's new spine. If it doesn't, the shape of the
