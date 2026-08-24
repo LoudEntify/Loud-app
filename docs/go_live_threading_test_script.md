@@ -6,8 +6,8 @@ own room, recorded into its own room, watched by someone who followed a
 link to it. Until this passes, "scheduled shows" is a form, not a
 feature.
 
-**Preview:** https://loud-lh1ehflyp-korey-alashe.vercel.app
-(branch `feature/overnight-product-round`, commit `109a5f2`, preview
+**Preview:** https://loud-267jomcoo-korey-alashe.vercel.app
+(branch `feature/overnight-product-round`, commit `1c4545c`, preview
 target — not production, not merged to main.)
 
 **Verified before handing this back (round 2, after the crash):**
