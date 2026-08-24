@@ -151,9 +151,13 @@ go to `/discover`.
 - Before the slated time: your show is **not** in the live list (a show
   is only "live" once it's in soundcheck *and* past its slated time).
   Paste the link `/live?show=<id>` directly instead — you should get the
-  holding screen with the artist name and a running countdown, and
-  **nothing should connect** (this is deliberate: no LiveKit connection
-  before the window, now on the audience side too).
+  holding screen with the artist name and a running countdown.
+- **Two different holding screens, and the difference is the point.**
+  Before the window opens (earlier than T-30) nothing connects at all —
+  no LiveKit, no cost, just the countdown. Between T-30 and showtime the
+  viewer *is* connected and waiting in the room. Both look the same;
+  only the network tab tells them apart. If you want to see the
+  no-connection one, use the link well before T-30.
 - After the slated time passes: the show appears in Discover's live list
   with its title and your artist name. Tapping it goes to
   `/live?show=<id>`.
@@ -170,7 +174,9 @@ bare `/live`. Before this round the id was dropped here.
 
 ## Step 5 — Live, and the show behaving
 
-**Do:** Let the slated time pass while you're on stage.
+**Do:** Let the slated time pass while you're on stage. With the timing
+fix this is seconds after you arrive, not half an hour — so watch for it
+rather than waiting for it.
 
 **Expect:**
 - Your own screen flips soundcheck → live.
