@@ -479,7 +479,17 @@ export default function LiveDemo() {
   // The one ephemeral stage banner (.stage-notice). Used for the rejoin
   // case: a performer whose device dropped mid-show and came back needs
   // to know they landed on the same slot rather than as a spectator.
+  // Ephemeral is enforced here, not in CSS -- the class has no
+  // auto-dismiss, and a banner parked over the stage for the rest of the
+  // show would be clutter charged for one moment of reassurance.
   const [notice, setNotice] = useState('');
+  const noticeTimerRef = useRef(null);
+  const showNotice = useCallback((text) => {
+    setNotice(text);
+    clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNotice(''), 6000);
+  }, []);
+  useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
   // Phase 4 (redesign) -- true browser Fullscreen API, not the CSS-only
   // "fill the stage box" toggle this used to be (that CSS effect no
   // longer exists at all since Phase 2 made full-bleed the permanent
@@ -781,7 +791,6 @@ export default function LiveDemo() {
   // answer for everyone in the audience, and it routes to the viewer
   // token instead.
   const enterShow = useCallback(async () => {
-    setNotice('');
     if (!show?.id || !show.room_name) return;
 
     const emailValue = session?.user?.email || '';
@@ -836,7 +845,7 @@ export default function LiveDemo() {
             // connection, a second device). join-show rebinds the same
             // slot by account, and saying so out loud is the difference
             // between "I'm back on" and "am I a spectator now?".
-            setNotice(`Back on slot ${String(data.slot).toUpperCase()}.`);
+            showNotice(`Back on slot ${String(data.slot).toUpperCase()}.`);
           }
           return;
         }
@@ -883,7 +892,7 @@ export default function LiveDemo() {
       setBlockedReason(e.message || 'Could not connect to this show.');
       setStep('blocked');
     }
-  }, [show, session, name, registerParticipant]);
+  }, [show, session, name, registerParticipant, showNotice]);
 
   // One entry attempt per mount. The window flipping open is what
   // triggers it for anyone who arrived early -- `now` ticks every
