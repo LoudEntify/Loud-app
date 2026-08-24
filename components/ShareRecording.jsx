@@ -27,6 +27,20 @@ function fmt(sec) {
 // share link to a private recording is a link that 404s for everyone the
 // artist sends it to. The toggle is right here rather than sending them
 // back to the dashboard to find it.
+const socialBtn = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '9px 13px',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  color: INK,
+  background: 'transparent',
+  border: '1px solid rgba(1,22,39,0.2)',
+  textDecoration: 'none',
+};
+
 export default function ShareRecording({ recordingId }) {
   const videoRef = useRef(null);
   const [session, setSession] = useState(null);
@@ -235,16 +249,3 @@ export default function ShareRecording({ recordingId }) {
   );
 }
 
-const socialBtn = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '9px 13px',
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.06em',
-  color: INK,
-  background: 'transparent',
-  border: '1px solid rgba(1,22,39,0.2)',
-  textDecoration: 'none',
-};

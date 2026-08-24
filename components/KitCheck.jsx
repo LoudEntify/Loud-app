@@ -58,33 +58,21 @@ export default function KitCheck() {
   const [artistEmail, setArtistEmail] = useState('');
   const [upcoming, setUpcoming] = useState(null);
   const [now, setNow] = useState(() => Date.now());
-  const [countdown, setCountdown] = useState(null); // seconds remaining, or null
+  // `countdown` is derived from the clock further down, not stored --
+  // this only records that the handover has already fired, so a second
+  // tick can't push the same route twice.
+  const [handingOver, setHandingOver] = useState(false);
 
   // ── Add Camera (the documented LiveKit exception) ──────────
   const [rehearsal, setRehearsal] = useState(null); // pairing session, or null
   const [pairBusy, setPairBusy] = useState(false);
   const [pairError, setPairError] = useState('');
 
-  async function addCamera() {
-    setPairError('');
-    setPairBusy(true);
-    try {
-      const res = await fetch('/api/camfeed/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ slot: 'a', show_id: upcoming?.id || null }),
-      });
-      const body = await res.json();
-      if (!res.ok) { setPairError(body.error || 'Could not start a pairing session.'); return; }
-      // Hand the camera over BEFORE connecting: Kit Check owns it
-      // locally, the rehearsal room needs to publish it, and two owners
-      // of one device produces a black tile.
-      stopCamera();
-      setRehearsal(body);
-    } finally {
-      setPairBusy(false);
-    }
-  }
+  // addCamera moved BELOW stopCamera (it calls it) -- see the crash
+  // post-mortem in DECISIONS.md §17. It was safe here only because a
+  // click handler never runs during render; that is one refactor away
+  // from being the same temporal-dead-zone crash that took the live
+  // page down, and the file shouldn't rely on that distinction holding.
 
   function endRehearsal() {
     setRehearsal(null);
@@ -128,6 +116,27 @@ export default function KitCheck() {
     setFacingMode(next);
     if (camOn) await startCamera(next);
   }, [facingMode, camOn, startCamera]);
+
+  async function addCamera() {
+    setPairError('');
+    setPairBusy(true);
+    try {
+      const res = await fetch('/api/camfeed/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ slot: 'a', show_id: upcoming?.id || null }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setPairError(body.error || 'Could not start a pairing session.'); return; }
+      // Hand the camera over BEFORE connecting: Kit Check owns it
+      // locally, the rehearsal room needs to publish it, and two owners
+      // of one device produces a black tile.
+      stopCamera();
+      setRehearsal(body);
+    } finally {
+      setPairBusy(false);
+    }
+  }
 
   // ── Local audio graph ──────────────────────────────────────
   const startAudio = useCallback(async () => {
@@ -181,34 +190,55 @@ export default function KitCheck() {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Window opens while in Kit Check → countdown, then live ──
-  useEffect(() => {
-    if (!upcoming?.id || countdown !== null) return;
-    if (isWindowOpen(upcoming, now)) setCountdown(COUNTDOWN_SECONDS);
-  }, [upcoming, now, countdown]);
+  // ── The last minute before SHOWTIME → countdown, then live ──
+  //
+  // THIS COUNTED DOWN TO THE WRONG MOMENT. It was keyed to the broadcast
+  // window opening -- which is T-30min -- so a show scheduled five
+  // minutes out had an already-open window the instant Kit Check
+  // loaded, the 60 seconds started immediately, and the artist was
+  // thrown on stage roughly four minutes before their own showtime. Not
+  // a timezone problem and not a wrong constant: the trigger was reading
+  // `windowOpensAt`, and what it wanted was `slated_at`.
+  //
+  // Now: derived from the clock every tick rather than stored and
+  // decremented, so it can't drift, and so opening Kit Check at T-20s
+  // shows twenty seconds rather than a fresh sixty. Still gated on the
+  // window being open -- that rule is about cost and hasn't changed --
+  // but the window merely PERMITS this; showtime is what triggers it.
+  //
+  // The knock-on is the good kind: the artist now gets the full ~29
+  // minutes of the window in Kit Check instead of being yanked out of it
+  // the moment the window opened.
+  const secondsToShowtime = upcoming?.slated_at
+    ? Math.ceil((new Date(upcoming.slated_at).getTime() - now) / 1000)
+    : null;
+
+  const countdownVisible =
+    !!upcoming?.id &&
+    isWindowOpen(upcoming, now) &&
+    secondsToShowtime !== null &&
+    secondsToShowtime <= COUNTDOWN_SECONDS;
+
+  // Clamped at zero so a late arrival (Kit Check opened after showtime,
+  // window still open) reads 0 and hands over immediately rather than
+  // rendering a negative number.
+  const countdown = countdownVisible ? Math.max(0, secondsToShowtime) : null;
 
   useEffect(() => {
-    if (countdown === null) return undefined;
-    if (countdown <= 0) {
-      // Release BEFORE handing over: the live path acquires its own
-      // camera, and two owners of one device is how you get a black
-      // frame on stage.
-      stopCamera();
-      stopAudio();
-      // THE HANDOFF. The id is what makes /live resolve THIS show's room;
-      // it was already being passed correctly before this round -- the
-      // live page just wasn't reading it. `?show=` with an empty value
-      // is no longer possible: the countdown can't start without an id.
-      //
-      // router.push (not a full page load) is deliberate: the Supabase
-      // session lives in this tab and a client-side navigation carries
-      // it, along with everything else already warm.
-      if (upcoming?.id) router.push(`/live?show=${upcoming.id}`);
-      return undefined;
-    }
-    const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
-    return () => clearTimeout(id);
-  }, [countdown, router, upcoming, stopCamera, stopAudio]);
+    if (!countdownVisible || handingOver) return;
+    if (secondsToShowtime > 0) return;
+    setHandingOver(true);
+    // Release BEFORE handing over: the live path acquires its own
+    // camera, and two owners of one device is how you get a black
+    // frame on stage.
+    stopCamera();
+    stopAudio();
+    // THE HANDOFF. The id is what makes /live resolve THIS show's room.
+    // router.push (not a full page load) is deliberate: the Supabase
+    // session lives in this tab and a client-side navigation carries it,
+    // along with everything else already warm.
+    router.push(`/live?show=${upcoming.id}`);
+  }, [countdownVisible, secondsToShowtime, handingOver, router, upcoming, stopCamera, stopAudio]);
 
   if (session === null) {
     return <div style={{ padding: 40, fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>;
@@ -251,7 +281,17 @@ export default function KitCheck() {
         {upcoming && (
           <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)' }}>
             Next show: <strong style={{ color: INK }}>{upcoming.title || 'Untitled show'}</strong>{' '}
-            — window opens {humanCountdown(msUntilWindow(upcoming, now))}.
+            {isWindowOpen(upcoming, now) ? (
+              <>
+                — window is open. You&apos;re on at{' '}
+                <strong style={{ color: INK }}>
+                  {new Date(upcoming.slated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </strong>
+                , and this page hands you over 60 seconds before that.
+              </>
+            ) : (
+              <>— window opens {humanCountdown(msUntilWindow(upcoming, now))}.</>
+            )}
           </div>
         )}
 
@@ -371,7 +411,11 @@ export default function KitCheck() {
             pointerEvents: 'none',
           }}
         >
-          <div style={{ fontSize: 13, letterSpacing: '0.2em', opacity: 0.85 }}>YOUR WINDOW IS OPEN</div>
+          {/* Says what it's counting to. "YOUR WINDOW IS OPEN" was
+              accurate about the old (wrong) trigger and would now be a
+              lie about the new one -- the window opened half an hour
+              ago; what's about to happen is showtime. */}
+          <div style={{ fontSize: 13, letterSpacing: '0.2em', opacity: 0.85 }}>YOU&apos;RE ON IN</div>
           <div style={{ fontSize: 120, fontWeight: 700, lineHeight: 1, marginTop: 8 }}>{countdown}</div>
           <div style={{ fontSize: 12, letterSpacing: '0.12em', opacity: 0.8, marginTop: 10 }}>GOING LIVE</div>
         </div>

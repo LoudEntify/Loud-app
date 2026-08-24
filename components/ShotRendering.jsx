@@ -180,6 +180,12 @@ const FRAME_READY_TIMEOUT_MS = 600;
 function waitForFirstFrame(videoEl, timeoutMs, onReady) {
   let done = false;
   let rvfcHandle = null;
+  // Declared before cleanup() closes over it. It was assigned below the
+  // two functions that read it -- safe only because neither could run
+  // before the assignment, which is exactly the kind of "safe for now"
+  // that became a crashed live page elsewhere in this codebase
+  // (DECISIONS.md 17).
+  let timer = null;
   const hasRVFC = typeof videoEl.requestVideoFrameCallback === 'function';
 
   function finish() {
@@ -197,7 +203,7 @@ function waitForFirstFrame(videoEl, timeoutMs, onReady) {
     }
   }
 
-  const timer = setTimeout(finish, timeoutMs);
+  timer = setTimeout(finish, timeoutMs);
 
   if (hasRVFC) {
     rvfcHandle = videoEl.requestVideoFrameCallback(finish);

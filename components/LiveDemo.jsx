@@ -2244,6 +2244,24 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     setFacingMode(next);
   }, [facingMode, room]);
 
+  // Round C -- the artist's own camera track, retained after the show
+  // ends so their self-view keeps working while nothing transmits.
+  //
+  // DECLARED HERE, ABOVE releaseLocalDevices, AND THAT IS THE WHOLE
+  // POINT. It used to sit ~130 lines further down, while
+  // releaseLocalDevices below both reads it and lists it in its
+  // dependency array -- and a dependency array is evaluated DURING
+  // RENDER, not when the callback eventually runs. So every render of
+  // this component touched a `const` still in its temporal dead zone and
+  // threw `ReferenceError: Cannot access 'endedSelfViewTrack' before
+  // initialization` -- minified to "Cannot access 'tP' before
+  // initialization", which is the crash that took the live page down on
+  // the first device test that ever got far enough to reach this
+  // component. It has been latent since the device-release round
+  // (21e8432); the old entry gate is what kept anyone from reaching the
+  // code that trips it.
+  const [endedSelfViewTrack, setEndedSelfViewTrack] = useState(null);
+
   // Round C -- LEAVE must release the DEVICES, not just the room.
   // room.disconnect() alone tears down the connection but can leave the
   // underlying MediaStreamTracks running, which is what keeps the camera
@@ -2385,9 +2403,6 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     showEndedRef.current = displayShowState === 'ended';
   }, [displayShowState]);
 
-  // Round C -- the artist's own camera track, retained after the show
-  // ends so their self-view keeps working while nothing transmits.
-  const [endedSelfViewTrack, setEndedSelfViewTrack] = useState(null);
   const audioStoppedForEndRef = useRef(false);
   useEffect(() => {
     // Fix (1d) -- runs for EVERY publishing role, not just the main

@@ -37,6 +37,18 @@ const TEAL = '#2ec4b6';
 //
 // `shows` is the one exception and deliberately so: its RLS is open, and
 // upcoming shows are public information in both modes anyway.
+const iconBtn = {
+  width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  borderRadius: 999, background: 'rgba(1,22,39,0.06)', textDecoration: 'none',
+};
+
+const ghostBtn = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '9px 14px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+  color: INK, background: 'transparent', border: '1px solid rgba(1,22,39,0.2)',
+  borderRadius: 999, textDecoration: 'none', cursor: 'pointer',
+};
+
 export default function ProfileSurface({ artistId }) {
   const [viewer, setViewer] = useState(undefined); // undefined = unknown
   const [profile, setProfile] = useState(undefined);
@@ -196,14 +208,3 @@ export default function ProfileSurface({ artistId }) {
   );
 }
 
-const iconBtn = {
-  width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
-  borderRadius: 999, background: 'rgba(1,22,39,0.06)', textDecoration: 'none',
-};
-
-const ghostBtn = {
-  display: 'inline-flex', alignItems: 'center', gap: 6,
-  padding: '9px 14px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
-  color: INK, background: 'transparent', border: '1px solid rgba(1,22,39,0.2)',
-  borderRadius: 999, textDecoration: 'none', cursor: 'pointer',
-};

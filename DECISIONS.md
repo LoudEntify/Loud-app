@@ -196,3 +196,44 @@ Closes the finding in `docs/WRITE_PATH_AUDIT.md` and the two failures the window
 ### Still true, and worth stating
 
 `shows.room_name` has no uniqueness constraint at the database level. Names are minted random per show at schedule time, so collisions are a rounding error — but the recordings-sync attribution heuristic leans on room names, and that comment now says exactly this rather than claiming one-room-per-pilot.
+
+## 17. The crash the threading round shipped — post-mortem and fixes
+
+I shipped §16 with a bundle grep and no page load, said so in the handover, and the first device test hit a client-side exception before anything else could be tested. The caveat was accurate and it was not a substitute for loading the page. Fixed, plus the two findings behind it.
+
+### The crash: a temporal dead zone that predates this round
+
+`ReferenceError: Cannot access 'tP' before initialization` demangles to `endedSelfViewTrack`. `releaseLocalDevices` (LiveDemo, RoomInner) both reads it and lists it in its `useCallback` dependency array — and **a dependency array is evaluated during render**, not when the callback runs. The `useState` that defines it sat ~130 lines below. So every render of `RoomInner` touched a `const` still in its TDZ and threw.
+
+- **It has been latent since `21e8432` (the device-release round, 23 Aug), not since §16.** What §16 changed is that people can now *reach* `RoomInner`. The old entry gate — the same one that demanded a second password — was also, accidentally, keeping everyone away from a crashing component. This is the second thing that gate was hiding.
+- **Fixed by moving the declaration above its consumer,** not by removing it from the dep array. The dependency is real; the ordering was the bug.
+- **The class is now swept and gated.** `npm run check:tdz` runs `no-use-before-define` across `app/`, `components/` and `lib/`. It found exactly one real hazard (this one) and four cosmetic ones, all now fixed so the check is *green* — a check that always prints nine known-safe errors is a check nobody reads. It runs via `npx`, adds no dependency and creates no `.eslintrc`, deliberately: an ESLint config in this repo would make `next build` start linting and could fail deploys on unrelated pre-existing warnings.
+- **Two "safe for now" orderings fixed alongside it** — Kit Check's `addCamera`→`stopCamera` and ShotRendering's `timer`. Both were genuinely safe (neither runs during render) and both were one refactor away from being this bug again.
+
+### Finding 2: the countdown was counting to the wrong moment
+
+Not a timezone bug, not a wrong constant. **The trigger was keyed to the broadcast window opening (T−30min) when it wanted showtime (T−0).** A show scheduled five minutes out has an already-open window the instant Kit Check loads, so the 60 seconds started immediately and put the artist on stage roughly four minutes early.
+
+- **The countdown is now derived from `slated_at` on every clock tick, not stored and decremented.** It can't drift, and opening Kit Check at T−20s shows twenty seconds rather than a fresh sixty.
+- **The window still gates it, but only permits it.** `isWindowOpen` remains the cost rule; showtime is the trigger. The knock-on is the good kind: the artist gets the full ~29 minutes of the window in Kit Check instead of being yanked out the moment it opened.
+- **A late arrival clamps to zero and hands over immediately** rather than rendering a negative number or a fresh minute.
+- **The overlay copy changed with it.** "YOUR WINDOW IS OPEN" was accurate about the old trigger and would be a lie about the new one; it says "YOU'RE ON IN" now.
+
+### Finding 3: the notifications 400 — right symptom, wrong cause
+
+The hypothesis was "no unique constraint exists". **The constraint exists.** `docs/scheduling_migration.sql` created `notifications_dedupe_idx` on `(user_id, dedupe_key)` — but **`where dedupe_key is not null`**, i.e. partial. Postgres will not infer a partial unique index from `ON CONFLICT (cols)` unless the statement repeats the predicate, and PostgREST's `on_conflict=` parameter cannot emit one. Hence 42P10 → 400.
+
+- **The fix is to drop the predicate, not to add an index.** A plain unique index is inferrable and changes nothing about null handling: Postgres already treats NULLs as distinct in a unique index, so multiple null-`dedupe_key` rows per user stay legal exactly as the partial index intended. `docs/notifications_conflict_target_migration.sql`, with the verification query.
+
+### The audit-method gap, and what the re-sweep found
+
+The original audit checked **permission** and was right about all eleven rows. It never asked whether an upsert's **conflict target is resolvable** — a different question with a different signature (400, not 403). Two method changes:
+
+- **A "conflict target → index" column,** where naming a *partial* index is a defect, not a note.
+- **Enumerate by call site, not by table.** That alone surfaced two writes the first sweep had folded into parentheticals — and one of them, `/api/profile/become-viewer`'s cancellation notices, was a live 400 behind a row previously marked OK. "Service role, therefore fine" was the wrong instinct: the service role bypasses RLS, not conflict-target inference.
+
+Result: 13 rows, two broken (both `notifications`, both fixed by the one migration), `cue_sheets` flagged as correct-but-migration-dependent.
+
+### Process
+
+Protection Bypass for Automation is now wired into my verification. **"Page loaded and rendered, confirmed via bypass" is a required line in every definition of done from here** — and where a page can only be reached behind app auth, I say exactly how far the load got rather than implying more.
