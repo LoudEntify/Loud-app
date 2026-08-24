@@ -24,7 +24,21 @@ the policy or constraint that governs it.
 
 ---
 
-## ⚠️ FINDING: the scheduled-show → live handoff is not wired
+## ✅ CLOSED — the Go Live threading round
+
+**This finding is fixed.** `LiveDemo` resolves `?show={id}` to a row and
+threads that row's `room_name` through every call site listed below; the
+constant is gone and nothing defaults to it (`/api/token` and `/cam` now
+refuse a missing room rather than substituting one). The two failures
+this predicted both showed up live in the window-opening test before the
+fix landed, exactly as described. See DECISIONS.md §16 and
+`docs/go_live_threading_test_script.md`.
+
+The original finding is preserved below, unedited — it called the shot.
+
+---
+
+## ⚠️ FINDING (ORIGINAL): the scheduled-show → live handoff is not wired
 
 Not one of the three failures, and bigger than all of them. Surfaced by
 row 11.

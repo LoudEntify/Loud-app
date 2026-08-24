@@ -183,7 +183,7 @@ export default function KitCheck() {
 
   // ── Window opens while in Kit Check → countdown, then live ──
   useEffect(() => {
-    if (!upcoming || countdown !== null) return;
+    if (!upcoming?.id || countdown !== null) return;
     if (isWindowOpen(upcoming, now)) setCountdown(COUNTDOWN_SECONDS);
   }, [upcoming, now, countdown]);
 
@@ -195,7 +195,15 @@ export default function KitCheck() {
       // frame on stage.
       stopCamera();
       stopAudio();
-      router.push(`/live?show=${upcoming?.id ?? ''}`);
+      // THE HANDOFF. The id is what makes /live resolve THIS show's room;
+      // it was already being passed correctly before this round -- the
+      // live page just wasn't reading it. `?show=` with an empty value
+      // is no longer possible: the countdown can't start without an id.
+      //
+      // router.push (not a full page load) is deliberate: the Supabase
+      // session lives in this tab and a client-side navigation carries
+      // it, along with everything else already warm.
+      if (upcoming?.id) router.push(`/live?show=${upcoming.id}`);
       return undefined;
     }
     const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);

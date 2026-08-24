@@ -14,10 +14,18 @@ import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
 // this round): `recordings/{room}-{epoch-ms}.mp4`. That format doesn't embed
 // a show_id, so attribution here is necessarily a heuristic, not exact: for
 // each object, find the `shows` row for that room_name whose `slated_at` is
-// closest to the object's embedded timestamp. At current pilot scale (one
-// room, few shows) this is unambiguous in practice; a room reused across
-// many distinct shows over a long period would make it fuzzier -- a real,
-// stated limitation, not hidden.
+// closest to the object's embedded timestamp.
+//
+// That heuristic got materially SAFER in the Go Live threading round.
+// Rooms used to be one shared 'pilot-room' string across every show ever
+// recorded, so nearest-by-time was doing real work (and could get it
+// wrong). Every scheduled show now owns a room name minted at schedule
+// time (components/ScheduleShow.jsx), so the room-name filter below
+// usually resolves to exactly one candidate and the time comparison is a
+// tie-break that rarely has to break anything. Still a heuristic, and
+// still stated rather than hidden: nothing enforces room_name uniqueness
+// at the database level, and a legacy 'pilot-room' object can still match
+// several old rows.
 //
 // Scoped to the calling artist's OWN shows only -- a sync call only ever
 // inserts rows for recordings whose matched show is owned by the caller

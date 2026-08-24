@@ -44,7 +44,14 @@ export default function RequireAuth({ children }) {
 
   useEffect(() => {
     if (state !== 'anon') return;
-    const next = encodeURIComponent(pathname || '/live');
+    // THE QUERY STRING IS PART OF THE DESTINATION. `pathname` alone is
+    // '/live' -- it drops `?show={id}`, so a viewer who followed a show
+    // link, logged in, and came back landed on a live page with no show
+    // in it. usePathname/useSearchParams are the app-router way to read
+    // this, but window.location.search is exact and avoids a second
+    // Suspense-boundary requirement on every gated route.
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const next = encodeURIComponent(`${pathname || '/live'}${search}`);
     router.replace(`/auth?next=${next}`);
   }, [state, pathname, router]);
 

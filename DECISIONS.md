@@ -169,3 +169,30 @@ It is buildable but not reliable. Signalling is genuinely easy — Supabase Real
 - **The role flips LAST.** If any earlier step fails, the console hasn't been taken away yet, so a retry is clean rather than leaving someone half-downgraded.
 - **A failed notification doesn't block the downgrade.** They explicitly asked for it; a missed message must not trap them in a role.
 - **Two-step confirm listing every consequence.** A one-click role flip that silently hides an artist's public work would be indefensible.
+
+## 16. Go Live threading — the live path becomes show-aware
+
+Closes the finding in `docs/WRITE_PATH_AUDIT.md` and the two failures the window-opening test surfaced live.
+
+### What actually broke, named precisely
+
+- **The "session lost at the countdown" was not a lost session.** `RequireAuth` had already verified it, and it was still in `localStorage` throughout. `LiveDemo` carried its *own* three-screen entry gate from the multi-performer round — watch-or-perform, then a full **"Artist sign in"** form — which never once looked at the session it was already sitting behind. An artist walking out of Kit Check on a 60-second countdown was asked to authenticate a second time, by a second login form, at the worst moment in the product.
+- **A second, latent copy of the same bug lived in `RequireAuth`:** the post-login return path was built from `pathname` alone, which drops `?show=`. Anyone who *did* log in came back to a `/live` with no show in it. Fixed in the same round — the query string is part of the destination.
+- **"Couldn't reach the show yet" was `registerParticipant` throwing** because the pilot-room lookup found nothing post-wipe. A mailing-list insert was a hard precondition for being in the show.
+
+### The decisions
+
+- **The entry gate is deleted, not hidden.** Every question it asked is now answered by something authoritative: who you are by the session, solo-or-versus by `shows.performance_mode`, which slot by `join-show`. A question whose answer is already known is friction, and this one was charging that friction at showtime.
+- **The server decides performer vs. viewer, and a 403 is not an error.** The client makes no entitlement guess. `join-show` re-checks ownership, invite binding and the window; a 403 routes to the viewer token, because "not on the line-up" is the ordinary answer for the entire audience.
+- **…except for the show's owner, where the same failure is shown loudly.** `show.artist_id === session.user.id` is known client-side and decides how loud a failure is. Silently seating an artist in the audience of their own show is the worst possible way for them to learn something went wrong.
+- **`?show=` missing gets exactly one recovery, then a plain message.** A signed-in artist with a show whose window hasn't closed unambiguously meant that show — so it resolves *and rewrites the URL*, leaving an address bar that's correct to share. Everything else says what's missing. Nothing falls back to a room.
+- **`'pilot-room'` survives nowhere as a default.** Not in `LiveDemo`, not in `/api/token` (a missing room is now a 400 — a token is the wrong way to find out the caller has a bug), not in `/cam` (a camera quietly publishing into a fallback room is worse than a link that says it's stale).
+- **The show state write moved from `room_name` to the primary key.** Same row, but a lookup that can only ever match once is the right shape for the write that decides whether every viewer sees a show at all.
+- **Pre-window viewers no longer connect.** Following a show link hours early gets the holding screen with the countdown and *no LiveKit connection* — the same broadcast-window rule Kit Check exists to honour, now applied to the audience side too. The one-second clock carries them in when the window opens; nobody taps anything on either side of the stage.
+- **`selfName` can never fall back to an email address.** It's published to the room on every comment. The old gate typed it in by hand; deriving it from the account made an email the obvious fallback, and that would have been a live privacy leak, not a default.
+- **Discover links to the show, not to `/live`.** It lists N live shows; a link with no id could only ever have taken you to one of them.
+- **No migration.** `health_events.show_id` and `shot_commands.show_id` are both `text` and already carry a room name (the recorder logs `room.name` into the same column), so per-show rooms keep the live and recording timelines joinable with no schema change. Checked column-by-column against `docs/`, per the standing rule.
+
+### Still true, and worth stating
+
+`shows.room_name` has no uniqueness constraint at the database level. Names are minted random per show at schedule time, so collisions are a rounding error — but the recordings-sync attribution heuristic leans on room names, and that comment now says exactly this rather than claiming one-room-per-pilot.

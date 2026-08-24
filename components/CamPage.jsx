@@ -85,7 +85,12 @@ const ROLE_OPTIONS = [
 
 export default function CamPage() {
   const searchParams = useSearchParams();
-  const room = searchParams.get('room') || 'pilot-room';
+  // No default room (Go Live threading round). The QR panel always
+  // encodes the show's own room_name; a link arriving without one is a
+  // stale/hand-edited link, and quietly publishing this camera into a
+  // fixed fallback room is the worst possible answer to that -- same
+  // reasoning, and now the same treatment, as a missing slot below.
+  const room = searchParams.get('room');
   const slot = searchParams.get('slot');
   // Stage 1 (portrait capture + rotation) is verified on real hardware --
   // the verbose on-screen diagnostic panel that found the LiveKitRoom
@@ -179,10 +184,13 @@ export default function CamPage() {
     textAlign: 'center',
   };
 
-  if (!slot) {
+  if (!room || !slot) {
     return (
       <div style={pageStyle}>
-        <p>This link is missing a slot -- scan the QR code from the artist&apos;s broadcast screen again.</p>
+        <p>
+          This link is missing a {!room ? 'show' : 'slot'} -- scan the QR code from the artist&apos;s broadcast
+          screen again.
+        </p>
       </div>
     );
   }

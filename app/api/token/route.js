@@ -25,7 +25,14 @@ export async function GET(request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const room = searchParams.get('room') || 'pilot-room';
+    // NO DEFAULT ROOM. This used to fall back to 'pilot-room', which
+    // meant any caller that failed to resolve a show still got a valid
+    // token -- into somebody else's room. A missing room is now a 400:
+    // the caller has a bug, and a token is the wrong way to find out.
+    const room = searchParams.get('room');
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
     const identity = searchParams.get('identity') || `guest-${Date.now()}`;
     const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
 
