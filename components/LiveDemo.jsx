@@ -18,7 +18,7 @@ import '@livekit/components-styles';
 import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
-import CameraQRPanel from './CameraQRPanel';
+import PairingPanel from './PairingPanel';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
@@ -512,6 +512,25 @@ export default function LiveDemo() {
   // Gates the `video` prop below so nothing can republish the camera.
   const [broadcastEnded, setBroadcastEnded] = useState(false);
   const handleBroadcastEnded = useCallback(() => setBroadcastEnded(true), []);
+
+  // ── LEAVE ────────────────────────────────────────────────────
+  // Owned HERE, not in RoomInner, and that placement is the fix for the
+  // white-screen crash rather than a stylistic preference: this
+  // component renders <LiveKitRoom>, so flipping this unmounts the room
+  // outright. RoomInner used to hold the same flag and render a message
+  // from inside a room it had just disconnected from — see the long note
+  // where that state used to live.
+  const [leftShow, setLeftShow] = useState(false);
+  const handleLeave = useCallback(() => setLeftShow(true), []);
+
+  // The account's own role, kept because Leave has to route somewhere
+  // and "somewhere" is different for the two kinds of person who can be
+  // in a show. An artist walking off stage wants their console — the
+  // recordings, the next show, the numbers. A viewer wants the next
+  // thing to watch. Sending either to the other's destination is a small
+  // insult, and sending both to a dead-end "you left the show" card
+  // (which is what this used to do, when it worked at all) is worse.
+  const [profileRole, setProfileRole] = useState(null);
   const canUseFullscreenApi =
     typeof document !== 'undefined' &&
     !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
@@ -661,7 +680,10 @@ export default function LiveDemo() {
         // Never the email address. selfName is what comments are
         // published under, to everyone in the room -- an email in that
         // position would be a live privacy leak, not a fallback.
-        if (!cancelled) setName(profile?.display_name || profile?.username || 'guest');
+        if (!cancelled) {
+          setName(profile?.display_name || profile?.username || 'guest');
+          setProfileRole(profile?.role || null);
+        }
       } finally {
         // Settled either way: the stage must not be held up by a profile
         // read, but it also shouldn't start under a name that's about to
@@ -748,6 +770,29 @@ export default function LiveDemo() {
       fetchShow();
     }
   }, [now, show, fetchShow]);
+
+  // Where Leave goes. Computed here rather than at the click so the
+  // destination is already resolved by the time anyone presses the
+  // button — a leave that pauses to look up your own role would be a
+  // pause at exactly the moment someone has decided to go.
+  //
+  // Falls back to Discover when the role is unknown (profile read failed,
+  // or hasn't landed). Discover is the safe default: it works for every
+  // account, signed in or not, and it is never a dead end.
+  const leaveHref =
+    profileRole === 'artist' && session?.user?.id ? `/artist/${session.user.id}` : '/discover';
+
+  useEffect(() => {
+    if (!leftShow) return undefined;
+    // A beat, deliberately. room.disconnect() has already been called by
+    // the time this runs; giving the teardown a moment before yanking the
+    // route out from under it avoids racing LiveKit's own cleanup, and
+    // gives the person who just pressed Leave a half-second of
+    // confirmation that it worked rather than an instant screen swap that
+    // reads as a glitch.
+    const id = setTimeout(() => router.replace(leaveHref), 600);
+    return () => clearTimeout(id);
+  }, [leftShow, leaveHref, router]);
 
   const showState = effectiveState(show, now);
 
@@ -939,6 +984,32 @@ export default function LiveDemo() {
   // login/signup form, a solo-or-versus picker and a role dropdown --
   // all of it after RequireAuth had already proven who this was, and all
   // of it in front of an artist whose countdown had just hit zero.
+  // Leave wins over every other state. Rendering this unmounts
+  // <LiveKitRoom> entirely — the connection is already down (leaveCall
+  // disconnects before calling up here), and this makes sure nothing
+  // stays mounted that could put it back.
+  //
+  // The link is a real link, not decoration. The effect above routes on
+  // its own after a beat; if that navigation is slow, blocked, or the
+  // person simply gets there first, there is something to press.
+  if (leftShow) {
+    return (
+      <PageShell active="live">
+        <div style={{ maxWidth: 420, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>You left the show</h2>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14, margin: 0 }}>
+            {profileRole === 'artist'
+              ? 'Your camera and microphone are released. Taking you back to your console…'
+              : 'Taking you back to Discover…'}
+          </p>
+          <Link href={leaveHref} style={{ ...primaryBtnStyle, textDecoration: 'none', textAlign: 'center' }}>
+            {profileRole === 'artist' ? 'GO TO MY CONSOLE' : 'BROWSE SHOWS'}
+          </Link>
+        </div>
+      </PageShell>
+    );
+  }
+
   if (step === 'resolving' || step === 'entering') {
     return (
       <PageShell active="live">
@@ -1111,6 +1182,7 @@ export default function LiveDemo() {
             connToken={conn.token}
             connServerUrl={conn.url}
             onBroadcastEnded={handleBroadcastEnded}
+            onLeave={handleLeave}
           />
         </LiveKitRoom>
       </div>
@@ -1201,7 +1273,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
@@ -1473,11 +1545,98 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
   const [facingMode, setFacingMode] = useState(isCamFeed ? 'environment' : 'user');
-  const [left, setLeft] = useState(false);
+  // `left` USED TO LIVE HERE, and it is the whole reason Leave threw a
+  // client-side exception onto a white screen.
+  //
+  // The post-mortem, because it is a class of bug worth recognising on
+  // sight: this component had `if (left) return <…>` sitting at :2790,
+  // and it has hooks below that line (a useMemo at what is now :2840, a
+  // useRef and a useEffect immediately after). React counts hooks per
+  // render and requires the count to be stable. While `left` was false
+  // the early return never fired and every hook ran; the instant Leave
+  // flipped it true, the component returned three hooks short and React
+  // threw "Rendered fewer hooks than expected" — an error with no error
+  // boundary above it, which is why it painted white rather than
+  // degrading to something readable.
+  //
+  // Note the shape of it: the guard was CORRECT in isolation and the
+  // hooks were CORRECT in isolation. What was wrong was a conditional
+  // return positioned above hooks in a 2,300-line component where that
+  // relationship is invisible from either end. The sibling early return
+  // for `isCamFeed` at :2801 has the identical defect and has never
+  // crashed, purely because isCamFeed is constant for a component's
+  // whole life and so the branch is chosen once, at mount.
+  //
+  // The fix is not to move the return below the hooks. Leaving a show
+  // should tear the LiveKit connection down, and a component that stays
+  // mounted inside <LiveKitRoom> to render "you left" is still in the
+  // room. So the state moved OUT, to the parent that owns <LiveKitRoom>
+  // — one level up, where flipping it unmounts the room instead of
+  // rendering a message inside it. See LiveDemo's `leftShow`.
   const [comments, setComments] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
+
+  // ── Cameras, on stage ────────────────────────────────────────
+  // Same mechanism as Kit Check, same component, same code path. What
+  // used to be here was components/CameraQRPanel.jsx, which printed three
+  // QR codes containing bare `/cam?room=…&slot=…&role=…` URLs — no
+  // credential of any kind. That was fine as a pilot shortcut and stopped
+  // being fine the moment those QR codes could appear in a frame: anyone
+  // who could read one off a stream could join the broadcast as a camera.
+  //
+  // Now the QR encodes a single-use pairing code, exactly as Kit Check's
+  // does, and a paired phone that was already propped for the rehearsal
+  // is ALREADY HERE — it followed the room across (see
+  // app/api/camfeed/session). This panel is for the camera you decide to
+  // add once you are already on stage, which should be the rare case
+  // rather than the normal one.
+  const [showPairings, setShowPairings] = useState([]);
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState('');
+  const [pairDegraded, setPairDegraded] = useState(false);
+
+  const pairFetch = useCallback(async (payload) => {
+    const res = await fetch('/api/camfeed/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${artistAccessToken}` },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, body };
+  }, [artistAccessToken]);
+
+  const addShowCamera = useCallback(async (cameraRole) => {
+    if (!artistAccessToken || !roomName) { setPairError('Sign in as the show’s artist to add a camera.'); return; }
+    setPairError('');
+    setPairBusy(true);
+    try {
+      const { ok, body } = await pairFetch({
+        action: 'invite',
+        role: cameraRole,
+        slot: role,
+        context: 'show',
+        // The room is stamped on the pairing row at creation, so a phone
+        // that redeems this code joins the SHOW directly — it never has
+        // to be migrated afterwards.
+        room: roomName,
+        show_id: showId || null,
+      });
+      if (!ok) { setPairError(body.error || 'Could not create a pairing code.'); return; }
+      if (body.degraded) setPairDegraded(true);
+      setShowPairings((prev) => [...prev.filter((p) => p.id !== body.pairing.id), body.pairing]);
+    } catch {
+      setPairError('Could not reach the pairing service.');
+    } finally {
+      setPairBusy(false);
+    }
+  }, [artistAccessToken, roomName, showId, role, pairFetch]);
+
+  const removeShowCamera = useCallback(async (id) => {
+    setShowPairings((prev) => prev.filter((p) => p.id !== id));
+    try { await pairFetch({ action: 'revoke', id }); } catch { /* card already gone; the row expires on its own */ }
+  }, [pairFetch]);
 
   // Page lifecycle -> health_events (Phase 2). All roles -- a viewer's
   // dropout is as diagnostically useful as the performer's. audioContext
@@ -2304,8 +2463,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const leaveCall = useCallback(() => {
     releaseLocalDevices();
     room.disconnect();
-    setLeft(true);
-  }, [room, releaseLocalDevices]);
+    // Hands off to the parent, which unmounts <LiveKitRoom> and routes.
+    // This component does not render a "you left" screen any more —
+    // see the note on the deleted `left` state above.
+    onLeave?.();
+  }, [room, releaseLocalDevices, onLeave]);
 
   // SHOW_LIVE/SHOW_ENDED receipt (SHOW_LIFECYCLE_SPEC.md 3a/L3) -- belt-
   // and-braces sync for clients whose own cached `show` row hasn't
@@ -2786,14 +2948,6 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const collapseComments = useCallback(() => {
     if (commentsExpanded) setCommentsExpanded(false);
   }, [commentsExpanded]);
-
-  if (left) {
-    return (
-      <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center' }}>
-        <p>You left the show.</p>
-      </div>
-    );
-  }
 
   // Camera-feed devices get a minimal screen: their own preview, a camera
   // toggle, and leave. They are not part of the audience-facing layout and
@@ -3510,7 +3664,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           </button>
           {qrPanelOpen && (
             <div className="camera-qr-panel-body">
-              <CameraQRPanel roomName={roomName} slot={role} />
+              <PairingPanel
+                pairings={showPairings}
+                connectedRoles={directorAvailableRoles.filter((r) => r !== 'main')}
+                onAdd={addShowCamera}
+                onRevoke={removeShowCamera}
+                busy={pairBusy}
+                error={pairError}
+                tone="over-video"
+                degraded={pairDegraded}
+                degradedNote="Adding cameras mid-show needs the pending database migration. Pair from Kit Check before the show instead."
+              />
             </div>
           )}
         </div>

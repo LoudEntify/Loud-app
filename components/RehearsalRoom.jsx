@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LiveKitRoom, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const ORANGE = '#ff9f1c';
+const TEAL = '#2ec4b6';
 
 // The composed multi-camera view, for rehearsal only.
 //
@@ -16,8 +17,38 @@ const ORANGE = '#ff9f1c';
 // UI states plainly that the artist is now connected and how long the
 // session has left. The failure mode this guards against is an artist
 // believing they are in the free local mode while a room quietly bills.
-function Tiles() {
+//
+// Now sized for a RIG rather than a pair: the grid grows with the number
+// of live cameras instead of assuming one paired phone, and every tile is
+// labelled with the camera role parsed out of the participant identity —
+// which is the same string the live show's director console parses, so
+// what the artist sees here is exactly what the console will offer them
+// on stage.
+
+// `camfeed-{slot}-{role}-{id}` — the format is set in lib/camfeedPairing.js
+// and read by components/LiveDemo.jsx. Parsed in one place here so the
+// label and the reported role can never disagree.
+function roleOf(identity) {
+  if (typeof identity !== 'string' || !identity.startsWith('camfeed-')) return null;
+  return identity.split('-')[2] || null;
+}
+
+function Tiles({ onConnectedRoles }) {
   const tracks = useTracks([Track.Source.Camera]);
+
+  const roles = useMemo(
+    () => tracks.map((t) => roleOf(t.participant.identity)).filter(Boolean),
+    [tracks]
+  );
+
+  // Reported upward so the pairing panel can flip a card from WAITING to
+  // LIVE. Keyed on the joined string so a re-render with the same set of
+  // cameras doesn't churn the parent's state.
+  const rolesKey = roles.join(',');
+  useEffect(() => {
+    onConnectedRoles?.(rolesKey ? rolesKey.split(',') : []);
+  }, [rolesKey, onConnectedRoles]);
+
   if (tracks.length === 0) {
     return (
       <div style={{ padding: 28, textAlign: 'center', color: 'rgba(253,255,252,0.5)', fontSize: 12 }}>
@@ -25,21 +56,29 @@ function Tiles() {
       </div>
     );
   }
+
+  // One camera reads as a preview, two as a comparison, three or more as
+  // a rig. Columns follow that rather than being fixed at two.
+  const columns = tracks.length === 1 ? 1 : tracks.length <= 4 ? 2 : 3;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tracks.length > 1 ? 2 : 1}, 1fr)`, gap: 6 }}>
-      {tracks.map((t) => (
-        <div key={`${t.participant.identity}:${t.publication?.trackSid}`} style={{ position: 'relative', aspectRatio: '9 / 16', background: INK, overflow: 'hidden' }}>
-          <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          <span style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 8.5, letterSpacing: '0.06em', color: PORCELAIN, background: 'rgba(1,22,39,0.6)', padding: '2px 6px', borderRadius: 3 }}>
-            {t.participant.identity.startsWith('camfeed-') ? 'PAIRED CAMERA' : 'YOUR CAMERA'}
-          </span>
-        </div>
-      ))}
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 6 }}>
+      {tracks.map((t) => {
+        const role = roleOf(t.participant.identity);
+        return (
+          <div key={`${t.participant.identity}:${t.publication?.trackSid}`} style={{ position: 'relative', aspectRatio: '9 / 16', background: INK, overflow: 'hidden' }}>
+            <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <span style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 8.5, letterSpacing: '0.06em', color: PORCELAIN, background: 'rgba(1,22,39,0.6)', padding: '2px 6px', borderRadius: 3 }}>
+              {role ? role.toUpperCase() : t.participant.identity.startsWith('camfeed-') ? 'PAIRED CAMERA' : 'YOUR CAMERA'}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-export default function RehearsalRoom({ session, onEnd }) {
+export default function RehearsalRoom({ session, onEnd, onConnectedRoles }) {
   const [secondsLeft, setSecondsLeft] = useState(session.sessionSeconds ?? 20 * 60);
 
   // Hard stop. The token's own TTL is the real backstop -- this is the
@@ -75,14 +114,19 @@ export default function RehearsalRoom({ session, onEnd }) {
         connect
         audio={false}
         // The artist's camera IS published here, on purpose: a composed
-        // view with only the paired phone in it is not a composition.
+        // view with only the paired phones in it is not a composition.
         // Kit Check releases its own local camera before this mounts --
         // two owners of one device is how you get a black tile.
         video
         style={{ background: INK, padding: 6 }}
       >
-        <Tiles />
+        <Tiles onConnectedRoles={onConnectedRoles} />
       </LiveKitRoom>
+
+      <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.5)', marginTop: 8, lineHeight: 1.5 }}>
+        Every camera you pair here <strong style={{ color: TEAL }}>comes with you</strong> when the show starts —
+        the phones move to the show room on their own, still propped exactly where you left them.
+      </div>
     </div>
   );
 }

@@ -237,3 +237,169 @@ Result: 13 rows, two broken (both `notifications`, both fixed by the one migrati
 ### Process
 
 Protection Bypass for Automation is now wired into my verification. **"Page loaded and rendered, confirmed via bypass" is a required line in every definition of done from here** — and where a page can only be reached behind app auth, I say exactly how far the load got rather than implying more.
+
+---
+
+# OVERNIGHT BUILD #2 — 2026-08-25
+
+Branch `feature/overnight-round-2`, cut from `feature/overnight-product-round`.
+Nothing merges to `main`; nothing deploys to production. Every judgment call
+made without being able to ask is recorded here with the reason.
+
+## Standing constraints honoured this run
+
+- **I did not touch the database.** Every schema change is a numbered,
+  idempotent file in `docs/` (`overnight2_01_…` onward) with its verification
+  queries inline, plus one runner doc (`docs/MORNING_MIGRATIONS.md`).
+- **The app must render before those files are run.** Every schema-dependent
+  capability is behind a server-side probe that degrades to the previous
+  behaviour and says so in plain words on screen, rather than 500ing. This is
+  stated per feature below.
+- **One migration file per table per round.** No table is split across two
+  files.
+
+## Phase 0a — Kit Check pairs a RIG, not a camera
+
+**The bug was in the state shape, not in the UI.** Kit Check held a single
+`rehearsal` object that was simultaneously "the artist's seat in the rehearsal
+room" and "the one pairing code". Two responsibilities in one variable is why
+a second camera could never exist: pairing again replaced the first one.
+
+- **Split into `rehearsal` (the artist's own session) and `pairings` (an
+  array).** The rehearsal room is opened once, on the first Add, and reused by
+  every camera after it.
+- **Cameras are named, not numbered.** WIDE / CLOSE / SIDE, matching
+  `lib/shotTypes.js`'s shot grammar. This is load-bearing rather than
+  cosmetic: the live show parses a camera's role out of its LiveKit identity
+  (`camfeed-{slot}-{role}-…`), so a phone paired without a role is connected,
+  publishing, and **invisible to the director console** — the worst failure
+  shape, because nothing looks broken.
+- **Six live cameras per artist, capped server-side.** More than any artist in
+  this pilot will prop, and it stops a stuck client minting codes forever.
+- **Ending a rehearsal does NOT revoke pairings.** A code that stopped working
+  because the artist closed the composed view would be a trap — the phones are
+  still propped and still coming to the show. Removing a camera is an explicit
+  act.
+- **The rig survives a page reload.** Kit Check re-lists the artist's live
+  pairings on mount, because an artist who reloads a tab has not changed their
+  mind about where they put three phones.
+
+**Judgment call — pairing stays `verifySession`, not `verifyArtistAuth`.**
+The previous route used session-only auth and I kept it. Tightening to
+artist-only is defensible, but it would newly break any account that has not
+yet upgraded, and doing that silently inside a "multi-camera" change is the
+wrong place for a permissions change. Flagged as a deliberate non-change.
+
+## Phase 0a — one pairing UI, both contexts
+
+There were two mechanisms. Kit Check printed a six-character code plus a
+sentence asking the artist to type a URL from memory into another phone. The
+live show printed three QR codes whose URLs were `/cam?room=…&slot=…&role=…`
+— **containing no credential at all**.
+
+- **The live show had the right shape and the wrong contents.** A picture you
+  point a camera at, a link you can tap, and a code you can read down a phone
+  line are three affordances for three real situations. So `PairingPanel`
+  keeps all three — and all three now describe the *same single-use pairing
+  code*.
+- **`components/CameraQRPanel.jsx` is deleted, not deprecated.** A bare
+  room+slot URL in a QR code is an invitation into a live broadcast for anyone
+  who can read it off a stream. Leaving it in the tree as dead code invites it
+  back.
+- **Scanning pairs the phone.** The QR encodes `/cam/pair?code=…`, and that
+  page redeems automatically. Asking an artist with a guitar in their hands to
+  walk over and tap a button on each phone is exactly the friction the QR
+  existed to remove.
+- **`tone` prop, not two components.** Kit Check is porcelain; the live panel
+  floats over video, where nothing may have a background fill. Same component,
+  two palettes, including the QR itself rendered light-on-transparent over
+  video — a white block punched into a live frame is not acceptable.
+
+## Phase 0b — how the cameras survive the transition
+
+**The mechanism, stated plainly: a paired phone does not know which room it is
+in. It knows which pairing it is, and it asks the server where that pairing
+currently lives.**
+
+The rehearsal room (`rehearsal-{artist_id}`) and the show room
+(`shows.room_name`) are different LiveKit rooms, and they have to be — a
+rehearsal must never be able to collide with a broadcast. So "the phone
+follows" cannot mean "the same room stays valid". It has to mean the phone
+re-resolves its room.
+
+1. At redeem the device is handed a **pairing id** and a **device secret**
+   (random, never shown to a human, stored only as a SHA-256).
+2. It polls `POST /api/camfeed/session` every ~4s with both, and gets back the
+   room it belongs to, a token for that room, and a **generation counter**.
+3. At countdown-zero Kit Check calls `POST /api/camfeed/pair {action:'migrate',
+   show_id}`, which rewrites `target_room` on every one of that artist's live
+   pairings and bumps `generation`.
+4. The next poll returns a generation the phone has not seen. The phone
+   remounts its `LiveKitRoom` — keyed on `room:generation`, so this is a clean
+   unmount/mount, never a token swapped under a live connection — and it is in
+   the show room. Nobody picks up a phone.
+
+**Why a counter and not a timestamp.** The comparison has to be exact, and a
+phone's clock versus the server's clock is a difference we do not control.
+
+**Why the artist's client triggers it and not a server job.** The show room's
+name is only knowable once a specific show is resolved, and the artist's own
+client is the one thing that certainly knows which show it is walking into. A
+scheduler would have to guess, and guessing wrong puts a camera in somebody
+else's broadcast. The route re-checks show ownership server-side regardless.
+
+**Why the code cannot be the ongoing credential.** It is six characters
+because a human reads it off a screen in bad light. That is exactly why it
+must die at redeem and why a separate, long, machine-only secret carries the
+session.
+
+**Judgment call — the handover has a 2.5-second ceiling.** The migrate call is
+fired with a hard timeout, after which the artist is routed to the show
+regardless. A camera arriving four seconds into a show is a shrug; an artist
+arriving four seconds late is the show starting without them. If migrate
+fails, the phones stay in the rehearsal room and can be re-paired from the
+live screen — i.e. it degrades to the pre-tonight behaviour, never worse.
+
+**Judgment call — the device secret is held in tab memory only, not
+localStorage.** A phone that reloads has been picked up by a person, and a
+person can scan the code again. Persisting a publish credential to disk on a
+borrowed phone is a worse trade than one re-scan.
+
+**Pre-migration behaviour.** `pairingCapabilities()` probes once per server
+process for the columns `overnight2_01` adds. Without them: one rehearsal
+camera, no role, no follow — exactly today's behaviour — and Kit Check prints
+a sentence saying multi-camera switches on when the migration is applied.
+Nothing 500s and nothing is silently wrong.
+
+## Phase 0c — the leave crash
+
+**Root cause: a hooks-order violation, not a LiveKit or routing problem.**
+`RoomInner` had `if (left) return …` at line ~2790 and three hooks below it
+(`useMemo`, `useRef`, `useEffect`). While `left` was false all hooks ran; the
+instant Leave set it true the component returned three hooks short and React
+threw *"Rendered fewer hooks than expected"*. With no error boundary above it,
+that paints white.
+
+- **The guard was correct in isolation and the hooks were correct in
+  isolation.** What was wrong was a conditional return sitting above hooks in
+  a 2,300-line component, where that relationship is invisible from either
+  end.
+- **The sibling early return for `isCamFeed` has the identical defect and has
+  never crashed** — purely because `isCamFeed` is constant for the
+  component's whole life, so the branch is chosen once at mount. Noted rather
+  than "fixed": changing it would be churn, and the real fix is that the
+  crashing one no longer exists.
+- **The fix is not to move the return below the hooks.** A component rendering
+  "you left" from *inside* `<LiveKitRoom>` is still in the room. The state
+  moved up one level, to the component that owns `<LiveKitRoom>`, where
+  flipping it unmounts the room.
+- **Leave now routes.** Artists to `/artist/{id}` (their console — recordings,
+  next show, numbers), viewers to `/discover`. Destination is computed from
+  the profile role *before* the click, so pressing Leave never pauses to look
+  up who you are. Unknown role falls back to Discover, which works for every
+  account and is never a dead end.
+- **600ms, then navigate.** A beat after `room.disconnect()` so the route
+  change does not race LiveKit's teardown, and so the person who pressed Leave
+  gets a moment of confirmation rather than a screen swap that reads as a
+  glitch. A real link is rendered underneath in case that navigation is slow
+  or blocked.

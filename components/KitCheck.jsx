@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CameraRotate, VideoCamera, VideoCameraSlash } from '@phosphor-icons/react';
 import AudioDeckPanel from './AudioDeckPanel';
 import EmptyState from './EmptyState';
+import PairingPanel from './PairingPanel';
 import RehearsalRoom from './RehearsalRoom';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
@@ -64,7 +65,15 @@ export default function KitCheck() {
   const [handingOver, setHandingOver] = useState(false);
 
   // ── Add Camera (the documented LiveKit exception) ──────────
-  const [rehearsal, setRehearsal] = useState(null); // pairing session, or null
+  //
+  // Now a RIG, not a camera. `rehearsal` is the artist's own seat in the
+  // rehearsal room; `pairings` is every camera they have invited into it.
+  // The two used to be one object, which is precisely why only one phone
+  // could ever be paired: the state shape said "there is at most one".
+  const [rehearsal, setRehearsal] = useState(null); // artist's rehearsal session, or null
+  const [pairings, setPairings] = useState([]);     // camera invitations / paired devices
+  const [connectedRoles, setConnectedRoles] = useState([]);
+  const [pairDegraded, setPairDegraded] = useState(false);
   const [pairBusy, setPairBusy] = useState(false);
   const [pairError, setPairError] = useState('');
 
@@ -74,8 +83,16 @@ export default function KitCheck() {
   // from being the same temporal-dead-zone crash that took the live
   // page down, and the file shouldn't rely on that distinction holding.
 
+  const handleConnectedRoles = useCallback((roles) => setConnectedRoles(roles), []);
+
   function endRehearsal() {
     setRehearsal(null);
+    setConnectedRoles([]);
+    // The pairing rows deliberately SURVIVE ending a rehearsal. A code
+    // that stops working because the artist closed the composed view
+    // would be a trap: the phones are still propped, still paired, and
+    // will follow into the show. Revoking is an explicit act (REMOVE),
+    // not a side effect of tidying the screen.
   }
 
   useEffect(() => {
@@ -117,26 +134,89 @@ export default function KitCheck() {
     if (camOn) await startCamera(next);
   }, [facingMode, camOn, startCamera]);
 
-  async function addCamera() {
+  const pairFetch = useCallback(async (payload) => {
+    const res = await fetch('/api/camfeed/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, body };
+  }, [session]);
+
+  // Add ONE camera, in a named role. Called once per camera, which is
+  // the whole difference from the old single-shot version: the rehearsal
+  // room is opened on the first call and reused by every call after it,
+  // so cameras accumulate instead of replacing each other.
+  async function addCamera(role) {
     setPairError('');
     setPairBusy(true);
     try {
-      const res = await fetch('/api/camfeed/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ slot: 'a', show_id: upcoming?.id || null }),
+      let current = rehearsal;
+      if (!current) {
+        const { ok, body } = await pairFetch({ action: 'start' });
+        if (!ok) { setPairError(body.error || 'Could not open the rehearsal room.'); return; }
+        // Hand the camera over BEFORE connecting: Kit Check owns it
+        // locally, the rehearsal room needs to publish it, and two owners
+        // of one device produces a black tile.
+        stopCamera();
+        current = body;
+        setRehearsal(body);
+        setPairDegraded(!!body.degraded);
+      }
+
+      const { ok, body } = await pairFetch({
+        action: 'invite',
+        role,
+        slot: 'a',
+        context: 'rehearsal',
+        show_id: upcoming?.id || null,
       });
-      const body = await res.json();
-      if (!res.ok) { setPairError(body.error || 'Could not start a pairing session.'); return; }
-      // Hand the camera over BEFORE connecting: Kit Check owns it
-      // locally, the rehearsal room needs to publish it, and two owners
-      // of one device produces a black tile.
-      stopCamera();
-      setRehearsal(body);
+      if (!ok) { setPairError(body.error || 'Could not create a pairing code.'); return; }
+      if (body.degraded) setPairDegraded(true);
+      setPairings((prev) => [...prev.filter((p) => p.id !== body.pairing.id), body.pairing]);
+    } catch {
+      setPairError('Could not reach the pairing service.');
     } finally {
       setPairBusy(false);
     }
   }
+
+  async function removeCamera(id) {
+    setPairings((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await pairFetch({ action: 'revoke', id });
+    } catch {
+      // The card is already gone from the artist's screen; a failed
+      // revoke leaves a row that expires on its own. Never worth an
+      // error message about a camera they have already dismissed.
+    }
+  }
+
+  // Reload the rig on mount. An artist who paired three phones, wandered
+  // off to check the door and came back to a reloaded tab should find
+  // their cameras still listed rather than an empty panel implying they
+  // have to start again.
+  useEffect(() => {
+    if (!session?.access_token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/camfeed/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'list' }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (cancelled || !res.ok) return;
+        setPairDegraded(!!body.degraded);
+        if (Array.isArray(body.pairings) && body.pairings.length) setPairings(body.pairings);
+      } catch {
+        // A failed list is a cosmetic loss — pairing still works.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session]);
 
   // ── Local audio graph ──────────────────────────────────────
   const startAudio = useCallback(async () => {
@@ -228,17 +308,51 @@ export default function KitCheck() {
     if (!countdownVisible || handingOver) return;
     if (secondsToShowtime > 0) return;
     setHandingOver(true);
+
     // Release BEFORE handing over: the live path acquires its own
     // camera, and two owners of one device is how you get a black
     // frame on stage.
     stopCamera();
     stopAudio();
-    // THE HANDOFF. The id is what makes /live resolve THIS show's room.
-    // router.push (not a full page load) is deliberate: the Supabase
-    // session lives in this tab and a client-side navigation carries it,
-    // along with everything else already warm.
-    router.push(`/live?show=${upcoming.id}`);
-  }, [countdownVisible, secondsToShowtime, handingOver, router, upcoming, stopCamera, stopAudio]);
+
+    // ── PHASE 0b: THE RIG COMES TOO ────────────────────────────
+    // This is the whole reason Kit Check exists: position once, go live
+    // with everything already in place. The rehearsal room and the show
+    // room are different LiveKit rooms, so "everything" has to include
+    // the phones — and a phone cannot follow a room it was told about
+    // once, at redeem time.
+    //
+    // So it doesn't. Each paired phone polls its own pairing row for the
+    // room it should currently be in. This call rewrites that column to
+    // the show's room and bumps a generation counter; every propped
+    // phone sees the change on its next poll (~4s) and reconnects itself
+    // to the show room with a fresh token. Nobody walks across the room.
+    //
+    // Fire-and-forget with a hard 2.5s ceiling. The artist's own handover
+    // is the thing that must not be late — a camera arriving four seconds
+    // into a show is a shrug; an artist arriving four seconds late is the
+    // show starting without them. If the migrate call is slow or fails,
+    // the phones simply stay in the rehearsal room and can be re-paired
+    // from the live screen, which is the pre-tonight behaviour.
+    const go = () => router.push(`/live?show=${upcoming.id}`);
+    const token = session?.access_token;
+    if (!token) { go(); return; }
+
+    let done = false;
+    const guard = setTimeout(() => { if (!done) { done = true; go(); } }, 2500);
+    fetch('/api/camfeed/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: 'migrate', show_id: upcoming.id }),
+    })
+      .catch(() => {})
+      .finally(() => {
+        if (done) return;
+        done = true;
+        clearTimeout(guard);
+        go();
+      });
+  }, [countdownVisible, secondsToShowtime, handingOver, router, upcoming, stopCamera, stopAudio, session]);
 
   if (session === null) {
     return <div style={{ padding: 40, fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>;
@@ -335,29 +449,26 @@ export default function KitCheck() {
                 artist knowing they are costing nothing -- and a feature
                 that quietly broke that would poison the rest of it. */}
             <div style={{ marginTop: 16, border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 700 }}>Add a camera</div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Your cameras</div>
               <div style={{ fontSize: 11.5, color: 'rgba(1,22,39,0.55)', marginTop: 6, lineHeight: 1.55 }}>
-                Pair a phone as a second camera and see the composed view. Moving video between two devices
+                Prop a phone for each angle you want. Scan the code with it, or tap the link, or type the six
+                characters — whichever is easiest with the phone in your hand. Moving video between devices
                 needs a connection, so this is the <strong>one part of Kit Check that goes online</strong> —
                 a rehearsal room, capped at 20 minutes, separate from your show.
               </div>
 
-              {pairError && <div style={{ fontSize: 12, color: '#e71d36', marginTop: 8 }}>{pairError}</div>}
-
-              {!rehearsal ? (
-                <button type="button" onClick={addCamera} disabled={pairBusy} style={{ ...btn(false), marginTop: 12 }}>
-                  {pairBusy ? 'STARTING…' : 'ADD CAMERA'}
-                </button>
-              ) : (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>PAIRING CODE</div>
-                  <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: '0.16em', marginTop: 4 }}>{rehearsal.code}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(1,22,39,0.55)', marginTop: 6, lineHeight: 1.5 }}>
-                    On the other phone, open <strong>{typeof window !== 'undefined' ? window.location.origin : ''}/cam/pair</strong> and enter this code.
-                    It works once, and expires in 10 minutes.
-                  </div>
-                </div>
-              )}
+              <div style={{ marginTop: 12 }}>
+                <PairingPanel
+                  pairings={pairings}
+                  connectedRoles={connectedRoles}
+                  onAdd={addCamera}
+                  onRevoke={removeCamera}
+                  busy={pairBusy}
+                  error={pairError}
+                  tone="light"
+                  degraded={pairDegraded}
+                />
+              </div>
             </div>
           </div>
 
@@ -365,7 +476,7 @@ export default function KitCheck() {
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
             {rehearsal && (
               <div style={{ marginBottom: 18 }}>
-                <RehearsalRoom session={rehearsal} onEnd={endRehearsal} />
+                <RehearsalRoom session={rehearsal} onEnd={endRehearsal} onConnectedRoles={handleConnectedRoles} />
               </div>
             )}
             {!audioNodes && (
