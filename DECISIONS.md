@@ -403,3 +403,78 @@ that paints white.
   gets a moment of confirmation rather than a screen swap that reads as a
   glitch. A real link is rendered underneath in case that navigation is slow
   or blocked.
+
+## Phase 1 — onboarding, both roles
+
+**The shape of the screen is an argument about what onboarding is for.**
+It is not a form to be completed before the product unlocks — the product is
+already unlocked. It is the shortest path from "I just made an account" to
+"I have done the one thing that makes this place work for me": for an artist,
+a date in the diary; for a fan, a reason for Discover to show them anything.
+
+- **Three rules, enforced structurally rather than by good intentions.**
+  Skippable (every step has a real button with a plain word on it, the same
+  size as the primary action, not a grey link in a corner). Resumable
+  (progress saved per step; coming back lands on the first step that is
+  neither done nor skipped). Never blocking (LEAVE is in the top right of
+  every step, and the walkthrough renders *inside* PageShell with the sidebar
+  live — the point made structurally, not just in copy).
+- **A skipped step is an answer, not a gap.** The resume nudge only appears
+  when there is a step the person has neither done nor deliberately passed on.
+  Asking again after someone has said no is nagging.
+- **Hand-off steps mark themselves complete before navigating.** An artist who
+  goes off to schedule a show has done that step; making them come back and
+  press "done" is asking them to file a report on themselves.
+- **Signup routes to `/welcome`; login does not.** Routing every login through
+  onboarding until it is "complete" turns a skippable helper into a gate that
+  reappears every session. Returning accounts get the dismissible bar instead.
+  A `?next=` still wins — someone who followed a show link and signed up to
+  watch it lands on the show.
+- **The nudge is never rendered on a live surface.** Gated in PageShell on
+  `!liveOverlay` rather than inside the component, so no live surface can
+  accidentally opt back in. A setup reminder over someone's performance is
+  indefensible.
+- **Dismiss lasts the browser session.** Not forever (they may have meant "not
+  now") and not one page load (that would make it a nag).
+
+**Judgment call — onboarding state is one jsonb blob, not a column per step.**
+Onboarding steps are product, and product changes weekly. Adding a step should
+not be a migration, and reordering steps must never be able to reinterpret
+existing progress — so the blob stores step KEYS, and an unknown key is
+ignored.
+
+**Judgment call — a localStorage fallback, which is normally the wrong
+answer.** `profiles.onboarding` arrives with a migration I cannot run. Rather
+than break a brand-new account's first minute in the product, a failed write
+falls back to localStorage keyed by user id, and upgrades itself silently the
+first time the real column accepts a write. This is defensible *here and
+nowhere else*: onboarding progress is the lowest-stakes data in the product,
+and the worst case of losing it is being offered a setup step twice.
+
+## Phase 1 — the FOLLOW button became real
+
+Viewer onboarding's second step is "follow a few artists", which cannot be a
+real step against a button that has always honestly admitted it does nothing.
+So `follows` exists now (`docs/overnight2_03_follows.sql`), and
+`ProfileSurface`'s button is wired to it.
+
+- **Composite primary key `(follower_id, artist_id)`, no surrogate id.** The
+  natural key *is* the fact. One person cannot follow one artist twice, and
+  expressing that as the key means the database enforces it rather than the
+  app remembering to.
+- **No UPDATE policy.** A follow is created or deleted; an UPDATE policy could
+  only ever be a way to rewrite who followed whom.
+- **The follow graph is private, and no surface claims a follower count.**
+  RLS lets a fan read their own follows and an artist read their own
+  followers. Nobody can enumerate a third party's. A consequence worth naming
+  rather than discovering later: a client-side `count` under these policies
+  returns the caller's own row, so it would render "1 follower" for everyone.
+  A public count needs a security-definer function or a maintained counter
+  column — neither is built, and nothing displays a number it cannot support.
+- **Suggestions are genre-matched then newest-first, deliberately NOT ranked
+  by popularity.** At this platform's size a popularity ranking is a handful of
+  accounts shown to everyone forever, which is how a new artist never gets a
+  first listener.
+- **The button still admits when it cannot work.** If the migration has not
+  been run, it disables itself and says so, exactly as the old placeholder did.
+  That habit was right and is kept.

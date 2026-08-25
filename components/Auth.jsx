@@ -80,6 +80,24 @@ export default function Auth() {
     return dbRole === 'artist' ? '/dashboard' : '/discover';
   }
 
+  // A brand-new account goes to the walkthrough; everyone else goes where
+  // they were headed.
+  //
+  // Only on SIGN-UP, deliberately. Routing every login through onboarding
+  // until it is "complete" would turn a skippable helper into a gate that
+  // reappears every session — and someone who skipped the photo step has
+  // already told us their answer. Returning accounts get the dismissible
+  // bar (components/OnboardingNudge.jsx) instead, which they can act on
+  // or ignore.
+  //
+  // A ?next= still wins: someone who followed a show link and signed up to
+  // watch it should land on the show, not on a setup screen. The nudge
+  // catches them afterwards.
+  function signupDestinationFor(dbRole) {
+    if (nextParam && nextParam.startsWith('/')) return nextParam;
+    return '/welcome';
+  }
+
   // Already signed in? Don't show a login form. Runs once on mount; the
   // redirect is `replace` so Back doesn't bounce them straight here again.
   useEffect(() => {
@@ -170,7 +188,7 @@ export default function Auth() {
           return;
         }
         setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
-        router.push(destinationFor(dbRole));
+        router.push(signupDestinationFor(dbRole));
       } else {
         const result = await signIn({ email: email.trim(), password });
         if (result.error) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Bell, GearSix, Wallet, ChatCircleText, UserPlus } from '@phosphor-icons/react';
 import AvatarRing from './AvatarRing';
@@ -11,6 +11,7 @@ import BRollLibrary from './BRollLibrary';
 import RecordingsLibrary from './RecordingsLibrary';
 import { getSupabase } from '../lib/supabaseClient';
 import { getSession } from '../lib/supabaseAuth';
+import { fetchFollowedArtistIds, followArtist, unfollowArtist } from '../lib/follows';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -53,6 +54,27 @@ export default function ProfileSurface({ artistId }) {
   const [viewer, setViewer] = useState(undefined); // undefined = unknown
   const [profile, setProfile] = useState(undefined);
   const [upcoming, setUpcoming] = useState([]);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followsSupported, setFollowsSupported] = useState(true);
+  const [followBusy, setFollowBusy] = useState(false);
+
+  // Optimistic, and reverted on failure. Following is low-stakes and
+  // instantly reversible; a button that waits for a round trip before
+  // acknowledging a tap reads as broken.
+  const toggleFollow = useCallback(async () => {
+    if (!viewer?.id) { window.location.href = '/auth'; return; }
+    const wasFollowing = isFollowing;
+    setIsFollowing(!wasFollowing);
+    setFollowBusy(true);
+    const res = wasFollowing
+      ? await unfollowArtist(viewer.id, artistId)
+      : await followArtist(viewer.id, artistId);
+    if (!res.ok) {
+      setIsFollowing(wasFollowing);
+      if (res.supported === false) setFollowsSupported(false);
+    }
+    setFollowBusy(false);
+  }, [viewer, artistId, isFollowing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +82,14 @@ export default function ProfileSurface({ artistId }) {
       const session = await getSession();
       if (cancelled) return;
       setViewer(session?.user ?? null);
+
+      if (session?.user?.id && session.user.id !== artistId) {
+        const followed = await fetchFollowedArtistIds(session.user.id);
+        if (!cancelled) {
+          setIsFollowing(followed.ids.has(artistId));
+          setFollowsSupported(followed.supported);
+        }
+      }
 
       const supabase = getSupabase();
       const { data } = await supabase
@@ -144,12 +174,28 @@ export default function ProfileSurface({ artistId }) {
               </>
             ) : (
               <>
-                {/* Follow and message have no backing tables yet. They
-                    say so rather than pretending to work -- a follow
-                    button that silently does nothing is worse than one
-                    that admits it isn't built. */}
-                <button type="button" disabled title="Following isn't built yet" style={{ ...ghostBtn, opacity: 0.45, cursor: 'not-allowed' }}>
-                  <UserPlus size={13} weight="bold" /> FOLLOW
+                {/* FOLLOW is real now — there is a `follows` table
+                    behind it (docs/overnight2_03_follows.sql). It keeps
+                    the old habit of admitting when it cannot work: if
+                    that migration has not been run, `followsSupported`
+                    goes false and the button says so rather than
+                    swallowing taps.
+
+                    MESSAGE still has no backing table and is unchanged. */}
+                <button
+                  type="button"
+                  onClick={toggleFollow}
+                  disabled={!followsSupported || followBusy}
+                  title={followsSupported ? undefined : 'Following switches on once the pending migration is applied'}
+                  style={{
+                    ...ghostBtn,
+                    opacity: followsSupported ? 1 : 0.45,
+                    cursor: followsSupported ? 'pointer' : 'not-allowed',
+                    color: isFollowing ? TEAL : INK,
+                    border: isFollowing ? `1px solid ${TEAL}` : '1px solid rgba(1,22,39,0.2)',
+                  }}
+                >
+                  <UserPlus size={13} weight="bold" /> {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
                 </button>
                 <Link href="/messages" style={ghostBtn}>
                   <ChatCircleText size={13} weight="bold" /> MESSAGE
