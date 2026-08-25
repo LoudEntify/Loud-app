@@ -1,7 +1,7 @@
 # MORNING BRIEF — overnight build #2
 
 25 August 2026 · branch `feature/overnight-round-2` · head `fe978f5`
-Preview: `https://loud-3d42nw8l5-korey-alashe.vercel.app`
+Preview: `https://loud-b4tzjj6jv-korey-alashe.vercel.app`
 
 **Nothing is merged. Nothing touched production. I did not touch the
 database.**
