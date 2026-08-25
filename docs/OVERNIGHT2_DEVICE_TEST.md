@@ -12,8 +12,9 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-8mu8h401a-korey-alashe.vercel.app` |
-| **Head commit** | `fe978f5` |
+| **Preview** | `https://loud-3d42nw8l5-korey-alashe.vercel.app` |
+| **Last code commit** | `fe978f5` (everything after it is documentation only) |
+| **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
 | **Production deployed** | **No.** Preview only, every time. |
 
@@ -290,7 +291,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-8mu8h401a-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-3d42nw8l5-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \
