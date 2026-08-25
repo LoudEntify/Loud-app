@@ -152,15 +152,16 @@ export default function KitCheck() {
     setPairError('');
     setPairBusy(true);
     try {
-      let current = rehearsal;
-      if (!current) {
+      // The rehearsal room is opened once, on the first camera, and
+      // reused by every one after it. That reuse is the whole difference
+      // from the old single-shot version.
+      if (!rehearsal) {
         const { ok, body } = await pairFetch({ action: 'start' });
         if (!ok) { setPairError(body.error || 'Could not open the rehearsal room.'); return; }
         // Hand the camera over BEFORE connecting: Kit Check owns it
         // locally, the rehearsal room needs to publish it, and two owners
         // of one device produces a black tile.
         stopCamera();
-        current = body;
         setRehearsal(body);
         setPairDegraded(!!body.degraded);
       }
