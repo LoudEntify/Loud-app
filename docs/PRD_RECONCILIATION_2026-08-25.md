@@ -1,6 +1,6 @@
 # PRD RECONCILIATION — 25 August 2026
 
-Branch `feature/overnight-round-2` · preview `https://loud-b4tzjj6jv-korey-alashe.vercel.app`
+Branch `feature/overnight-round-2` · preview `https://loud-2xhs99yds-korey-alashe.vercel.app`
 
 ---
 
@@ -52,7 +52,32 @@ migrated behaviour.
 # SECTION A — rows I can key by number
 
 ### Row 14 · B-roll
-**PARTIAL — unchanged tonight.**
+**BUILT-UNTESTED** *(updated — was PARTIAL/skipped on the overnight run, then
+built as its own round, commit `0ecdf8f`)*.
+
+Live playback into the broadcast now exists: the artist cues an uploaded clip,
+it publishes as a real LiveKit track, and the **B-Roll Clip** shot cuts to it
+like any other source — live and in cue sheets. When it ends the shot returns
+to the camera that was on air, with the cut firing before the track is
+unpublished so no CAMERA LOST can appear.
+
+- **Verified without a show:** `lib/trackSources.js` exercised directly in node,
+  14/14, including the exact bug case (two tracks, one participant identity —
+  a clip-targeted command matches the clip and not the camera, and the reverse).
+  `/live` and `/egress` load via bypass and the served bundle contains the
+  b-roll code.
+- **Needs a live show to confirm** the thing that matters: cue a clip and see
+  the clip, not your face, on both devices — and a clean return with no CAMERA
+  LOST. `docs/OVERNIGHT2_DEVICE_TEST.md` § 3.6b.
+- **Still not built:** clip audio into the broadcast (the element is muted and
+  only video is published, per the upload policy — mixing it into the Web Audio
+  graph is a separate feature), and Safari, where `captureStream` does not
+  exist and the panel says so.
+
+The original skip note follows, kept because it is the clearest statement of
+what the blocker was.
+
+**PARTIAL — as of the overnight run.**
 Upload, library, storage and deletion all exist (`components/BRollLibrary.jsx`,
 `app/api/broll/*`). What the PRD asks for and does not exist is **live playback
 into the broadcast as a cuttable director source**.
@@ -142,7 +167,7 @@ are not echoed to their sender). Rate-limited at 150ms on the sender.
 | ONE pairing mechanism, both contexts | **BUILT+VERIFIED-BY-BYPASS (code)** | `PairingPanel` replaces both the Kit Check code panel and `CameraQRPanel`. The old component is **deleted**, not deprecated — its QR codes contained bare room+slot URLs with no credential, readable off a stream. |
 | QR + clickable link + code, all three | **BUILT-UNTESTED** | Scanning auto-redeems (`/cam/pair?code=…`). |
 | Cameras survive Kit Check → live | **BUILT-UNTESTED** | The mechanism: the phone polls `/api/camfeed/session` for the room its pairing currently points at; countdown-zero rewrites `target_room` and bumps `generation`; the phone remounts into the show room. Verified by bypass that the route answers `{"supported":false,"pollMs":4000}` **pre-migration** — i.e. the graceful path works. The migrated path needs two devices. |
-| B-roll live into the broadcast | **NOT STARTED — skipped with reasons** | Row 14 above. |
+| B-roll live into the broadcast | **BUILT-UNTESTED** *(updated)* | Row 14 above. Source discrimination moved from participant identity to the publication; six parse sites converted. |
 
 ## Recording & Distribution
 
@@ -328,10 +353,32 @@ two-second blip into a twenty-second one.
 **🔴 NEW —** **Leaving a show must clear the resume marker.** Otherwise the app
 argues with something the person meant to do.
 
-**🔴 NEW —** **Camera roles must eventually move off participant identity and
-onto per-publication metadata.** This is the blocking refactor for row 14, and
-it is a requirement in its own right — the current scheme means one participant
-can only ever be one source.
+**🔴 NEW —** **Camera roles must not be parsed from participant identity.**
+*(Was "must eventually move"; done in `0ecdf8f`.)* Source is a property of the
+PUBLICATION, not of the participant — the identity scheme meant one participant
+could only ever be one source. `lib/trackSources.js` is now the only module
+that answers "what is this track", and it states the rule both ways: no b-roll
+track may resolve to a camera role, and no camera role may resolve to a b-roll
+track. Any new surface that resolves a track must use it rather than adding a
+seventh parser.
+
+**🔴 NEW —** **A shot command must identify a TRACK, not just a participant.**
+`targetSourceKey` alongside `targetIdentity`. Absent it, a command meaning "the
+clip" resolves to "the face" on every receiving client.
+
+**🔴 NEW —** **Automatic directors may never choose b-roll.** Auto and staccato
+are filtered to camera roles. Cutting to a clip is an editorial decision about
+one's own material; a rotation timer making it is the machine making that call.
+A cue sheet may, because an authored cue is a human decision made in advance.
+
+**🔴 NEW —** **A source that is expected to end must not be reported as a
+failure.** The liveness registry forgets a b-roll track immediately on absence
+under its own event, rather than marking it impaired for 30 seconds under a row
+that reads exactly like a camera dying.
+
+**🔴 NEW —** **A cut away from a track must reach clients before that track is
+unpublished.** Otherwise the gap renders as CAMERA LOST over a frozen frame,
+for something that ended exactly as intended.
 
 ---
 

@@ -12,8 +12,8 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-b4tzjj6jv-korey-alashe.vercel.app` |
-| **Deployed from** | `a464eb0` — the last commit that changes code. Everything after it is documentation. |
+| **Preview** | `https://loud-2xhs99yds-korey-alashe.vercel.app` |
+| **Deployed from** | `0ecdf8f` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
 | **Production deployed** | **No.** Preview only, every time. |
@@ -27,6 +27,7 @@ and not five.
 | 2 | `d482c17` | Request my data, close my account, log out everywhere |
 | 3 | `3517b8a` | Token economy, provider-agnostic checkout, signed finance webhook |
 | 4 | `fe978f5` | Egress verification, reactions, share cards, resume ladder, Discover |
+| 4e | `0ecdf8f` | **B-roll live playback** — source discrimination at the root, then the clip path |
 
 ### Bypass-loaded confirmation, per phase
 
@@ -49,6 +50,8 @@ shipped, not just committed" line for each phase.
 | **4** | `POST /api/egress/webhook` (unsigned) | `400 {"error":"Signature verification failed"}`. |
 | **4** | `GET /api/egress/verify` | `405` — route deployed, POST-only. |
 | **4** | `POST /api/reactions` | `500 {"ok":false,"error":"Insert failed"}` **pre-migration** — which the client ignores by design, so reactions still work. |
+| **4e** | `/live`, `/egress` | HTTP 200 each. Served `/live` bundle grepped: contains `B-Roll Clip`, `broll`, `captureStream`, `maintain-resolution`, `targetSourceKey`. |
+| **4e** | `lib/trackSources.js` unit-exercised in node against the real module | 14/14 pass, including the exact bug case: two tracks sharing one participant identity, where a clip-targeted command matches the clip and **does not** match the camera (and the reverse). Legacy commands with no source key still match on identity alone. |
 | all | `/`, `/shows`, `/notifications` | HTTP 200 each. |
 
 **What that does NOT prove**, stated plainly: no live show was run, no phone
@@ -286,12 +289,112 @@ Rejoin as the viewer. Then, on the **artist laptop**, press **Leave**.
 
 Go back in and **END SHOW** properly.
 
+### 3.6b ★ B-ROLL CLIP, live into the broadcast ★
+
+**Do this before Leave (3.6) — it needs the show still running.**
+
+**Prerequisites**, and check them first because two of them will otherwise
+look like bugs:
+
+> ☐ You are on **Chrome or Edge, on a computer**. Safari cannot hand a video
+>   file to a live stream (`captureStream` is not implemented) and the panel
+>   will say so instead of offering buttons. That message is the feature
+>   working, not a failure.
+> ☐ You have **at least one clip uploaded** — profile → B-roll library. Upload
+>   one now if not; a short clip (10–30s) makes this test much faster than a
+>   three-minute one.
+> ☐ The **viewer device is watching** the show. Half of what is being tested
+>   is what *they* see.
+
+#### The panel
+
+On the artist laptop, open the **SHOTS** panel.
+
+> ☐ A **B-ROLL** section is listed under the shot groups, with a button per clip
+> ☐ Under Static, a **B-Roll Clip** button exists and is **greyed out** — you
+>   cannot cut to a clip that isn't playing yet
+> ☐ The note reads *"Clip audio stays off — the show keeps your sound."*
+
+#### ★ Cue it ★
+
+Tap a clip.
+
+> ☐ **The stage shows the clip — NOT your face.** This is the whole round. If
+>   you see yourself here, stop and tell me: it means a parse site resolved a
+>   b-roll track as a camera.
+> ☐ **The viewer sees the clip too**, within a moment
+> ☐ The clip button turns orange with a ■ (tap again to take it off)
+> ☐ **B-Roll Clip** in Static is now enabled and shows as the active shot
+> ☐ The note changes to *"On air. Cuts back to your camera when it ends."*
+
+#### ★ Audio ★
+
+> ☐ **You still hear the artist, not the clip.** The clip is silent on both
+>   devices. If you hear clip audio, that is a policy break worth reporting
+>   immediately.
+
+#### ★ Let it end — the important part ★
+
+Do nothing. Watch both screens as the clip finishes.
+
+> ☐ At the end, the stage **cuts back to your camera on its own**
+> ☐ **NO "CAMERA LOST" pill appears** — not on the artist screen, not on the
+>   viewer's. Not for a frame.
+> ☐ **No frozen frame** hanging after the clip
+> ☐ The clip button goes back to grey with a ▶
+> ☐ **B-Roll Clip** in Static is greyed out again
+
+If a CAMERA LOST pill flashes even briefly, note **which device** and roughly
+how long — that points at the cut/unpublish ordering rather than at the
+discrimination fix.
+
+#### Cutting away mid-clip
+
+Cue the clip again, and while it is still playing tap **WIDE**.
+
+> ☐ The stage cuts to the wide shot immediately
+> ☐ The clip comes off air on its own (button returns to ▶) — it is not left
+>   playing to nobody
+> ☐ No CAMERA LOST
+
+#### The automatic paths must NOT touch it
+
+Cue a clip, and while it plays switch the mode control to **Auto**.
+
+> ☐ Auto cuts between your **cameras** and never to the clip
+> ☐ (Auto cutting away from the clip is correct and expected — it takes the
+>   clip off air, same as a manual cut away)
+
+And with **no clip playing**:
+
+> ☐ Tapping the greyed-out **B-Roll Clip** does nothing — it must never cut to
+>   your camera "instead"
+> ☐ Start **Staccato** with a clip playing: the rapid cuts go between cameras
+>   only, never into the clip
+
+#### ★ The recording ★
+
+This is checked in 3.7 below, but note it now so you know what to look for:
+
+> ☐ When you review the recording, the b-roll segment is **in the file**, at
+>   the point where you cued it — not your camera at that timestamp
+
+#### If something looks wrong
+
+Reload `/live?show=…&debug=1` and reproduce. The console prints one
+`[renderSlot:a]` line per resolution change, and it now prints **source keys**
+rather than identities — so a cut to the clip reads
+`…#broll` and a cut to your camera reads `…#camera`. Those two strings sharing
+an identity and differing only in the suffix is exactly the distinction this
+round added; a line showing `chosen=…#camera` while `target=…#broll` is the
+bug, and is the single most useful thing you could send me.
+
 ### 3.7 Recording verification (Phase 4a)
 Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-b4tzjj6jv-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-2xhs99yds-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \
@@ -475,8 +578,12 @@ the live path is where a silent failure looks like a working one.
 - The egress webhook never fires on the preview (LiveKit cannot reach a
   protected deployment). Use the manual verify route.
 - Comments vanish for anyone who joins late — they are ephemeral by design.
-- B-roll cannot be cut into the broadcast. Skipped deliberately; reasons in
-  `DECISIONS.md` § Phase 4e.
+- B-roll on Safari or on a phone: the panel says the browser cannot do it.
+  That is `captureStream` genuinely being unimplemented there, not a bug.
+- A cue sheet can cut to a clip that is already playing but cannot START one.
+  Starting playback is a deliberate act at the console.
+- Auto and Staccato never cut to a clip. That is deliberate — see
+  `DECISIONS.md` § B-roll live playback.
 - Followed artists only sort to the top of the *loaded* page of Discover.
 - No follower counts anywhere. The follow graph is private and a client-side
   count would read "1" for everybody.

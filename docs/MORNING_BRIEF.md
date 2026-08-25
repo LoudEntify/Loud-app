@@ -1,7 +1,7 @@
 # MORNING BRIEF — overnight build #2
 
-25 August 2026 · branch `feature/overnight-round-2` · code head `a464eb0`
-Preview: `https://loud-b4tzjj6jv-korey-alashe.vercel.app`
+25 August 2026 · branch `feature/overnight-round-2` · code head `0ecdf8f`
+Preview: `https://loud-2xhs99yds-korey-alashe.vercel.app`
 
 **Nothing is merged. Nothing touched production. I did not touch the
 database.**
@@ -592,8 +592,29 @@ Three further blockers, each independently sufficient:
    resolution that is wrong for viewers is baked into the file permanently.
 
 **The right sequence** is: per-publication source metadata (a refactor worth
-doing on its own merits) → b-roll as a source → audio mixing. That refactor is
-the next real piece of live work.
+doing on its own merits) → b-roll as a source → audio mixing.
+
+**That is exactly what was then done.** The first two are built; audio mixing
+is not, and clip audio stays muted as the upload policy already required. In
+short:
+
+* Role now comes from the **publication** (a track named `broll`), not from the
+  participant identity. All six parse sites converted, plus a fifth local copy
+  in the rehearsal room.
+* Commands carry a `targetSourceKey` as well as an identity, so "the clip" and
+  "the face" can never be confused — backward compatible, so a mid-deploy mix
+  of clients keeps working.
+* `B-Roll Clip` is a **new** shot rather than the existing `B-Roll` taught to
+  prefer a clip: `bRoll` is in staccato's pool and is the side camera's nearest
+  shot, so overloading it would have the sequencer hard-cutting into a playing
+  clip every 500ms.
+* Clip ends → **auto-cut back** to the shot that was on air, re-resolved so a
+  camera that dropped mid-clip is not returned to. **The cut fires before the
+  track is unpublished**, which is what keeps CAMERA LOST off the screen.
+* Auto and staccato are filtered to cameras and can never choose a clip. A cue
+  sheet can cut to a playing clip but cannot start one.
+* **Safari cannot do this** (`captureStream` is unimplemented) and is told so
+  in plain words rather than given a button that does nothing.
 
 ## 4f — The resume ladder
 
