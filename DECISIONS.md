@@ -928,3 +928,208 @@ the morning brief as the next real piece of live work.
   `cancelled_at` each arrive with a different hand-run migration, and naming a
   column before it exists 400s the whole query rather than returning null for
   it — which would empty Discover on an unmigrated database.
+
+---
+
+# B-ROLL LIVE PLAYBACK — 2026-08-25
+
+The deliberately-skipped Phase 4e, built. Branch `feature/overnight-round-2`.
+The earlier reasoning stands and this round did what those notes said was the
+correct sequence: fix source discrimination at the root first, then build the
+playback path on top of it.
+
+## 1 · Source discrimination — the actual blocker
+
+**The problem restated precisely.** "What kind of shot is this track" was
+answered by parsing the LiveKit PARTICIPANT IDENTITY — `camfeed-a-wide-3f9c`,
+split on hyphens, take the third piece — in **six** places across three files.
+That is correct exactly as long as one participant publishes one track. A
+b-roll clip is published by the artist's own participant, so every one of those
+parsers would look at a clip, read `contestant-a-…`, and answer "the
+performer's camera". The director taps B-ROLL and gets a face; the recorder
+bakes it in.
+
+**The fix: the discriminator moved down a level, from the participant to the
+publication.** A track published with the name `broll` is a clip. Identity
+still answers *whose is it and which slot* — which is genuinely what identity
+is for. It no longer answers *what is it*.
+
+`lib/trackSources.js` is now the only module that answers that question, and
+it states its rule at the top so any parser can be checked against it:
+
+> No function may ever resolve a b-roll track to a camera role, and no camera
+> role may ever resolve to a b-roll track.
+
+**Both directions matter.** The first stops a cut to b-roll landing on a face.
+The second stops a cut to WIDE landing on a clip — the same bug arrived at
+backwards, and the one that would have been found later and blamed on
+something else.
+
+### All six parse sites, converted
+
+| # | Site | Was | Now |
+|---|---|---|---|
+| 1 | `LiveDemo.tracksForSlot` | identity prefix | `belongsToSlot` — b-roll stays IN the pool, on purpose: ShotVideo needs a layer to cut to |
+| 2 | `LiveDemo.presentSlots` | `startsWith('contestant-')` | `isPerformerCameraTrack` — a clip must never make an empty stage read as occupied |
+| 3 | `LiveDemo.availableRoles` | `id.split('-')[2]` | `roleOfTrack` — this is what surfaces `broll` to the console |
+| 4 | `LiveDemo.setActiveForSlot` | identity prefix | resolves the picked track, then `roleOfTrack` |
+| 5 | `LiveDemo.renderSlot` + `EgressPage.renderSlot` | `identity === targetIdentity` | `matchesTarget` — **the line where the bug would actually have happened** |
+| 6 | `LiveDemo` blur-fill | identity match | `matchesTarget` — otherwise the desktop background sits on the camera while the stage shows a clip |
+
+Plus `resolveTargetIdentity` in `lib/shotCommands.js`, and
+`components/RehearsalRoom.jsx`'s local `roleOf` — a fifth copy that was correct
+in isolation and is exactly the kind of thing that made one change break four
+places at once. It now uses the shared resolver even though a rehearsal room
+has no b-roll to discriminate.
+
+**Judgment call — `targetIdentity` was not enough, so commands carry
+`targetSourceKey`.** Identity plus what the track is (`…#broll` / `…#camera`).
+Backward compatible by construction: a command without one matches on identity
+alone, exactly as before, so a mid-deploy mix of old and new clients keeps
+working rather than mis-resolving.
+
+**Judgment call — ScreenShare, not a second Camera source.**
+`<LiveKitRoom video>` drives `setCameraEnabled()`, which owns the Camera source
+and **re-asserts itself on every SignalConnected** — there are already two
+fixes in this file (1b, 1d) that exist because of that re-assertion. A second
+Camera-source track invites the SDK's camera management to mute, replace or
+stop the clip on any reconnect. ScreenShare is a source that path never
+touches. The cost is one line per surface, and that cost is a feature: a
+surface sees b-roll only if someone decided it should. `CamPage` (a phone
+looking at itself) and `RehearsalRoom` are correctly left on Camera alone.
+
+**Judgment call — `bRollClip` is a NEW shot, not `bRoll` taught to prefer a
+clip.** The instruction said "the B-Roll shot cuts to it", and overloading the
+existing one was the obvious reading. It is wrong for two concrete, checkable
+reasons: `bRoll` is in **staccato's pool**, so the sequencer would hard-cut
+into a playing clip every 500ms; and it is `NEAREST_SHOT_FOR_ROLE.side`, so
+picking the side camera from the feed strip would resolve to the clip. Both are
+silent, both only appear mid-show, and both would be diagnosed as "b-roll is
+broken". Two shots, one family, sitting next to each other in the Static group.
+
+**`strictSource`.** `resolveSourceRole` falls back to `availableRoles[0]` when
+a shot's declared source isn't live — which for `bRollClip` is the artist's own
+camera. Tapping B-ROLL CLIP with nothing cued would have cut to the performer's
+face under a command that said "clip": the original bug, reintroduced from the
+other end. `strictSource` makes the shot refuse to resolve instead. Every
+caller already treats a null `sourceRole` as "skip the cut", so refusing is a
+supported answer rather than an edge case.
+
+## 2 · Playback path, and what happens when the clip ends
+
+Artist taps a clip → signed URL (owner-checked server-side, unchanged route) →
+hidden muted `<video>` → `captureStream()` → published as `broll` → the
+`bRollClip` shot cuts to it.
+
+- **Cue and cut are ONE action.** Splitting "load" from "take" is the
+  broadcast-desk metaphor and it is wrong here: there is one operator, they are
+  also performing, and a two-step control during a song is a step they will get
+  wrong.
+- **Tapping the playing clip again takes it off air.** Obvious meaning, one
+  fewer control.
+- **Clip audio never leaves the element.** The element is muted and only
+  `getVideoTracks()[0]` is published. That is the standing upload policy and
+  also the only safe answer: the broadcast carries ONE processed audio track
+  out of the Web Audio graph, and a second published audio track would double
+  the room's audio rather than mix into it. Mixing clip audio into the graph is
+  a real, separate feature.
+- **The element is attached to the DOM** (2px, invisible). Several browsers
+  will not decode a video element that has never been attached, and an element
+  that never paints captures a black stream.
+
+### When the clip ends — the deliberate behaviour
+
+**Auto-cut back to the shot that was on air when the clip was cued.**
+
+- **Restored by shot KEY, not by replaying the old command.** The return
+  re-resolves against whatever cameras are live *now*, so a camera that dropped
+  during the clip is never cut back to.
+- **No previous shot → `wide`.** Cueing a clip as the first shot of a show is
+  legitimate, and the thing to come back to is the widest honest view.
+- **THE CUT FIRES BEFORE THE TRACK IS UNPUBLISHED.** This is the ordering that
+  matters. If the track vanished first, every client that hadn't yet applied
+  the return command would be looking at a shot whose target had gone — a
+  frozen frame under a CAMERA LOST pill, for a clip that ended exactly as
+  intended. The clip holds its final frame for `BROLL_OFFAIR_GRACE_MS` (500ms:
+  a reliable data message plus the 250ms camera-change crossfade), and by the
+  time it goes nobody is looking at it.
+- **One rule takes the clip off air, not five.** An effect watches the resolved
+  shot: if a clip is playing and the active shot is no longer `bRollClip`, it
+  comes down. That covers our own return cut, the director tapping another
+  shot, the feed strip, a cue sheet, and auto resuming — and makes it
+  impossible to add a sixth path that forgets.
+- **Cutting away mid-clip stops the clip.** A clip playing off-air is a
+  published track nobody is watching. Re-cueing starts it from the top, which
+  is what "cue a clip" means.
+- **Nothing to cut back to → the clip still comes down.** If every camera
+  dropped during the clip, the return can't resolve; rather than leaving a
+  finished clip on air forever, it is taken down directly and the stage falls
+  to its own be-right-back interstitial — the correct picture for a stage with
+  no live camera.
+
+**B-roll is never an AUTOMATIC choice.** The auto director's role list and
+shot menu are filtered to cameras, and so is staccato's pool. Cutting to a clip
+is an editorial decision about one's own material; a rotation timer making it,
+or a strobe of hard cuts through somebody's edit, are both wrong.
+
+**Cue sheets CAN cut to a clip** — an authored `broll` cue at 1:42 is a human
+decision made in advance, which is precisely the distinction. **They cannot
+start one**, and that limit is stated rather than left to be discovered:
+starting playback is a deliberate act at the console.
+
+## 3 · Egress and liveness
+
+**Egress.** The recorder uses the identical resolution — same
+`STAGE_TRACK_SOURCES`, same `matchesTarget`, same camera-only fallbacks. It has
+to: it composes the same directed view a viewer sees, so an identity-only match
+would produce a file showing the artist's camera at the moment the show showed
+a clip. A recording that quietly disagrees with the performance is worse than
+no recording.
+
+**Liveness.** `lib/trackLiveness.js` treats an absent track as impaired, holds
+the entry for 30 seconds and serves probation on return — all of which is built
+for *a camera that stopped when it shouldn't have*. A b-roll track disappearing
+is the opposite: it is the clip finishing, which is the entire expected outcome
+of playing one.
+
+Left on the normal path it would sit in the ineligible set under a
+`track_liveness_impaired` row that reads exactly like a camera failure — noise
+in the timeline during the one window an artist is most likely to be reading
+it. So the entry is stamped `isBroll` while the track is present (the absence
+branch has only the key to work with by then) and **forgotten immediately on
+absence, under its own `broll_source_ended` event**. Nothing to recover,
+nothing to protect: the shot was already cut away 500ms earlier.
+
+**And `CAMERA LOST` cannot fire for it** for a second, independent reason:
+`ShotVideo` only shows the frozen frame when the candidate pool is empty or the
+active track is impaired. With the camera still publishing the pool is
+non-empty, and the orphan rescue promotes the camera layer — so even if the
+grace timer were removed, the failure mode is a fast cut rather than a lost
+camera. Two mechanisms, neither relying on the other.
+
+## 4 · UI
+
+The simplest honest version: a list of the artist's clips in the SHOTS panel,
+one tap on, one tap off. No scrub bar, no queue, no thumbnails, no in/out
+points — each is a real feature and none was the thing that was missing, which
+was being able to cut to a clip at all.
+
+- **The B-ROLL CLIP shot button enables when a clip is actually publishing**
+  (its role appears in `availableRoles`) — you cannot cut to a clip that is not
+  playing. The clip LIST is gated on clips existing, which is a different
+  question.
+- **Safari is told the truth.** `HTMLMediaElement.captureStream()` is not
+  implemented in Safari and there is no workaround short of re-encoding frames
+  through a canvas at a quality nobody would broadcast. Feature-detected on the
+  prototype (not a UA sniff — the question is genuinely "does this API exist",
+  and a UA test would be wrong the day Safari ships it), and the panel says
+  "this browser can't play a clip into a live show; Chrome or Edge on a
+  computer can" rather than offering a button that silently does nothing.
+- **The feed strip stays a CAMERA picker.** `VideoDeckPanel` hands back a bare
+  participant identity, which cannot distinguish the artist's camera from their
+  clip, so b-roll is filtered out of its candidate list rather than made
+  ambiguous inside it.
+
+**No schema changes.** The clip's meaning reaches the flywheel through the
+existing `source_role` column (`'broll'`), so `shot_commands` needed nothing
+new. `targetSourceKey` is a wire-only field.

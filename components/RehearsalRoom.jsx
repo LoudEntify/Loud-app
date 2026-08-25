@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LiveKitRoom, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
+import { roleOfTrack } from '../lib/trackSources';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -20,24 +21,24 @@ const TEAL = '#2ec4b6';
 //
 // Now sized for a RIG rather than a pair: the grid grows with the number
 // of live cameras instead of assuming one paired phone, and every tile is
-// labelled with the camera role parsed out of the participant identity —
-// which is the same string the live show's director console parses, so
-// what the artist sees here is exactly what the console will offer them
-// on stage.
+// labelled with the camera role resolved by the SAME function the live
+// show's director console uses — so what the artist sees here is exactly
+// what the console will offer them on stage.
 
-// `camfeed-{slot}-{role}-{id}` — the format is set in lib/camfeedPairing.js
-// and read by components/LiveDemo.jsx. Parsed in one place here so the
-// label and the reported role can never disagree.
-function roleOf(identity) {
-  if (typeof identity !== 'string' || !identity.startsWith('camfeed-')) return null;
-  return identity.split('-')[2] || null;
-}
-
+// Role resolution comes from lib/trackSources.js, the same function the
+// live stage and the recorder use. It used to be a local identity parse
+// here — correct in isolation, and exactly the kind of fifth copy that
+// made b-roll break four other copies at once.
+//
+// This surface subscribes to Camera ONLY, deliberately: there is no
+// b-roll in a rehearsal room, so there is nothing here to discriminate.
+// Using the shared resolver anyway means that if that ever changes, this
+// tile grid gets the right answer without anyone remembering it exists.
 function Tiles({ onConnectedRoles }) {
   const tracks = useTracks([Track.Source.Camera]);
 
   const roles = useMemo(
-    () => tracks.map((t) => roleOf(t.participant.identity)).filter(Boolean),
+    () => tracks.map((t) => roleOfTrack(t)).filter((r) => r && r !== 'main'),
     [tracks]
   );
 
@@ -64,12 +65,12 @@ function Tiles({ onConnectedRoles }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 6 }}>
       {tracks.map((t) => {
-        const role = roleOf(t.participant.identity);
+        const role = roleOfTrack(t);
         return (
           <div key={`${t.participant.identity}:${t.publication?.trackSid}`} style={{ position: 'relative', aspectRatio: '9 / 16', background: INK, overflow: 'hidden' }}>
             <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             <span style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 8.5, letterSpacing: '0.06em', color: PORCELAIN, background: 'rgba(1,22,39,0.6)', padding: '2px 6px', borderRadius: 3 }}>
-              {role ? role.toUpperCase() : t.participant.identity.startsWith('camfeed-') ? 'PAIRED CAMERA' : 'YOUR CAMERA'}
+              {role && role !== 'main' ? role.toUpperCase() : 'YOUR CAMERA'}
             </span>
           </div>
         );

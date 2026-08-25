@@ -27,7 +27,19 @@ import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
-import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
+import { buildShotCommand, broadcastShotCommand, resolveTarget, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
+import {
+  BROLL_ROLE,
+  STAGE_TRACK_SOURCES,
+  belongsToSlot,
+  cameraRolesOnly,
+  cameraTracksOnly,
+  isPerformerCameraTrack,
+  matchesTarget,
+  roleOfTrack,
+  sourceKey,
+} from '../lib/trackSources';
+import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState } from '../lib/showState';
@@ -125,6 +137,22 @@ const CAMERA_LOST_OVERLAY = (
 // baked into the delivered pixels, not something object-fit downstream
 // can undo. A phone already delivering ~9:16 content is unaffected.
 const HIGH_RES_VIDEO_CAPTURE = { resolution: { height: 1920, aspectRatio: 9 / 16 }, frameRate: { ideal: 30 } };
+
+// How long a finished b-roll clip stays PUBLISHED after the shot has cut
+// away from it.
+//
+// Not a cosmetic delay. The return cut travels over the data channel and
+// each client applies it on arrival; unpublishing the instant we fire
+// would mean any client that had not yet applied it was looking at a
+// shot whose target had just disappeared — which renders as a frozen
+// frame under the CAMERA LOST pill, for a clip that ended exactly as
+// intended. Holding the clip's final frame for this long costs nothing
+// and makes that window impossible.
+//
+// 500ms comfortably covers a reliable data message plus the 250ms
+// camera-change crossfade, without leaving a dead track around long
+// enough to matter.
+const BROLL_OFFAIR_GRACE_MS = 500;
 
 // DEBUG -- surfaces what useSourceDimensions actually detected, for
 // verifying the portrait capture work on real hardware. Safe to delete
@@ -1332,7 +1360,13 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
   const room = useRoomContext();
-  const tracks = useTracks([Track.Source.Camera]);
+  // ScreenShare is in this list ONLY because that is how b-roll clips are
+  // published (lib/trackSources.js explains why not Camera). Nothing in
+  // this app screen-shares. Opting in explicitly, per surface, is the
+  // point: components/CamPage.jsx and components/RehearsalRoom.jsx
+  // deliberately still subscribe to Camera alone, because a phone looking
+  // at itself and a rehearsal room have no b-roll to see.
+  const tracks = useTracks(STAGE_TRACK_SOURCES);
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
   // instance feeding every selection on this device.
   const ineligibleTracks = useIneligibleTracks(room, tracks);
@@ -2823,12 +2857,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   //
   // eligibleForSlot is the AUTOMATIC set. The auto director must never
   // choose an impaired feed for itself.
+  // PARSE SITE 1 of 6. Includes b-roll deliberately: a cued clip has to
+  // be in the rendering pool or ShotVideo has no layer to cut to. What
+  // stops it being mistaken for a camera is roleOfTrack, everywhere a
+  // role is asked for.
   const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) =>
-      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-      !t.publication?.isMuted
-    ), [tracks]);
+    tracks.filter((t) => belongsToSlot(t, letter) && !t.publication?.isMuted),
+    [tracks]);
 
   const eligibleForSlot = useCallback((letter) =>
     filterEligible(tracksForSlot(letter), ineligibleTracks),
@@ -2844,14 +2879,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // shouldn't make a performer vanish from the spotlight/switcher.
   // Sorted for a stable, deterministic render order (SpotlightStage's
   // thumbnail row and the switcher both key off array order).
+  // PARSE SITE 2 of 6. A slot is "present" because a PERSON is there
+  // with a camera on -- isPerformerCameraTrack, not just a contestant
+  // identity, because a b-roll clip carries the artist's own identity
+  // and a clip playing must never make an empty stage look occupied.
   const presentSlots = useMemo(() => {
     const set = new Set();
     tracks.forEach((t) => {
-      const identity = t.participant.identity;
-      if (identity.startsWith('contestant-')) {
-        const slot = identity.split('-')[1];
-        if (slot) set.add(slot);
-      }
+      if (!isPerformerCameraTrack(t)) return;
+      const slot = t.participant.identity.split('-')[1];
+      if (slot) set.add(slot);
     });
     return Array.from(set).sort();
   }, [tracks]);
@@ -2863,13 +2900,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // own callbacks pass tracksRef.current explicitly instead (see below)
   // so they read live data without needing `tracks` itself as a
   // dependency anywhere.
+  // PARSE SITE 3 of 6, and the one the director console reads. 'broll'
+  // appears here exactly when a clip is on air, which is what enables the
+  // B-ROLL CLIP shot -- and roleOfTrack is what stops that same clip
+  // also being reported as 'main'.
   const availableRoles = (slot, trackList = tracks) => {
     const roles = new Set();
     trackList.forEach((t) => {
       if (t.publication?.isMuted) return;
-      const id = t.participant.identity;
-      if (id.startsWith(`contestant-${slot}-`)) roles.add('main');
-      if (id.startsWith(`camfeed-${slot}-`)) roles.add(id.split('-')[2]);
+      if (!belongsToSlot(t, slot)) return;
+      const r = roleOfTrack(t);
+      if (r) roles.add(r);
     });
     return [...roles];
   };
@@ -2887,11 +2928,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // broadcast; each device only needs to know what IT last picked.
     setActiveCamera((prev) => ({ ...prev, [letter]: identity }));
 
-    const role = identity.startsWith('contestant-')
-      ? 'main'
-      : identity.startsWith('camfeed-')
-        ? identity.split('-')[2] || null
-        : null;
+    // PARSE SITE 4 of 6 -- the feed strip's direct pick.
+    //
+    // VideoDeckPanel is a CAMERA picker and is fed a camera-only list
+    // (see BroadcastStage), so resolving the identity back to a track
+    // within that same camera pool is unambiguous. Doing it this way
+    // rather than parsing the identity string means the role comes from
+    // the same function every other site uses, and a b-roll track could
+    // not be resolved here even if one were somehow passed.
+    const picked = cameraTracksOnly(tracksForSlot(letter))
+      .find((t) => t.participant.identity === identity);
+    const role = roleOfTrack(picked) ?? null;
     const shotKey = (role && NEAREST_SHOT_FOR_ROLE[role]) || 'wide';
 
     const command = buildShotCommand({
@@ -2901,13 +2948,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       fromShotKey: activeShot[letter]?.shot ?? null,
       sourceRole: role,
       targetIdentity: identity, // already the exact participant picked -- no resolution needed
+      targetSourceKey: picked ? sourceKey(picked) : null,
       decisionSource: 'human',
       showPhase,
       availableRoles: availableRoles(letter),
     });
     setActiveShot((prev) => ({ ...prev, [letter]: command }));
     broadcastShotCommand(room, command);
-  }, [room, activeShot, showPhase, roomName]);
+  }, [room, activeShot, showPhase, roomName, tracksForSlot]);
 
   // Stage 4 (MULTI_PERFORMER_SPEC.md) -- which performer slot is
   // "on stage." Derived directly from `show`, never separate state:
@@ -2981,17 +3029,30 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // is a stable frozen frame with the CAMERA LOST treatment until they
     // cut away or it revives, not a silent re-pick. Searched against the
     // unfiltered pool for exactly that reason.
+    // PARSE SITE 5 of 6, and the one that actually decides what is on
+    // screen. matchesTarget compares identity AND what the track IS --
+    // identity alone would match the artist's camera for a command that
+    // meant their b-roll clip, because a clip is published by the
+    // artist's own participant. That is the failure this whole round
+    // exists to remove, and this is the line where it would have
+    // happened.
     const matched = cmd?.targetIdentity
-      ? candidates.find((t) => t.participant.identity === cmd.targetIdentity)
+      ? candidates.find((t) => matchesTarget(t, cmd))
       : undefined;
     // Every non-explicit path prefers LIVE feeds -- this is what stops
     // auto/fallback from ever landing on a dead camera by itself. The
-    // final `candidates[0]` is a last resort for when nothing is live at
-    // all, where a frozen frame beats an empty stage.
+    // final fallback is a last resort for when nothing is live at all,
+    // where a frozen frame beats an empty stage.
+    //
+    // Every fallback resolves against CAMERAS ONLY. A shot whose target
+    // has gone must never land on a playing clip by accident -- the
+    // return from b-roll is a deliberate broadcast cut, not a fallback.
+    const eligibleCameras = cameraTracksOnly(eligible);
     const chosen =
       matched ||
-      eligible.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
-      eligible[0] ||
+      eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
+      eligibleCameras[0] ||
+      cameraTracksOnly(candidates)[0] ||
       candidates[0];
     const activeImpaired = !!chosen && !eligible.includes(chosen);
 
@@ -3005,13 +3066,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // confirmed, not a candidates-timing issue.
     if (CUT_DEBUG_ENABLED && role === 'viewer') {
       const chosenVia = matched
-        ? 'targetIdentity match'
+        ? 'target match'
         : chosen
-          ? (chosen.participant.identity.startsWith(`contestant-${letter}-`)
-            ? 'FALLBACK: prefer contestant'
-            : 'FALLBACK: candidates[0]')
+          ? (isPerformerCameraTrack(chosen) ? 'FALLBACK: prefer contestant' : 'FALLBACK: first available')
           : 'none (no candidates)';
-      const key = `${cmd?.targetIdentity || 'none'}|${!!matched}|${chosen?.participant.identity || 'none'}`;
+      // Keyed on the SOURCE key, not the identity: during b-roll the
+      // artist's camera and their clip share an identity, so an
+      // identity-keyed signature would suppress the one log line that
+      // shows a cut between them -- which is exactly the line anyone
+      // debugging b-roll is looking for.
+      const key = `${cmd?.targetSourceKey || cmd?.targetIdentity || 'none'}|${!!matched}|${sourceKey(chosen) || 'none'}`;
       if (chosenDebugRef.current[letter] !== key) {
         chosenDebugRef.current[letter] = key;
         // candidates here include sub/track state (same shape as the
@@ -3019,10 +3083,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // actually subscribed is distinguishable from one that's fully
         // live -- third link in the chain, after [dataChannel] and
         // [tracks].
+        // sourceKey rather than identity, for the same reason as the
+        // signature above: two candidates sharing one identity (camera +
+        // clip) are indistinguishable in a log that prints identities.
         const candidatesDetailed = candidates
-          .map((t) => `${t.participant.identity}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`)
+          .map((t) => `${sourceKey(t)}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`)
           .join(', ') || 'none';
-        logCutDebug(`[renderSlot:${letter}] targetIdentity=${cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidatesDetailed}] chosen=${chosen?.participant.identity || 'none'} via=${chosenVia}`);
+        logCutDebug(`[renderSlot:${letter}] target=${cmd?.targetSourceKey || cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidatesDetailed}] chosen=${sourceKey(chosen) || 'none'} via=${chosenVia}`);
       }
     }
 
@@ -3201,9 +3268,24 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // is honoured there rather than silently re-picked.
     const isAutomatic = decisionSource !== 'human';
     const sourceTracks = isAutomatic ? autoTrackList() : tracksRef.current;
-    const roles = availableRoles(role, sourceTracks);
+    const allRoles = availableRoles(role, sourceTracks);
+    // B-ROLL IS NEVER AN AUTOMATIC CHOICE. Cutting to a clip is an
+    // editorial decision a person makes about their own material -- the
+    // auto director rotating into it, or a cue sheet resolving into it
+    // because it happened to be playing, would both be the machine
+    // making that call. A human tap still sees the full list, which is
+    // how the B-ROLL CLIP button works at all.
+    const roles = isAutomatic ? cameraRolesOnly(allRoles) : allRoles;
     const sourceRole = meta.sourceRole ?? resolveSourceRole(meta.framingHint || shotKey, roles);
-    const targetIdentity = resolveTargetIdentity(sourceTracks, role, sourceRole);
+    // Refuse rather than substitute. A strict-source shot (bRollClip)
+    // with nothing to resolve to returns null here, and firing it anyway
+    // would put whatever resolveTargetTrack falls back to on air under a
+    // command that says "clip".
+    if (!sourceRole) {
+      logHealthEvent('shot_unresolved', { shot: shotKey, decisionSource, availableRoles: roles });
+      return null;
+    }
+    const { targetIdentity, targetSourceKey } = resolveTarget(sourceTracks, role, sourceRole);
     const command = buildShotCommand({
       showId: roomName,
       slot: role,
@@ -3211,6 +3293,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       fromShotKey: activeShotRef.current[role]?.shot ?? null,
       sourceRole,
       targetIdentity,
+      targetSourceKey,
       decisionSource,
       params: meta.params || {},
       availableRoles: roles,
@@ -3222,6 +3305,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const fireAutoShot = useCallback((shotKey, decisionSource = 'auto', meta = {}) => {
     const command = buildAndFireCommand(shotKey, decisionSource, meta);
+    // null means the shot could not resolve a source and deliberately
+    // was not broadcast (see buildAndFireCommand). Nothing was emitted,
+    // so there is nothing to log under an event whose whole meaning is
+    // "the director loop produced a command".
+    if (!command) return null;
     // Phase 2 diagnostic instrumentation -- every command the director
     // loop itself emits (scheduled cuts + the L6-2 forced failover both
     // route through here). Human taps from DirectorShotPanel are a
@@ -3246,10 +3334,209 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     buildAndFireCommand(shotKey, decisionSource, meta)
   ), [buildAndFireCommand]);
 
+  // ══════════════════════════════════════════════════════════════
+  // B-ROLL: an uploaded clip, live, as a cuttable director source
+  // ══════════════════════════════════════════════════════════════
+  //
+  // The artist taps a clip; the file plays into a hidden element, its
+  // frames are captured into a real LiveKit track named `broll`, and the
+  // B-ROLL CLIP shot cuts to it like any other source. When the clip
+  // ends, the shot returns to whatever was on air before it.
+  //
+  // Everything that makes that safe lives in lib/trackSources.js -- this
+  // block is only the sequencing.
+  const [brollClips, setBrollClips] = useState([]);
+  const [activeBrollClipId, setActiveBrollClipId] = useState(null);
+  const [brollBusy, setBrollBusy] = useState(false);
+  const [brollError, setBrollError] = useState('');
+  const brollPlayerRef = useRef(null);
+  // Resolved after mount rather than during render. captureStream is a
+  // browser capability and the server has no opinion about it; deciding
+  // in an effect keeps the first client render identical to the server's
+  // regardless of how this component is ever mounted.
+  const [brollSupported, setBrollSupported] = useState(false);
+  useEffect(() => { setBrollSupported(isBrollPlaybackSupported()); }, []);
+  // The shot that was on air when the clip was cued. Restored, by shot
+  // KEY rather than by replaying the old command, so the return
+  // re-resolves against whatever cameras are live NOW -- a camera that
+  // dropped during the clip must not be cut back to.
+  const brollReturnShotRef = useRef(null);
+
+  // The artist's own library. RLS (broll_select_own) is what scopes this
+  // to them, so the anon client is enough and no route is needed.
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from('broll_clips')
+          .select('id, title, duration_ms, size_bytes')
+          .order('created_at', { ascending: false });
+        if (!cancelled && !error) setBrollClips(data || []);
+      } catch {
+        // No clips is a legitimate state and the panel renders nothing
+        // for it. A failed read is indistinguishable from that, and
+        // shouting about it over a live show would be worse than the
+        // missing feature.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isMainPerformer]);
+
+  const stopBroll = useCallback(async (reason) => {
+    const player = brollPlayerRef.current;
+    brollPlayerRef.current = null;
+    setActiveBrollClipId(null);
+    if (player) {
+      logHealthEvent('broll_stopped', { reason });
+      await player.stop();
+    }
+  }, []);
+
+  // THE RETURN CUT. Fired when the clip ends, BEFORE the track is
+  // unpublished (the unpublish is driven by the effect below, on a
+  // grace timer).
+  //
+  // Restores the shot key that was on air when the clip was cued, and
+  // re-resolves it -- so if the artist's camera changed, dropped or was
+  // swapped during the clip, the return lands on what is live now rather
+  // than on a stale target.
+  const returnFromBroll = useCallback(() => {
+    const previous = brollReturnShotRef.current;
+    brollReturnShotRef.current = null;
+    // 'wide' is the default return, not the previous shot, when there
+    // wasn't one: cueing a clip as the very first shot of a show is
+    // legitimate, and the thing to come back to is the widest honest
+    // view of the stage.
+    const shotKey = previous && previous !== 'bRollClip' ? previous : 'wide';
+    logHealthEvent('broll_return_cut', { shot: shotKey, hadPrevious: !!previous });
+    const command = buildAndFireCommand(shotKey, 'human', {});
+    if (!command) {
+      // Nothing to cut back TO -- the artist's camera is off, or every
+      // camera dropped while the clip was playing. The clip still has to
+      // come off air, so take it down directly rather than waiting on an
+      // off-air effect that watches for a shot change that will never
+      // arrive. The stage falls to its own "be right back" interstitial,
+      // which is the correct picture for a stage with no live camera.
+      logHealthEvent('broll_return_unresolved', { attemptedShot: shotKey });
+      stopBroll('no_camera_to_return_to');
+    }
+  }, [buildAndFireCommand, stopBroll]);
+
+  const cueBroll = useCallback(async (clip) => {
+    setBrollError('');
+    // Tapping the playing clip again is "take it off", which is the
+    // obvious meaning and saves a second control.
+    if (activeBrollClipId === clip.id) {
+      returnFromBroll();
+      return;
+    }
+    if (brollBusy) return;
+    setBrollBusy(true);
+    try {
+      // One clip at a time. Swapping means the previous one comes down
+      // first -- two published b-roll tracks would both answer to the
+      // 'broll' role and the resolution between them would be arbitrary.
+      if (brollPlayerRef.current) await stopBroll('replaced');
+
+      const player = createBrollPlayer({
+        room,
+        onEnded: () => {
+          // Cut away FIRST. The track is still published and still
+          // holding its final frame at this moment, which is the right
+          // picture to be showing while the cut travels.
+          returnFromBroll();
+        },
+        onError: ({ error }) => {
+          setBrollError(error);
+          returnFromBroll();
+        },
+      });
+      brollPlayerRef.current = player;
+
+      // Captured BEFORE the cut, so the return knows where to go back to.
+      brollReturnShotRef.current = activeShotRef.current[role]?.shot ?? null;
+
+      const result = await player.start({ clip, accessToken: artistAccessToken });
+      if (result.error) {
+        brollPlayerRef.current = null;
+        brollReturnShotRef.current = null;
+        setBrollError(result.error);
+        return;
+      }
+
+      setActiveBrollClipId(clip.id);
+
+      // The command is built from the PUBLICATION we just received, not
+      // by searching `tracks` for it. useTracks has not necessarily seen
+      // LocalTrackPublished yet, and a resolve against a list that does
+      // not contain the clip would refuse (strictSource) and leave a
+      // clip on air that nothing had cut to.
+      const identity = room.localParticipant.identity;
+      const command = buildShotCommand({
+        showId: roomName,
+        slot: role,
+        shotKey: 'bRollClip',
+        fromShotKey: brollReturnShotRef.current,
+        sourceRole: BROLL_ROLE,
+        targetIdentity: identity,
+        targetSourceKey: sourceKey({ participant: room.localParticipant, publication: result.publication }),
+        decisionSource: 'human',
+        showPhase,
+        availableRoles: availableRoles(role),
+      });
+      setActiveShot((prev) => ({ ...prev, [role]: command }));
+      // Caught rather than left to reject: a publish landing inside a
+      // reconnect window throws, and an unhandled rejection during a
+      // live show is noise in exactly the console someone is reading to
+      // work out what went wrong. The local state above is already
+      // correct, and the next command re-syncs everyone else.
+      broadcastShotCommand(room, command).catch((err) =>
+        console.warn('[broll] cut broadcast failed (likely a transient reconnect)', err)
+      );
+    } finally {
+      setBrollBusy(false);
+    }
+    // availableRoles is a plain function recreated every render and
+    // deliberately not a dependency -- it reads `tracks` at call time,
+    // which is what we want, and listing it would recreate this callback
+    // on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrollClipId, brollBusy, room, role, roomName, showPhase, artistAccessToken, stopBroll, returnFromBroll]);
+
+  // ── The clip comes off air when the shot leaves it ──────────
+  // ONE rule covering every way that can happen: our own return cut, the
+  // director tapping another shot, the feed strip, a cue sheet, auto
+  // resuming. Watching the resolved shot rather than hooking each of
+  // those paths is what makes it impossible to add a sixth path that
+  // forgets to stop the clip.
+  //
+  // The delay is the important part. Unpublishing the instant the cut
+  // fires would race it: clients that had not yet applied the new
+  // command would be looking at a shot whose target had just vanished --
+  // a frozen frame under a CAMERA LOST pill, for a clip that ended
+  // exactly as intended. The clip holds its last frame for this long
+  // instead, and by the time it goes nobody is looking at it.
+  useEffect(() => {
+    if (!activeBrollClipId) return undefined;
+    if (activeShot[role]?.shot === 'bRollClip') return undefined;
+    const t = setTimeout(() => { stopBroll('off_air'); }, BROLL_OFFAIR_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [activeShot, role, activeBrollClipId, stopBroll]);
+
+  // Leaving, ending, or unmounting mid-clip must not leave a published
+  // track behind on a room this component no longer owns.
+  useEffect(() => () => { brollPlayerRef.current?.stop?.(); }, []);
+
   const getAutoAvailableShots = useCallback(() => {
     // Live feeds only -- auto must never offer itself a shot whose
-    // camera is impaired (Test 4 ruling).
-    const roles = availableRoles(role, autoTrackList());
+    // camera is impaired (Test 4 ruling) -- and CAMERAS only, so
+    // bRollClip can never appear in the auto director's menu. Without
+    // the second filter, 'broll' being live would make bRollClip a legal
+    // auto pick and the rotation would start cutting to the artist's
+    // clip on a timer.
+    const roles = cameraRolesOnly(availableRoles(role, autoTrackList()));
     return Object.keys(SHOT_TYPES).filter((k) => {
       const src = SHOT_TYPES[k].source;
       if (src === 'currentOrSelected') return roles.length > 0;
@@ -3268,7 +3555,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // identity -- otherwise auto's own same-feed comparison could decide
     // to "cut" to a camera that is already dead (Test 4 ruling).
     const live = autoTrackList();
-    const roles = availableRoles(role, live);
+    // Camera-only, matching getAutoAvailableShots -- the two have to
+    // agree about what auto is allowed to see or the "would this land on
+    // a different feed" comparison is made against a shot auto could
+    // never actually fire.
+    const roles = cameraRolesOnly(availableRoles(role, live));
     const sourceRole = resolveSourceRole(shotKey, roles);
     return resolveTargetIdentity(live, role, sourceRole);
   }, [role, autoTrackList]);
@@ -3331,6 +3622,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // Cue playback is automation too -- live feeds only, so a cue
       // naming a camera that has since died takes cueDirector's existing
       // cue_fallback path instead of cutting to a dead feed.
+      //
+      // 'broll' IS included here, unlike in the auto director's own role
+      // list, and the distinction is who decided. A cue sheet is a human
+      // editorial decision made in advance -- authoring a `broll` cue at
+      // 1:42 is a person saying "put the clip up here", which is exactly
+      // the decision the auto director may not make on its own. The cue
+      // carries meta.sourceRole, which buildAndFireCommand honours over
+      // its own resolution for precisely this reason.
+      //
+      // WORTH KNOWING, and stated because it is a real limit rather than
+      // an oversight: a cue sheet can CUT TO a clip that is already
+      // playing. It cannot START one. Starting playback is a deliberate
+      // act at the console, so a `broll` cue firing with nothing cued
+      // falls through cueDirector's normal fallback path.
       getAvailableRoles: () => availableRoles(role, autoTrackList()),
       getPlayerState: getBackingTrackState,
       // Same suspend()/resume() pair onExclusiveMode already drives for
@@ -3602,12 +3907,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const blurFillSlot = performanceMode === 'versus' ? activePerformerSlot : 'a';
   const blurFillCandidates = tracksForSlot(blurFillSlot);
   const blurFillCmd = activeShot[blurFillSlot];
+  // PARSE SITE 6 of 6 -- the ambient blur-fill behind the portrait
+  // stage. It mirrors whatever is on air, so it needs the identical
+  // matcher: with identity-only matching it would sit on the artist's
+  // camera while the stage showed a clip, and the desktop background
+  // would visibly disagree with the performance in front of it.
   const blurFillMatched = blurFillCmd?.targetIdentity
-    ? blurFillCandidates.find((t) => t.participant.identity === blurFillCmd.targetIdentity)
+    ? blurFillCandidates.find((t) => matchesTarget(t, blurFillCmd))
     : undefined;
   const blurFillTrackRef =
     blurFillMatched ||
-    blurFillCandidates.find((t) => t.participant.identity.startsWith(`contestant-${blurFillSlot}-`)) ||
+    blurFillCandidates.find((t) => isPerformerCameraTrack(t)) ||
+    cameraTracksOnly(blurFillCandidates)[0] ||
     blurFillCandidates[0];
 
   const stageProps = {
@@ -3633,6 +3944,15 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // affordance on both roles.
     commentsCollapsed,
     onToggleCommentsCollapsed: toggleCommentsCollapsed,
+    // B-roll. Threaded through the same stageProps bundle as everything
+    // else the director console needs, so BroadcastStage stays a layout
+    // component with no knowledge of clips.
+    brollClips,
+    onCueBroll: cueBroll,
+    activeBrollClipId,
+    brollBusy,
+    brollError,
+    brollSupported,
   };
 
   return (
