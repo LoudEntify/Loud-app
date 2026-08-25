@@ -581,3 +581,131 @@ Account closure calls it too — the account is banned server-side, but the
 access token in the closing tab stays valid until it expires, and leaving
 someone sitting in a live session for an account they just closed is a
 confusing few minutes.
+
+## Phase 3 — the token economy
+
+**No Stripe keys were supplied, so the provider is behind an interface —
+which is the shape this should have had anyway.** Every route in
+`app/api/wallet/*` talks to `getPaymentProvider()` and knows nothing about
+Stripe. Swapping providers, or running two during a migration, is a change to
+one file.
+
+Two implementations, one interface:
+
+- **Stripe**, active the moment `STRIPE_SECRET_KEY` is set. Written against the
+  REST API with **no SDK** — two calls and one HMAC, all stable and short,
+  against a dependency that would have to be added tonight and audited. If
+  Stripe's API were complicated here this would be the wrong call; it is not.
+- **Dev**, otherwise. **Not a mock that returns success** — it mints a
+  reference, sends the person to a checkout page, and emits a genuinely
+  HMAC-signed event that goes through the *identical* verification,
+  idempotency and ledger path. The only thing it does not do is take money.
+  That distinction is the whole value: when real keys arrive, what changes is
+  which signature is checked — not whether events are verified, not whether
+  replays are caught, not whether the ledger write is idempotent.
+
+**Judgment call — the dev signing secret is derived, not configured.** When
+`PAYMENTS_WEBHOOK_SECRET` is unset it is derived from the service-role key by
+HMAC under a fixed label — the same construction as HKDF's expand step, so the
+output leaks nothing about the input. It means the harness works with zero new
+configuration. It is used for the DEV PROVIDER ONLY; the Stripe path derives
+nothing and refuses to verify without a real `STRIPE_WEBHOOK_SECRET`.
+
+### The hard rules, and where each one is actually enforced
+
+- **One-way economy.** Cash-out uses `verifyArtistAuth`, not
+  `verifySession` — fans buy and spend, they never cash out. That is the
+  difference between a token and a currency.
+- **KYC-gated cash-out.** `profiles.kyc_status` is read **server-side through
+  the service role** and is never taken from the request. This matters more
+  than usual: `profiles_update_own` currently lets an account write any column
+  on its own row, `kyc_status` included, so the client value is untrusted *by
+  construction* and the server read is what makes the gate real. There is also
+  no INSERT policy on `cashout_requests` — a client that could insert could
+  insert `kyc_status_at_request: 'verified'` and skip the gate entirely.
+- **No card data.** Hosted checkout on the provider's domain, both
+  implementations. No route accepts, forwards, logs or stores a card number,
+  and there is no column anywhere that could hold one.
+- **Integer minor units everywhere.** Pence, never a float, never a decimal
+  string. The only decimal point in the codebase is inside a formatter whose
+  output is for eyes and never for arithmetic.
+- **Append-only ledger, enforced by the database.** A trigger blocks UPDATE and
+  DELETE for everyone including the service role. RLS having no UPDATE policy
+  only stops the browser, and every write worth protecting comes from a
+  service-role route. A mistake is corrected with a compensating row — not a
+  workaround, but what double-entry bookkeeping has done for six centuries, and
+  the only version where the history of the correction survives.
+
+### The webhook
+
+- **Signature verified before any write that matters.** A failed event is
+  recorded and then refused — keeping rejections is how you find out you are
+  being probed, and how you diagnose a rotated secret silently rejecting real
+  traffic.
+- **The raw body is read as TEXT and hashed as-is.** `JSON.parse` then
+  `JSON.stringify` changes whitespace and key order and the signature never
+  matches again. This is the single most common way a webhook integration is
+  broken, so the reason sits next to the code that depends on it.
+- **Timestamp tolerance of five minutes.** A signature with no freshness check
+  is valid forever, which is the entire replay attack.
+- **Idempotency in two layers, and they are not redundant.**
+  `webhook_events (provider, event_id)` stops the same EVENT being processed
+  twice; `wallet_transactions.idempotency_key` stops the same CREDIT being
+  written twice if anything else contrives to call the credit path. The failure
+  mode is "we gave someone free money", and it is discovered by an accountant.
+- **The insert IS the lock.** Two concurrent redeliveries race to insert the
+  same event id; the unique index lets one win and the loser sees zero rows and
+  stops. Insert-and-check, not select-then-insert, which has a window.
+- **The event never decides the amount.** It names an intent; the intent says
+  what was bought, decided server-side before the person ever left for the
+  provider. An event claiming ten million tokens credits what the intent says.
+  A genuine mismatch is refused with a 409 and logged, not reconciled.
+- **Status codes are chosen for what they make the provider do.** 400 on a bad
+  signature (do not redeliver — it will never start matching). 200 on a
+  duplicate (it IS handled; a non-2xx would redeliver forever). 500 only where
+  a redelivery could genuinely succeed.
+- **Every outcome writes a `health_events` row** under `show_id = 'finance'`,
+  so "did the webhook fire and what did it decide" is one query rather than a
+  log search.
+
+### Spending
+
+- **The client names an ACTION, never an amount.** A client that could send an
+  amount could send a negative one, which in a signed-integer ledger is a
+  credit.
+- **Votes are wired even though the feature is not built.** The ledger, the
+  balance check and the idempotency shape are the same for every spend, and
+  building them once against two callers is how the second arrives without a
+  second implementation of "can this person afford it".
+
+**Known debt, named rather than left to be found in a reconciliation:**
+
+- **The balance check is a check, not a lock.** Two concurrent spends could
+  each read a balance of 1 and each write a debit. The exposure is bounded by
+  the cost of one action per concurrent request, the append-only ledger makes
+  any overdraft *visible* and correctable, and the fix is a SQL function that
+  checks and inserts in one statement — a migration and a round of testing this
+  build could not do properly tonight.
+- **Balance is summed client-of-the-database-side, with a 5,000-row ceiling.**
+  PostgREST cannot SUM without a database function. Past the ceiling the number
+  would silently start being wrong, which is the worst possible failure for a
+  balance — so `readBalance` REPORTS when it hits it and every caller refuses
+  the operation rather than acting on a lower bound.
+
+### The dev harness
+
+Gated three independent ways, because a route that can mint signed payment
+events must not be one forgotten flag from being live: `VERCEL_ENV !==
+'production'` (the platform's own marker, not a flag we set), the dev provider
+being the active one (the moment a Stripe key exists it has no signing key and
+refuses), and a session that owns the intent being settled.
+
+It calls the webhook handler **directly rather than over HTTP** — a
+server-to-server fetch from a protected preview to itself is intercepted by
+deployment protection and never arrives. Direct invocation is also more honest:
+it is unambiguously the same code, not a similar request.
+
+Three buttons, and two of them are failures: pay (expect a credit), replay the
+same event id (expect `duplicate`, no second credit), tampered signature
+(expect rejection, no ledger row), plus a valid-signature/wrong-amount case to
+prove the amount check refuses a mismatch rather than trusting the event.
