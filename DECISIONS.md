@@ -478,3 +478,106 @@ So `follows` exists now (`docs/overnight2_03_follows.sql`), and
 - **The button still admits when it cannot work.** If the migration has not
   been run, it disables itself and says so, exactly as the old placeholder did.
   That habit was right and is kept.
+
+## Phase 2a — request my data
+
+- **Owner-only with no parameter to abuse.** The route reads no account
+  identifier from the request at all — `verifySession` resolves the Bearer
+  token to a user and every query is filtered by that id. There is nothing an
+  attacker could point at somebody else's account because there is nothing to
+  point.
+- **Rate limited in the database, not in memory.** Three per rolling 24 hours,
+  counted from `account_requests` rows. Serverless functions do not share
+  memory, so an in-process counter is a limit that resets whenever the
+  platform reschedules. A pre-migration in-process fallback exists and is
+  labelled as the weaker thing it is.
+- **The window is rolling, and the refusal names a time.** "You can request it
+  again after 14:32" is a real answer; "try again tomorrow" invites a midnight
+  retry loop.
+- **No file bytes.** Recordings and B-roll are listed with metadata and
+  storage paths. A JSON document with a 400MB video base64'd into it is not an
+  export, it is a denial of service against the person who asked for it.
+- **A section that cannot be read says so, in the export.** An export with a
+  silent hole in it is worse than one that reports "this part was unavailable,
+  here is why". The file opens with a manifest listing what is included AND an
+  `excluded` block naming what is not and the reason.
+- **`health_events` is excluded on purpose and said so out loud.** It is keyed
+  by LiveKit participant identity, not account id, so filtering it to one
+  person is not reliably possible — and a best-effort filter of a diagnostics
+  table risks handing someone else's session to the wrong person.
+- **`Cache-Control: no-store, private`.** This response is a person's entire
+  account; it must never sit in a shared cache or a browser's disk cache.
+- **Downloaded from a blob, not a link.** The request needs an Authorization
+  header and `<a download>` cannot send one.
+
+## Phase 2b — close my account
+
+**A deactivation that preserves the customer record, and the UI says so.**
+"Close my account" means something different on every platform, and the only
+way a person makes an informed decision is to be told what happens *before*
+they decide — including the parts they may not like. Stating it plainly costs
+a few people who wanted a hard delete and saves every one of them finding out
+afterwards.
+
+What happens: login disabled (a reversible Supabase ban, not a deletion),
+profile hidden everywhere public, recordings made private, upcoming shows
+cancelled with a notification to every slot holder, wallet ledger retained in
+full, stage name retained against the record.
+
+- **The ledger is never deleted, and the copy defends it rather than burying
+  it.** Money that moved, moved. A financial record you can delete is not a
+  financial record — and it is the part the person is most likely to need
+  again.
+- **The name is held, and the reason is stated.** Not possessiveness:
+  releasing a closed artist's name lets someone else claim it and be mistaken
+  for them, in a product where the name IS the identity.
+- **The migration is checked BEFORE anything is written, and the whole request
+  refused if it is missing.** A partial close — shows cancelled, login still
+  working — is the one outcome that must not be reachable. The Settings
+  section asks the server up front and renders itself disabled with a sentence
+  saying why, rather than offering a button that half-works.
+- **The ban is the LAST step.** Everything before it is a database write this
+  route could retry; banning is the one action that would stop the person
+  coming back to a half-finished closure and trying again. If it fails, the
+  response says so explicitly rather than reporting success.
+- **Slot holders are notified individually, per cancelled show.** A versus
+  show has someone else's evening in it; cancelling it silently is the failure
+  that would actually hurt somebody. The notification upsert names its
+  conflict target `(user_id, dedupe_key)` — the plain, non-partial index —
+  because a partial index in exactly this position produced a live 400 in an
+  earlier round.
+- **Ownership is re-checked on every write even though the route runs as
+  service role.** "The client could have done this anyway" is not a reason for
+  a server route to skip the check.
+- **Closed profiles return a named "has closed their account" screen, not a
+  404.** Someone following an old link deserves to know the account is gone
+  rather than be told the link was wrong, which would invite them to assume
+  they mistyped and try again.
+
+**Judgment call — reactivation is documented, not built.** Every step is a
+single reversible write and the un-ban is one admin call, so the path exists.
+What does not exist is a way to verify that the person asking is the same
+person — and a self-service reopen with no such check is a worse feature than
+a support request. Named in the morning brief.
+
+**Known limitation, stated rather than discovered later.** `profiles_update_own`
+lets an account write any column on its own row, including `deactivated_at`
+and `kyc_status`. That is why nothing security-relevant is authorised by
+reading those from the client — cash-out re-reads `kyc_status` server-side
+through the service role. Tightening the policy to a column allow-list needs a
+trigger or a split table; it is the correct next hardening step and is named
+in the brief rather than left implicit.
+
+## Phase 2c — log out everywhere
+
+**Clean, so built rather than documented.** `supabase.auth.signOut({ scope:
+'global' })` revokes every refresh token the account holds, on every device.
+Offered as its own control with its own explanation rather than folded into
+the ordinary log-out, because "sign out of this browser" and "sign out of the
+phone I left at a friend's house" are different intentions and only one of
+them is destructive to the person's other sessions.
+
+Account closure calls it too — the account is banned server-side, but the
+access token in the closing tab stays valid until it expires, and leaving
+someone sitting in a live session for an account they just closed is a
+confusing few minutes.

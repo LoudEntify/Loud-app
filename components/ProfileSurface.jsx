@@ -92,9 +92,14 @@ export default function ProfileSurface({ artistId }) {
       }
 
       const supabase = getSupabase();
+      // select('*') rather than a column list, deliberately: this needs
+      // `deactivated_at`, which arrives with a hand-run migration, and
+      // NAMING a column that does not exist yet 400s the whole query
+      // instead of returning null for it. The same reasoning is why
+      // lib/discoveryFeed.js's fetchLiveShows uses select('*').
       const { data } = await supabase
         .from('profiles')
-        .select('id, role, display_name, username, bio, genres, avatar_url')
+        .select('*')
         .eq('id', artistId)
         .maybeSingle();
       if (cancelled) return;
@@ -130,6 +135,26 @@ export default function ProfileSurface({ artistId }) {
   }
 
   const isOwner = !!viewer && viewer.id === profile.id;
+
+  // A closed account keeps its URL and loses its storefront.
+  //
+  // Not a 404, deliberately. Someone following an old link deserves to
+  // know the account is gone rather than to be told the link was wrong —
+  // and a 404 would invite them to assume they mistyped and try again.
+  // The stage name is shown because it is retained against the record
+  // (that is the point of retaining it); nothing else is.
+  if (profile.deactivated_at && !isOwner) {
+    return (
+      <div style={{ padding: 40 }}>
+        <EmptyState
+          title={`${profile.retained_stage_name || profile.display_name || 'This account'} has closed their account`}
+          body="Their profile, shows and recordings are no longer public."
+          action="BROWSE ARTISTS"
+          actionHref="/discover"
+        />
+      </div>
+    );
+  }
   const name = profile.display_name || profile.username || 'Artist';
 
   return (

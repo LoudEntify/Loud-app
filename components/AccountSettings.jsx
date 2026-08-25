@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
+import AccountDataControls from './AccountDataControls';
 import GenreSelect from './GenreSelect';
 
 const INK = '#011627';
@@ -358,6 +359,12 @@ export default function AccountSettings() {
             )}
           </div>
         </div>
+
+        {/* Data export, session revocation and account closure. Their own
+            component because they are the highest-consequence controls in
+            the product and should be read together in one file rather
+            than found three screens apart in this form. */}
+        <AccountDataControls session={session} profile={profile} />
 
       </div>
     </div>
