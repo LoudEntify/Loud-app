@@ -50,6 +50,9 @@ export default function ShareRecording({ recordingId }) {
   const [inPoint, setInPoint] = useState(0);
   const [outPoint, setOutPoint] = useState(MAX_CLIP_SECONDS);
   const [copied, setCopied] = useState('');
+  const [clipSaving, setClipSaving] = useState(false);
+  const [clipNotice, setClipNotice] = useState('');
+  const [clipError, setClipError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +89,44 @@ export default function ShareRecording({ recordingId }) {
   async function setVisibility(next) {
     await getSupabase().from('recordings').update({ visibility: next }).eq('id', recordingId);
     setRecording((r) => (r ? { ...r, visibility: next } : r));
+  }
+
+  // Milliseconds, integer, matching the column and the CHECK constraint
+  // (docs/overnight2_10_recordings.sql: both set or both null, end after
+  // start, and no longer than 90 seconds). Rounded here rather than
+  // trusted from a float range input — the constraint would reject
+  // 42000.5 and the artist would get a database error for moving a
+  // slider.
+  async function saveClipRange() {
+    setClipError('');
+    setClipNotice('');
+    setClipSaving(true);
+    try {
+      const start = Math.max(0, Math.round(inPoint * 1000));
+      const end = Math.round(outPoint * 1000);
+      if (end <= start) { setClipError('Pick a range longer than a second.'); return; }
+      if (end - start > MAX_CLIP_SECONDS * 1000) { setClipError(`Clips are up to ${MAX_CLIP_SECONDS} seconds.`); return; }
+
+      const { error } = await getSupabase()
+        .from('recordings')
+        .update({ clip_start_ms: start, clip_end_ms: end })
+        .eq('id', recordingId);
+      if (error) {
+        // The columns arrive with a hand-run migration. Say which thing
+        // is missing rather than reporting a generic failure the artist
+        // can do nothing with.
+        const missing = /column|schema cache/i.test(error.message || '');
+        setClipError(missing
+          ? 'Saving a clip range needs a pending database update. Your range is still selected on this page.'
+          : (error.message || 'Could not save that range.'));
+        return;
+      }
+      setRecording((r) => (r ? { ...r, clip_start_ms: start, clip_end_ms: end } : r));
+      setClipNotice('Saved.');
+      setTimeout(() => setClipNotice(''), 3000);
+    } finally {
+      setClipSaving(false);
+    }
   }
 
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/watch/${recordingId}` : '';
@@ -125,7 +166,19 @@ export default function ShareRecording({ recordingId }) {
               onLoadedMetadata={(e) => {
                 const d = e.currentTarget.duration;
                 setDuration(d);
-                setOutPoint(Math.min(MAX_CLIP_SECONDS, d));
+                // A previously saved range wins over the default window.
+                // This is the payoff for storing it: an artist who picked
+                // their moment last week finds the handles where they
+                // left them, rather than being asked to choose again.
+                // Clamped to the real duration in case the recording was
+                // re-uploaded shorter than when the range was chosen.
+                if (recording?.clip_start_ms != null && recording?.clip_end_ms != null) {
+                  const start = Math.min(recording.clip_start_ms / 1000, d);
+                  setInPoint(start);
+                  setOutPoint(Math.min(recording.clip_end_ms / 1000, d));
+                } else {
+                  setOutPoint(Math.min(MAX_CLIP_SECONDS, d));
+                }
               }}
               style={{ width: '100%', height: '100%', objectFit: 'contain', background: INK }}
             />
@@ -237,11 +290,34 @@ export default function ShareRecording({ recordingId }) {
             Selected: <strong style={{ color: INK }}>{fmt(clipLength)}</strong> of {fmt(duration)}
           </div>
 
+          {/* THE RANGE IS NOW SAVED, and that is the whole change.
+              Cutting the video still is not possible here — see the note
+              below — but the artist's choice of moment used to die with
+              the page, which meant that when the export job eventually
+              exists, every artist would be asked to pick again. */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={saveClipRange}
+              disabled={clipSaving || clipLength < 1}
+              style={{
+                padding: '10px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+                color: TEAL, background: 'rgba(46,196,182,0.12)', border: 'none',
+                cursor: clipSaving || clipLength < 1 ? 'default' : 'pointer',
+                opacity: clipSaving || clipLength < 1 ? 0.5 : 1,
+              }}
+            >
+              {clipSaving ? 'SAVING…' : 'SAVE THIS RANGE'}
+            </button>
+            {clipNotice && <span style={{ fontSize: 11.5, color: TEAL }}>{clipNotice}</span>}
+            {clipError && <span style={{ fontSize: 11.5, color: '#e71d36' }}>{clipError}</span>}
+          </div>
+
           <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)', lineHeight: 1.55, borderTop: '1px dashed rgba(1,22,39,0.15)', paddingTop: 12 }}>
             <strong style={{ color: INK }}>Clip export isn&apos;t switched on yet.</strong>{' '}
             Cutting the video server-side needs a background job runner that doesn&apos;t exist in this stack. Rather than ship a
-            button that appears to work and silently does nothing, the range picker is here and wired, and the export is the
-            next piece. The full show is fully shareable today.
+            button that appears to work and silently does nothing, the range picker is here and wired, your chosen range is
+            saved against the recording, and the export is the next piece. The full show is fully shareable today.
           </div>
         </div>
       </div>

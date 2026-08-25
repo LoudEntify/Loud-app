@@ -8,10 +8,13 @@ import ImagePlaceholder from './ImagePlaceholder';
 import EmptyState from './EmptyState';
 import {
   fetchLiveShows,
+  fetchUpcomingShows,
   fetchArtistsPage,
   fetchGenreFacets,
   shouldUseGrid,
 } from '../lib/discoveryFeed';
+import { fetchFollowedArtistIds } from '../lib/follows';
+import { getSession } from '../lib/supabaseAuth';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -35,6 +38,11 @@ export default function DiscoverFeed() {
   const [activeGenre, setActiveGenre] = useState('ALL');
   const [query, setQuery] = useState('');
   const [liveShows, setLiveShows] = useState(null);
+  const [upcoming, setUpcoming] = useState(null);
+  // Artist ids this viewer follows, used to float them to the top of the
+  // list. Phase 1's follow step has to pay off somewhere visible, or it
+  // is a step that asks for something and gives nothing back.
+  const [followed, setFollowed] = useState(() => new Set());
   const [artists, setArtists] = useState([]);
   const [nextPage, setNextPage] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -53,7 +61,14 @@ export default function DiscoverFeed() {
 
   useEffect(() => {
     fetchLiveShows().then(setLiveShows);
+    fetchUpcomingShows().then(setUpcoming);
     fetchGenreFacets().then((g) => setGenreChips(['ALL', ...g]));
+    (async () => {
+      const s = await getSession();
+      if (!s?.user?.id) return;
+      const { ids } = await fetchFollowedArtistIds(s.user.id);
+      setFollowed(ids);
+    })();
   }, []);
 
   // Reset AND refetch whenever filters change -- without the reset the
@@ -95,6 +110,20 @@ export default function DiscoverFeed() {
   }, [loadMore, nextPage]);
 
   const useGrid = shouldUseGrid(artists.length, viewportWidth);
+
+  // Artists this viewer follows float to the top of what is CURRENTLY
+  // LOADED. Stated precisely because the limitation is real: paging
+  // happens server-side, so a followed artist sitting on page four is not
+  // dragged forward until page four has been fetched. Doing it properly
+  // means ordering in the query, which means the follow list has to reach
+  // the database — a `.in()` filter that grows with how many people you
+  // follow, or a join that RLS on `follows` will not permit from an anon
+  // client. Both are the right fix later; neither is a five-minute one,
+  // and a partial sort that is honest about being partial beats a follow
+  // step whose result is invisible.
+  const orderedArtists = followed.size === 0
+    ? artists
+    : [...artists.filter((a) => followed.has(a.row?.id)), ...artists.filter((a) => !followed.has(a.row?.id))];
 
   return (
     <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px 60px' }}>
@@ -147,6 +176,42 @@ export default function DiscoverFeed() {
           )}
         </div>
 
+        {/* ── Coming up ────────────────────────────────────────
+            Phase 4g. "Who is on right now" only helps someone who
+            happens to open the app at the right moment; "who is on
+            later" is what makes this a page you come back to. The links
+            work before the show starts — /live shows a holding screen
+            with a countdown and connects nothing until the broadcast
+            window opens — so these are real destinations, not dated
+            dead links. */}
+        {(upcoming || []).length > 0 && (
+          <div style={{ marginTop: 30 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: ORANGE }} />
+              <span style={{ fontSize: 11, letterSpacing: '0.12em' }}>COMING UP</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+              {upcoming.map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  style={{ display: 'flex', alignItems: 'center', gap: 14, textDecoration: 'none', color: 'inherit', border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: '10px 12px' }}
+                >
+                  <div style={{ width: 74, height: 44, flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
+                    <ImagePlaceholder label="SOON" />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</div>
+                    <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>{item.subtitle}</div>
+                  </div>
+                  <span style={{ fontSize: 9, letterSpacing: '0.1em', color: ORANGE, border: '1px solid rgba(255,159,28,0.5)', borderRadius: 999, padding: '3px 9px', flexShrink: 0 }}>SCHEDULED</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 32, gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {genreChips.map((label) => {
@@ -184,7 +249,7 @@ export default function DiscoverFeed() {
             ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginTop: 22 }
             : { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 22 }}
         >
-          {artists.map((item) => (
+          {orderedArtists.map((item) => (
             <Link
               key={item.id}
               href={item.href}
@@ -206,6 +271,11 @@ export default function DiscoverFeed() {
                 <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</div>
                 {item.subtitle && (
                   <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.subtitle}</div>
+                )}
+                {followed.has(item.row?.id) && (
+                  <span style={{ display: 'inline-block', marginTop: 5, fontSize: 8.5, letterSpacing: '0.08em', color: TEAL, border: `1px solid rgba(46,196,182,0.5)`, borderRadius: 999, padding: '2px 8px' }}>
+                    FOLLOWING
+                  </span>
                 )}
               </div>
             </Link>

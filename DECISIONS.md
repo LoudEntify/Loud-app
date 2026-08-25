@@ -709,3 +709,222 @@ Three buttons, and two of them are failures: pay (expect a credit), replay the
 same event id (expect `duplicate`, no second credit), tampered signature
 (expect rejection, no ledger row), plus a valid-signature/wrong-amount case to
 prove the amount check refuses a mismatch rather than trusting the event.
+
+## Phase 4a — did the recording actually work?
+
+Until tonight nothing answered that. A `recordings` row said a file was
+SUPPOSED to exist; whether it landed, how long it was and whether it
+contained any picture were unknown until an artist clicked play on their own
+show and found out the hard way.
+
+Three specific failures, one check each:
+
+- **The file never landed.** The egress "succeeded" and the S3 upload did not.
+  Caught by asking STORAGE for the object — deliberately not the egress
+  result's own `size`, which is written when the recorder finishes muxing,
+  before the upload completes, so a failed upload reports a healthy size for a
+  file that does not exist.
+- **The duration is nonsense.** Under ten seconds means the recorder started
+  and died.
+- **The file has no picture.** A room-composite egress of a room where nobody
+  published video produces a real file of real duration containing nothing but
+  audio. The nastiest of the three, because every other signal looks healthy.
+
+**Judgment call — video presence is INFERRED from our own telemetry, and
+labelled as inferred.** `health_events` already records every track publish, so
+the question becomes "did anyone publish video in this show". Probing the MP4
+itself means downloading and parsing it inside a webhook's budget. The proxy
+can be wrong in one specific direction — video published but never subscribed
+by the recorder would read as `has_video` true against a file with no picture —
+and that is written into the stored result rather than left as a footnote.
+Catching it properly is the transcode worker's job.
+
+- **`verified_at` set with a failing check is the system WORKING.** The
+  checks record what is true; a suspect recording is a successful verification,
+  not an error, which is why the webhook returns 200 for one.
+- **The webhook is attached PER EGRESS REQUEST, not configured in the LiveKit
+  dashboard.** A project-wide dashboard webhook points at one URL, which means
+  a preview deployment's recordings would be reported to production or vice
+  versa. Carrying the URL on the request keeps each deployment's results with
+  that deployment — and removes a manual setup step.
+- **`app/api/egress/verify` runs the IDENTICAL function**, not a similar one.
+  Two implementations of "is this recording good" diverge, and then a recording
+  is verified by one path and suspect by the other with no way to tell which is
+  right. It exists because LiveKit cannot POST to a deployment-protected
+  preview — the automatic path is unreachable there, and this is the same
+  check with a different trigger.
+- **Status codes are chosen for what they make LiveKit do:** 400 on a bad
+  signature (never redeliver), 200 on a suspect result (handled — the answer
+  will not change), 500 only when the check itself could not complete.
+
+## Phase 4b — tap-to-react (PRD row 54)
+
+**The shape of the feature is the point: the tap goes out over the data
+channel and animates on every screen in the room within a frame or two.
+Nothing waits for a server.** A reaction that arrives after the moment it was
+reacting to is not a reaction. The database write is batched, fire-and-forget,
+and never a dependency.
+
+- **Native emoji, six of them, no picker.** A reaction is a reflex; anything
+  that turns it into a decision has already lost. Native emoji also render
+  everywhere, need no assets and no loading state.
+- **Your own reaction is indistinguishable from everyone else's.** The feeling
+  being built is "this room is enjoying this" — highlighting your own would
+  turn a shared moment into a personal receipt.
+- **Local-first on send.** Data messages are not echoed to their sender, so
+  appending locally is the ONLY way the person who tapped sees their own
+  reaction. Same asymmetry that once left the artist who ended a show as the
+  one client that never saw `SHOW_ENDED`.
+- **Rate-limited on the sender at 150ms.** The real failure mode of a reaction
+  feature is one person filling everybody else's screen.
+- **`pointer-events: none` on the whole layer.** A floating emoji must never
+  eat a click meant for the video underneath it.
+- **`prefers-reduced-motion` gets a fade in place.** A wall of drifting emoji
+  is exactly the motion that triggers vestibular symptoms, and a reaction that
+  fades in place still says everything it needs to.
+- **`offset_ms` from showtime is the column the training data is about.**
+  Wall-clock is unusable for comparing across shows; "42 seconds in" lines up
+  with a shot change.
+
+**Judgment call — reactions are FREE tonight, and that is why they are free
+rather than why they are not built.** The spend path is fully wired
+(`/api/wallet/spend` accepts `action: 'reaction'`, the ledger kind exists,
+`reaction_events.tokens_spent` is the column). It is switched off behind one
+constant because charging a token for a tap a person makes reflexively, with
+no price anywhere on screen, is how you make somebody feel robbed by a feature
+they enjoyed. Turning it on is that constant plus showing the price on the bar
+— a design decision, not a feature.
+
+**`reaction_events` accepts UNATTRIBUTED writes, deliberately.** Requiring a
+valid session would bias the training data toward whoever happened to have a
+live token in the tab, dropping exactly the reactions from people whose
+session quietly expired mid-show. The table grants nothing and reveals nothing
+(RLS on, zero policies); the worst a forged batch achieves is polluting a
+training set, which is what the per-request cap is for.
+
+## Phase 4c — comment replies and quotes: ALREADY BUILT
+
+Checked before building anything. `components/CommentsPanel.jsx` already has
+long-press → reply/quote, and `LiveDemo`'s `sendComment` already carries
+`replyMode` / `replyAuthor` / `quoteText` over the data channel to every
+client. PRD rows 24/25/56/57 are satisfied by code that predates tonight.
+
+Left alone, on purpose. The honest note for the reconciliation is what it does
+NOT do: comments are ephemeral — data-channel only, never persisted — so a
+thread exists for everyone present and for nobody who arrives later. Making
+replies durable is a comments TABLE, which is a real feature with real
+moderation questions attached, not an extension of this one.
+
+## Phase 4d — share cards, and a clip range that survives
+
+- **Share cards now carry the artist.** `/watch/[id]` gained a byline, a
+  recorded-on date and the artist's photo; `/artist/[id]` gained a card at all.
+  Both read with the ANON key under RLS, which is what makes them safe — a
+  private recording and a viewer-role profile are invisible to the same query
+  that builds the card, so neither can leak a name through an unfurl.
+- **A closed account has no share card**, for the same reason it has no
+  storefront.
+- **`og:image` only when there genuinely is one.** No branded fallback: every
+  unfurler handles a missing image gracefully and none handles a broken URL
+  gracefully. `twitter:card` is downgraded to `summary` in that case, because
+  declaring `summary_large_image` with no image produces a visibly broken card
+  where plain `summary` would have produced a fine one.
+- **The clip range is SAVED now.** Cutting the video still needs a job runner
+  this stack does not have — that is stated on the page rather than hidden
+  behind a button that appears to work — but the artist's choice used to die
+  with the page, which meant that when the export job eventually exists, every
+  artist would be asked to pick their moment again. A saved range also
+  reloads: the handles come back where they were left, clamped to the real
+  duration.
+- **Milliseconds are rounded before the write.** The CHECK constraint would
+  reject `42000.5`, and an artist should not get a database error for moving a
+  slider.
+
+## Phase 4e — B-roll live into the broadcast: SKIPPED, with reasons
+
+Not attempted. The instruction was to skip rather than half-ship the live
+path, and this is a case where half-shipping means a black frame in somebody's
+broadcast.
+
+**The blocking problem is not the video plumbing — it is role resolution.**
+Publishing a clip is achievable (`captureStream()` off a hidden `<video>` →
+`publishTrack`). What is not achievable in one night is making the director
+console SEE it as a separate cuttable source. Camera roles are encoded in the
+LiveKit **participant identity** (`camfeed-{slot}-{role}-…`) and parsed by
+string position in at least four places. A b-roll track published by the
+artist's OWN participant has the artist's identity, so it would resolve as the
+artist's camera — the director would cut to "b-roll" and get the artist's face.
+
+Making it work properly means moving role resolution from identity parsing to
+per-publication metadata, which touches `availableRoles`, `tracksForSlot`,
+`renderSlot`, the auto-director, the cue director and the egress template — all
+of them on the live path, all of them currently correct.
+
+Three further risks, each independently sufficient to stop tonight:
+
+1. **Audio.** The broadcast publishes ONE processed audio track from the Web
+   Audio graph. B-roll audio has to be mixed into that graph, not published
+   alongside it — a second audio track would double the room's audio and
+   invite feedback. That is an audio-engineering change to a chain that was
+   only just stabilised.
+2. **Safari.** `captureStream()` on a video element is a Chrome-first API with
+   a prefixed, historically unreliable Safari implementation. Artists perform
+   on phones.
+3. **Egress.** The recording composes the same directed view, so a role
+   resolution that is wrong for viewers is baked into the file permanently.
+
+The right sequence is: per-publication source metadata first (a refactor worth
+doing on its own merits), then b-roll as a source, then audio mixing. Named in
+the morning brief as the next real piece of live work.
+
+## Phase 4f — the resume ladder (Round D)
+
+**One rule: a performer who drops mid-show is never asked to log in again.**
+
+- **Almost all of it already existed and is worth naming so nobody builds a
+  second mechanism on top.** The Supabase session persists in the browser, and
+  `join-show` rebinds the slot BY ACCOUNT — it is not told which slot, it looks
+  up who is asking and returns what was already theirs. A silent re-claim is
+  therefore one API call with a credential the tab already holds.
+- **No credential is stored by this feature, and there must not be.** A
+  performer's publish rights in localStorage would be a far worse trade than
+  one extra API call. What IS stored is a marker in sessionStorage — which show
+  this device was performing in — which grants nothing and answers one
+  question the app otherwise cannot: is this person ARRIVING or COMING BACK?
+  Those deserve different sentences.
+- **sessionStorage, not localStorage.** A performer who closes the tab has left
+  the show; a resume offer surfacing next week is noise.
+- **Reconnecting offers nothing for the first six seconds.** LiveKit is already
+  retrying; a manual reconnect on top of an automatic one turns a two-second
+  blip into a twenty-second one. The manual offer appears when the automatic
+  path has been going long enough to suggest it will not finish, and instantly
+  on a hard disconnect.
+- **Resume unmounts and remounts the room** rather than trying to repair a
+  connection that has already been given up on.
+- **Suppressed once the show has ended.** A RESUME button over the ended card
+  is a promise the room cannot keep.
+- **Leaving forgets the marker.** Otherwise a performer who deliberately walked
+  off stage and reopened the tab is greeted with "you're back on", which is the
+  app arguing with something they meant to do.
+
+## Phase 4g — Discover on real data
+
+- **"Coming up" is the addition that matters.** "Who is on right now" only
+  helps someone who happens to open the app at the right moment; a diary is
+  what makes this a page you come back to. The links work before the show
+  starts — `/live` shows a holding screen with a countdown and connects
+  nothing until the broadcast window opens — so these are real destinations,
+  not dated dead links.
+- **Cancelled shows and closed accounts are excluded** from both sections.
+- **Followed artists float to the top of what is CURRENTLY LOADED, and the
+  limitation is stated in the code rather than discovered.** Paging happens
+  server-side, so a followed artist on page four is not dragged forward until
+  page four is fetched. Ordering in the query means getting the follow list to
+  the database — an `.in()` filter that grows with how many people you follow,
+  or a join RLS on `follows` will not permit from an anon client. Both are the
+  right fix later; a partial sort that admits to being partial beats a follow
+  step whose result is invisible.
+- **Every shows query uses `select('*')`.** `title`, `performance_mode` and
+  `cancelled_at` each arrive with a different hand-run migration, and naming a
+  column before it exists 400s the whole query rather than returning null for
+  it — which would empty Discover on an unmigrated database.

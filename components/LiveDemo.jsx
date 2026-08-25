@@ -19,6 +19,8 @@ import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
 import PairingPanel from './PairingPanel';
+import ReactionLayer from './ReactionLayer';
+import ConnectionRecovery from './ConnectionRecovery';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
@@ -35,6 +37,9 @@ import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
 import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
 import { isWindowOpen, humanCountdown, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
+import { REACTIONS_COST_TOKENS, chargeReaction, logReaction } from '../lib/reactions';
+import { SPEND_ACTIONS } from '../lib/tokens';
+import { forgetPerformerSession, recallPerformerSession, rememberPerformerSession } from '../lib/sessionResume';
 import './reactions.css';
 
 // THE ROOM IS THE SHOW'S ROOM. There is no default.
@@ -521,7 +526,14 @@ export default function LiveDemo() {
   // from inside a room it had just disconnected from — see the long note
   // where that state used to live.
   const [leftShow, setLeftShow] = useState(false);
-  const handleLeave = useCallback(() => setLeftShow(true), []);
+  const handleLeave = useCallback(() => {
+    // Leaving is a decision, so the resume marker goes with it. Without
+    // this, a performer who deliberately walked off stage and then
+    // reopened the tab would be greeted with "you're back on" — which is
+    // the app arguing with something they meant to do.
+    forgetPerformerSession();
+    setLeftShow(true);
+  }, []);
 
   // The account's own role, kept because Leave has to route somewhere
   // and "somewhere" is different for the two kinds of person who can be
@@ -890,8 +902,20 @@ export default function LiveDemo() {
             // connection, a second device). join-show rebinds the same
             // slot by account, and saying so out loud is the difference
             // between "I'm back on" and "am I a spectator now?".
-            showNotice(`Back on slot ${String(data.slot).toUpperCase()}.`);
+            //
+            // Round D — the marker (lib/sessionResume.js) is what lets
+            // this distinguish a performer COMING BACK from one arriving
+            // late. No credential is stored; the Supabase session already
+            // in this tab is what made the silent re-claim possible, and
+            // this only decides which sentence to show.
+            const returning = recallPerformerSession(show.id);
+            showNotice(
+              returning
+                ? `You're back on slot ${String(data.slot).toUpperCase()} — nothing was lost.`
+                : `Back on slot ${String(data.slot).toUpperCase()}.`
+            );
           }
+          rememberPerformerSession({ showId: show.id, slot: data.slot });
           return;
         }
 
@@ -975,6 +999,37 @@ export default function LiveDemo() {
     setStep('resolving');
     fetchShow();
   }, [fetchShow]);
+
+  // ── Round D · the resume ladder ──────────────────────────────
+  // Reached from the Reconnecting/Disconnected banner inside the room
+  // (components/ConnectionRecovery.jsx).
+  //
+  // THE POINT IS WHAT IT DOES NOT DO: it does not ask for a password, and
+  // it cannot. The Supabase session is already in this tab, and
+  // join-show rebinds the slot BY ACCOUNT — it is not told which slot,
+  // it looks up who is asking and gives back what was already theirs.
+  // So resuming is one API call with a credential the browser already
+  // holds. A performer who drops mid-song and is met with a login form
+  // has lost the show; that is the failure this exists to make
+  // impossible.
+  //
+  // Setting `step` back to 'entering' unmounts <LiveKitRoom> and remounts
+  // it with a fresh token — a clean reconnect rather than an attempt to
+  // repair a connection that has already been given up on.
+  const [resuming, setResuming] = useState(false);
+  const resumeShow = useCallback(async () => {
+    if (resuming) return;
+    setResuming(true);
+    logHealthEvent('resume_requested', { showId: show?.id || null });
+    try {
+      enterAttemptedRef.current = false;
+      setConn(null);
+      setStep('entering');
+      await enterShow();
+    } finally {
+      setResuming(false);
+    }
+  }, [resuming, enterShow, show]);
 
   const primaryBtnStyle = { padding: 12, background: '#2ec4b6', color: '#011627' };
 
@@ -1183,6 +1238,8 @@ export default function LiveDemo() {
             connServerUrl={conn.url}
             onBroadcastEnded={handleBroadcastEnded}
             onLeave={handleLeave}
+            onResume={resumeShow}
+            resuming={resuming}
           />
         </LiveKitRoom>
       </div>
@@ -1273,7 +1330,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
   const room = useRoomContext();
   const tracks = useTracks([Track.Source.Camera]);
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
@@ -1574,6 +1631,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // — one level up, where flipping it unmounts the room instead of
   // rendering a message inside it. See LiveDemo's `leftShow`.
   const [comments, setComments] = useState([]);
+  const [reactions, setReactions] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
@@ -2489,6 +2547,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     if (payload.type === 'comment') {
       setComments((prev) => [...prev, payload.comment]);
     }
+    if (payload.type === 'REACTION' && payload.reaction?.id) {
+      // Bounded, because a busy room sends a lot of these and the array
+      // is only ever read by an animation that discards each entry after
+      // a couple of seconds. Keeping the last 60 is more than can be on
+      // screen at once; keeping all of them would be a memory leak that
+      // grows with how much the audience is enjoying itself.
+      setReactions((prev) => [...prev, payload.reaction].slice(-60));
+    }
     if (payload.type === 'SHOT_COMMAND') {
       // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
       // only. First link in the chain: did the SHOT_COMMAND actually
@@ -2674,6 +2740,54 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
     triggerEgress('stop', roomName); // Stage 3: stop the recording started at the live transition -- this show's room, so End Show stops THIS show's recorder
   }, [onShowUpdate, onShowWriteErrorChange, send, roomName, showId]);
+
+  // ── Tap-to-react (PRD row 54) ────────────────────────────────
+  // The tap goes out over the data channel FIRST and animates locally in
+  // the same breath. Nothing waits for a server: a reaction that arrives
+  // after the moment it was reacting to is not a reaction.
+  //
+  // The database write and the (currently disabled) token charge both
+  // happen afterwards, fire-and-forget, and neither is allowed to affect
+  // what the person sees. A viewer must never have a tap swallowed by a
+  // wallet round trip, and must never get an error card over the
+  // performance because they ran out of tokens.
+  const sendReaction = useCallback((emoji) => {
+    const reaction = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      emoji,
+    };
+    // Local first, so the person who tapped sees it immediately even if
+    // the data channel is having a bad moment. Data messages are not
+    // echoed to their sender, so this is the ONLY way the sender sees
+    // their own reaction — the same asymmetry that once left the artist
+    // who ended a show as the one client that never saw SHOW_ENDED.
+    setReactions((prev) => [...prev, reaction].slice(-60));
+    try {
+      send(new TextEncoder().encode(JSON.stringify({ type: 'REACTION', reaction })), {});
+    } catch {
+      // A failed broadcast costs everyone else's view of this one tap.
+      // It must not cost the tap.
+    }
+
+    const startedAt = show?.slated_at ? new Date(show.slated_at).getTime() : null;
+    logReaction({
+      showId: showId || roomName,
+      emoji,
+      // Offset from showtime, which is the column the training data is
+      // actually about — wall-clock is unusable for comparing across
+      // shows, "42 seconds in" lines up with a shot change.
+      offsetMs: startedAt ? Date.now() - startedAt : null,
+      tokensSpent: REACTIONS_COST_TOKENS ? SPEND_ACTIONS.reaction.tokens : 0,
+    });
+
+    // Result deliberately ignored. See lib/reactions.js.
+    chargeReaction({
+      accessToken: artistAccessToken,
+      showId,
+      emoji,
+      idempotencyKey: reaction.id,
+    });
+  }, [send, show, showId, roomName, artistAccessToken]);
 
   const sendComment = useCallback((text, replyTarget) => {
     const comment = {
@@ -3653,6 +3767,49 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           top-right ~54px strip before). Setup-time only, collapsed by
           default; toggleQrPanel (above) is part of the deck/comments/QR
           mutual-exclusivity group, not a bare boolean flip anymore. */}
+      {/* Round D · the resume ladder's visible rung. Reconnecting is
+          informational only for the first few seconds — LiveKit is
+          already retrying, and a manual reconnect on top of an automatic
+          one turns a two-second blip into a twenty-second one. The offer
+          appears when the automatic path has been going long enough to
+          suggest it will not finish, and immediately on a hard
+          disconnect.
+
+          Suppressed once the show has ended: there is nothing to get
+          back on to, and a RESUME button over the ended card would be a
+          promise the room cannot keep. */}
+      {displayShowState !== 'ended' && (
+        <ConnectionRecovery
+          state={
+            roomConnectionState === ConnectionState.Reconnecting
+              ? 'reconnecting'
+              : roomConnectionState === ConnectionState.Disconnected
+                ? 'disconnected'
+                : null
+          }
+          onResume={onResume}
+          busy={resuming}
+          isPerformer={isMainPerformer}
+        />
+      )}
+
+      {/* Tap-to-react (PRD row 54). Mounted for every role that can see
+          the stage, artist included — an artist should be able to react
+          to their own guest in a versus show, and more to the point
+          should SEE the room reacting, which is the whole feature.
+
+          Only while the show is genuinely live: reactions during
+          soundcheck would animate over a rehearsal for an audience that
+          is not there, and after the ended card they would be a party in
+          an empty room. */}
+      {displayShowState === 'live' && (
+        <ReactionLayer
+          reactions={reactions}
+          onReact={sendReaction}
+          cost={REACTIONS_COST_TOKENS ? SPEND_ACTIONS.reaction.tokens : 0}
+        />
+      )}
+
       {isMainPerformer && (
         <div className={`camera-qr-panel ${qrPanelOpen ? 'open' : ''}`}>
           <button
