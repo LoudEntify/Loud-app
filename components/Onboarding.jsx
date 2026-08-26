@@ -333,7 +333,13 @@ export default function Onboarding() {
             </ul>
             <Actions
               onSkip={() => advance('skipped')}
-              onNext={() => completeAndGo('/shows')}
+              // '/profile', not '/shows'. /shows is RECORDED shows —
+              // past replays. Scheduling lives on the artist's own
+              // console (ProfileSurface renders ScheduleShow), and
+              // /profile resolves there. Caught by grepping the deployed
+              // bundle for the duration picker and not finding it on the
+              // page this step pointed at.
+              onNext={() => completeAndGo('/profile')}
               nextLabel="SCHEDULE MY FIRST SHOW"
             />
           </div>

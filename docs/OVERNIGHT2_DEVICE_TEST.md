@@ -145,6 +145,16 @@ Now try the opposite: sign up a **second** throwaway fan, skip nothing, and
 >   navigation
 > ☐ It never appears over a live show
 
+### 1.3b ★ Profile photo, everywhere ★ *(QA batch, BUG 3)*
+
+On any account, go to `/settings` and **upload a photo**.
+
+> ☐ It appears in Settings
+> ☐ Now go to `/profile` — **the header shows the photo, not an initial**.
+>   This was the bug: the header had no code path that could ever show one.
+> ☐ On `/discover`, your artist card shows it too
+> ☐ In onboarding's follow step, suggested artists with photos show them
+
 ### 1.4 Discover on real data (Phase 4g)
 Back on the first fan account, on `/discover`:
 
@@ -164,10 +174,54 @@ Back on the first fan account, on `/discover`:
 On your **main browser**, signed in as your artist account.
 
 ### 2.1 Schedule a show for ~35 minutes from now
-`/shows` → schedule. **35 minutes** matters: the broadcast window opens at
+**`/profile`** → your artist console → *Schedule a show*. (Not `/shows` — that
+is Recorded Shows, the replay list.)
+
+*(QA batch, RULING 1)* There is a **HOW LONG** row now:
+
+> ☐ Options are 30m / 1h / 1h 30m / 2h / 3h, with **1h** selected by default
+> ☐ The line underneath states your window: start time → duration → plus 15
+>   minutes' grace
+
+**Pick 30m for this test** — it makes the window-close checks in Sitting 3
+take minutes rather than hours.
+
+> ☐ The show appears in the list showing **30MIN** in its meta line **35 minutes** matters: the broadcast window opens at
 T−30, and you want to be inside Kit Check before it does.
 
 > ☐ Show created, appears on your profile
+
+### 2.1b ★ B-ROLL UPLOAD — the retest bar ★ *(QA batch, BUG 1)*
+
+On your artist console (`/profile`), find the **B-ROLL** section.
+
+**A ~50MB clip:**
+
+> ☐ Pressing UPLOAD CLIP shows a **percentage on the button and a moving
+>   progress bar** — not "WORKING…"
+> ☐ The bar advances steadily and the label reads "Uploading 50MB…"
+> ☐ Near the end it changes to **"Saving to your library…"** — the bar reaches
+>   100 only after the clip is registered, not merely uploaded
+> ☐ The clip **appears in the library** with its real size
+> ☐ **It does not hang.** The old failure was an indefinite Pending with no
+>   error, ever.
+
+**A file over 100MB:**
+
+> ☐ Refused **immediately**, before any transfer, with a message naming the
+>   actual size and the limit
+> ☐ Nothing appears in the library
+
+**Cancel mid-upload:**
+
+> ☐ A CANCEL button is there during the upload
+> ☐ Pressing it stops the transfer, shows no error (you did that on purpose),
+>   and adds nothing to the library
+
+**In the network tab**, the big request should now go to
+`…supabase.co/storage/v1/object/upload/sign/…`, **not** to `/api/broll/upload`.
+That is the whole fix: the bytes no longer pass through a serverless function.
+`/api/broll/upload` is gone entirely — a GET to it returns 404.
 
 ### 2.2 Kit Check, and the thing that could not be done before
 Open `/kit-check`.
@@ -455,6 +509,70 @@ an identity and differing only in the suffix is exactly the distinction this
 round added; a line showing `chosen=…#camera` while `target=…#broll` is the
 bug, and is the single most useful thing you could send me.
 
+### 3.6c ★ END SHOW RELEASES EVERY DEVICE ★ *(QA batch, BUG 2)*
+
+**Do this instead of the plain End Show at the end of 3.6.** It is the one
+check that needs two devices watching at once.
+
+With the show live and **a phone paired as a camera**, press **END SHOW** on
+the laptop. Then watch the phone.
+
+> ☐ **The phone's camera light goes out within a few seconds**, untouched
+> ☐ The phone shows "The show has ended — this camera is off"
+> ☐ **Your laptop's camera light goes out too**
+> ☐ **And the microphone indicator** — the mic device was never released
+>   either, for the same reason
+> ☐ You still see your own last frame on the ended screen — that is a **still**
+>   now, captured before the camera was released, not a live feed
+
+If any light stays on, note **which device and which light**. Camera-still-on
+and mic-still-on have different causes.
+
+### 3.6d Show duration and the window *(QA batch, RULING 1)*
+
+While live, look at the LIVE banner:
+
+> ☐ There is a **"29m LEFT"**-style chip beside ● LIVE, counting down
+> ☐ Past the scheduled duration it reads **OVER TIME** rather than a negative
+>   number — the window has 15 minutes' grace and running slightly over is fine
+
+Now the sweep. **Do not press End Show.** Leave the show running and wait until
+the duration plus 15 minutes has passed (this is why 30m was suggested), then:
+
+> ☐ On a viewer device, `/discover` **no longer lists the show under LIVE NOW**
+> ☐ Reloading `/live?show=…` shows the ended card, not the stage
+> ☐ On your console, the show is no longer in UPCOMING
+
+And the expired case — schedule a show for **5 minutes from now with a 30m
+duration**, then do nothing at all for ~50 minutes (or temporarily change your
+computer's clock forward, which is faster):
+
+> ☐ It shows as **MISSED** in your console list, not as a countdown reading
+>   "now"
+> ☐ **GO LIVE is refused** for it — an artist cannot arm a show whose window
+>   has closed
+> ☐ It does not appear in Discover's COMING UP
+
+### 3.6e Named cue sheets *(QA batch, RULING 2)*
+
+In the AUDIO panel, load a backing track and open the cue editor.
+
+> ☐ There is a **Sheet** name field, defaulting to `Default`
+> ☐ Mark two or three cues, name the sheet **"Slow version"**, press Save
+> ☐ Change a cue, rename the field to **"Festival cut"**, press Save again
+> ☐ A **Load** dropdown now offers both, with cue counts
+> ☐ Loading "Slow version" **restores its cues**, not the festival ones
+> ☐ With a name that matches a saved sheet, an orange line warns **"Saving
+>   overwrites …"** — so overwriting is never a surprise
+
+Then on your console (`/profile`), find **CUE SHEETS**:
+
+> ☐ Both sheets are listed, with the track name, cue count and date
+> ☐ The pencil renames one — and renaming it to the other's name is refused
+>   with a real sentence, not an error page
+> ☐ The bin asks first, naming the sheet, then deletes it
+> ☐ The deleted one is gone from the editor's Load dropdown too
+
 ### 3.7 Recording verification (Phase 4a)
 Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
@@ -653,3 +771,9 @@ the live path is where a silent failure looks like a working one.
 - Followed artists only sort to the top of the *loaded* page of Discover.
 - No follower counts anywhere. The follow graph is private and a client-side
   count would read "1" for everybody.
+- A swept show's database row can read `soundcheck` until its owner next opens
+  the app. Every client already treats it as ended by the clock; the durable
+  write is deliberately lazy because there is no cron in this stack.
+- GO LIVE still arms 30 minutes before the start, not at the start. That is a
+  deliberate reading of Ruling 1 — see DECISIONS.md — because arming only from
+  the slated time would delete soundcheck.
