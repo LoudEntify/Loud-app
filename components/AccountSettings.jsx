@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
 import AccountDataControls from './AccountDataControls';
+import AvatarRing from './AvatarRing';
 import GenreSelect from './GenreSelect';
 
 const INK = '#011627';
@@ -193,12 +194,12 @@ export default function AccountSettings() {
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>PROFILE INFO</span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
-            <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
-              {photoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              )}
-            </div>
+            {/* AvatarRing, not a bespoke <img>. Settings having its own
+                avatar rendering is what let the rest of the app disagree
+                with it -- one component now, so "what my photo looks
+                like here" and "what it looks like everywhere else"
+                cannot drift apart again. */}
+            <AvatarRing src={photoUrl} name={displayName || profile?.username || 'You'} size={64} alt="Your photo" />
             <div>
               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
               <button

@@ -5,6 +5,8 @@ import { Trash, UploadSimple } from '@phosphor-icons/react';
 import EmptyState from './EmptyState';
 import { getSupabase } from '../lib/supabaseClient';
 import { getSession } from '../lib/supabaseAuth';
+import { MAX_CLIP_BYTES, MAX_TOTAL_BYTES, megabytes as mb } from '../lib/brollLimits';
+import { uploadBrollClip } from '../lib/brollUpload';
 
 const INK = '#011627';
 const TEAL = '#2ec4b6';
@@ -12,22 +14,27 @@ const RED = '#e71d36';
 
 // B-roll: the artist's own clip library, cuttable during a show.
 //
-// Caps are enforced here AND stated up front, because a 500MB ceiling
-// discovered at the end of a 400MB upload is a worse experience than one
-// shown before you pick the file.
-export const MAX_CLIP_BYTES = 100 * 1024 * 1024;   // 100MB per file
-export const MAX_TOTAL_BYTES = 500 * 1024 * 1024;  // 500MB per artist
-
-const BUCKET = 'recordings';
-
-function mb(bytes) {
-  return Math.round((bytes / 1048576) * 10) / 10;
-}
+// Caps are enforced server-side AND stated up front, because a 500MB
+// ceiling discovered at the end of a 400MB upload is a worse experience
+// than one shown before you pick the file. The numbers themselves live
+// in lib/brollLimits.js so this file and the routes cannot promise
+// different things.
+//
+// UPLOADS GO STRAIGHT TO STORAGE. The bytes do not pass through a
+// serverless function — see lib/brollUpload.js and
+// app/api/broll/upload-url for why the version that did hung forever on
+// anything larger than a few megabytes.
 
 export default function BRollLibrary() {
   const [session, setSession] = useState(null);
   const [clips, setClips] = useState(null);
   const [busy, setBusy] = useState(false);
+  // null when idle, 0-100 while uploading. Real bytes-transferred
+  // progress from XHR -- the thing the old fetch-based upload could not
+  // produce at all.
+  const [progress, setProgress] = useState(null);
+  const abortRef = useRef(null);
+  const [pendingBytes, setPendingBytes] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const fileRef = useRef(null);
@@ -64,43 +71,35 @@ export default function BRollLibrary() {
     setError('');
     setNotice('');
 
-    if (!file.type.startsWith('video/')) {
-      setError('B-roll must be a video file.');
-      return;
-    }
-    if (file.size > MAX_CLIP_BYTES) {
-      setError(`That clip is ${mb(file.size)}MB. The limit is ${mb(MAX_CLIP_BYTES)}MB per clip.`);
-      return;
-    }
-    if (file.size > remainingBytes) {
-      setError(`Not enough space — ${mb(remainingBytes)}MB left of your ${mb(MAX_TOTAL_BYTES)}MB. Delete a clip first.`);
-      return;
-    }
+    // Type/size/quota checks live in uploadBrollClip so the same rules
+    // apply however it is called, and so this component cannot drift
+    // from them. It fails fast, before any transfer starts.
 
+    setPendingBytes(file.size);
     setBusy(true);
+    setProgress(0);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      // Uploads go through the service-role route now. The browser has no
-      // write access to either the bucket or the table -- see
-      // app/api/broll/upload for why the direct-from-client version was
-      // always going to be refused.
-      const form = new FormData();
-      form.append('file', file);
-
-      const res = await fetch('/api/broll/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: form,
+      const result = await uploadBrollClip({
+        file,
+        accessToken: session.access_token,
+        usedBytes,
+        onProgress: setProgress,
+        signal: controller.signal,
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body.error || 'Upload failed.');
+      if (!result.ok) {
+        // Cancelling is a thing the artist did, not a failure to report
+        // back at them.
+        if (!result.aborted) setError(result.error || 'Upload failed.');
         return;
       }
-
       setNotice('Clip uploaded — muted, and ready to cue.');
       await load(session.user.id);
     } finally {
+      abortRef.current = null;
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -159,13 +158,50 @@ export default function BRollLibrary() {
           }}
         >
           <UploadSimple size={14} weight="bold" />
-          {busy ? 'WORKING…' : 'UPLOAD CLIP'}
+          {busy ? (progress === null ? 'STARTING…' : `${progress}%`) : 'UPLOAD CLIP'}
         </button>
+        {busy && (
+          <button
+            type="button"
+            onClick={() => abortRef.current?.abort()}
+            style={{
+              padding: '10px 12px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em',
+              color: 'rgba(1,22,39,0.6)', background: 'transparent',
+              border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer',
+            }}
+          >
+            CANCEL
+          </button>
+        )}
         <span style={{ fontSize: 10, color: 'rgba(1,22,39,0.45)' }}>
           Max {mb(MAX_CLIP_BYTES)}MB per clip. Clips are muted on upload.
         </span>
         <input ref={fileRef} type="file" accept="video/*" onChange={handleFile} style={{ display: 'none' }} />
       </div>
+
+      {/* Real progress, not a spinner. The bar only reaches 100 after the
+          clip has been REGISTERED, not merely uploaded -- a full bar for
+          a clip that then failed to save would be the same lie the old
+          "WORKING…" told, just faster. */}
+      {busy && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ height: 5, background: 'rgba(1,22,39,0.08)', borderRadius: 999, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${progress ?? 0}%`,
+                height: '100%',
+                background: TEAL,
+                transition: 'width 160ms linear',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.45)', marginTop: 5 }}>
+            {progress !== null && progress >= 99
+              ? 'Saving to your library…'
+              : `Uploading ${mb(pendingBytes)}MB — you can leave this tab open and carry on.`}
+          </div>
+        </div>
+      )}
 
       {error && <div style={{ fontSize: 12, color: RED, marginTop: 10 }}>{error}</div>}
       {notice && <div style={{ fontSize: 12, color: TEAL, marginTop: 10 }}>{notice}</div>}

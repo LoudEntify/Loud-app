@@ -427,31 +427,54 @@ function probeWithTimeout(room) {
 // through VideoTrack/TrackReference: this track is deliberately no
 // longer published, so it has no publication for a TrackReference to
 // point at.
-function EndedSelfView({ track }) {
-  const videoRef = useRef(null);
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!track || !el) return undefined;
-    track.attach(el);
-    return () => {
-      try {
-        track.detach(el);
-      } catch {
-        // detach on an already-torn-down element is not worth throwing over
-      }
-    };
-  }, [track]);
+// The artist's own last frame, after the show.
+//
+// A STILL, not a live track. It used to attach the real camera track,
+// which is what kept the camera acquired -- and the light on -- after
+// End Show. Rendering the final frame instead keeps what that was for
+// (the artist is not dropped to a black screen the instant they end)
+// while the device is genuinely released.
+function EndedSelfView({ still }) {
+  if (!still) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 8, background: '#011627', overflow: 'hidden' }}>
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={still} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
     </div>
   );
+}
+
+/**
+ * Grab one frame from a live video track as a data URL.
+ *
+ * Must run BEFORE the track is stopped -- a stopped track paints
+ * nothing, which is the same reason ShotVideo snapshots continuously
+ * rather than at the moment a camera dies. Returns null on any failure;
+ * a missing still is a black panel, never a thrown error in an
+ * end-of-show path.
+ */
+async function captureStillFrom(track) {
+  let el = null;
+  try {
+    el = track.attach();
+    el.muted = true;
+    el.playsInline = true;
+    await el.play?.().catch(() => {});
+    if (!el.videoWidth) {
+      // One short wait for the first frame; past that, no still.
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    if (!el.videoWidth || !el.videoHeight) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = el.videoWidth;
+    canvas.height = el.videoHeight;
+    canvas.getContext('2d')?.drawImage(el, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  } catch {
+    return null;
+  } finally {
+    try { if (el) track.detach(el); } catch { /* nothing worth throwing over */ }
+  }
 }
 
 function classifyDirectorStartReason(showId, role) {
@@ -2495,23 +2518,24 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     setFacingMode(next);
   }, [facingMode, room]);
 
-  // Round C -- the artist's own camera track, retained after the show
-  // ends so their self-view keeps working while nothing transmits.
+  // The artist's own last frame, kept as a STILL after the show ends.
   //
-  // DECLARED HERE, ABOVE releaseLocalDevices, AND THAT IS THE WHOLE
-  // POINT. It used to sit ~130 lines further down, while
-  // releaseLocalDevices below both reads it and lists it in its
+  // This used to hold the live camera TRACK, so the self-view kept
+  // working while nothing transmitted -- and that is precisely what kept
+  // the camera light on after End Show. It is a data URL now: the frame
+  // is grabbed while the track is alive, then the device is released for
+  // real. See the ended effect below.
+  //
+  // Historical note worth keeping, because the shape of the mistake
+  // recurs: an earlier version declared this ~130 lines further down,
+  // while releaseLocalDevices below both read it and listed it in its
   // dependency array -- and a dependency array is evaluated DURING
-  // RENDER, not when the callback eventually runs. So every render of
-  // this component touched a `const` still in its temporal dead zone and
-  // threw `ReferenceError: Cannot access 'endedSelfViewTrack' before
-  // initialization` -- minified to "Cannot access 'tP' before
-  // initialization", which is the crash that took the live page down on
-  // the first device test that ever got far enough to reach this
-  // component. It has been latent since the device-release round
-  // (21e8432); the old entry gate is what kept anyone from reaching the
-  // code that trips it.
-  const [endedSelfViewTrack, setEndedSelfViewTrack] = useState(null);
+  // RENDER, not when the callback eventually runs. Every render touched
+  // a `const` still in its temporal dead zone and threw
+  // "Cannot access 'tP' before initialization", which took the live page
+  // down on the first device test that got far enough to reach it.
+  // `npm run check:tdz` exists because of that afternoon.
+  const [endedSelfViewStill, setEndedSelfViewStill] = useState(null);
 
   // Round C -- LEAVE must release the DEVICES, not just the room.
   // room.disconnect() alone tears down the connection but can leave the
@@ -2544,13 +2568,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     } catch {
       // same
     }
-    try {
-      endedSelfViewTrack?.stop?.();
-    } catch {
-      // same
-    }
-    logHealthEvent('local_devices_released', {});
-  }, [room, endedSelfViewTrack]);
+    logHealthEvent('local_devices_released', { reason: 'leave' });
+  }, [room]);
 
   const leaveCall = useCallback(() => {
     releaseLocalDevices();
@@ -2700,13 +2719,43 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // locally, zero publishing outside Go Live -> End Show.
         const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
         if (camPub?.track) {
-          // Round C -- retain the track BEFORE unpublishing so the
-          // artist keeps a local self-view. stopOnUnpublish:false leaves
-          // the MediaStreamTrack running; only the transmission stops.
-          setEndedSelfViewTrack(camPub.track);
-          await room.localParticipant.unpublishTrack(camPub.track, false);
+          // ── QA RULING: THE LIGHT GOES OUT ───────────────────────
+          // This previously unpublished with `stopOnUnpublish: false`,
+          // deliberately, so the artist kept a live local self-view
+          // after the show (Round C). That decision is overturned: it
+          // meant the camera DEVICE stayed acquired, so the light stayed
+          // on — on the artist's laptop and on every other participating
+          // device — after End Show. Nobody was receiving it, which is
+          // exactly the distinction that made the original audio leak a
+          // privacy problem rather than a rendering one. The light is
+          // the only thing anyone actually trusts.
+          //
+          // The self-view is KEPT, as a still. A frame is grabbed to a
+          // canvas while the track is alive, and the device is then
+          // released properly. The artist still sees themselves; the
+          // camera is genuinely off. Both properties, no trade.
+          const still = await captureStillFrom(camPub.track);
+          if (still) setEndedSelfViewStill(still);
+          await room.localParticipant.unpublishTrack(camPub.track, true);
+          try { camPub.track.stop(); } catch { /* already stopped by the unpublish */ }
         }
+
+        // The MICROPHONE DEVICE, not just the published track. The
+        // processed track unpublished above is a MediaStreamDestination
+        // -- stopping it does not release the getUserMedia input feeding
+        // the Web Audio graph, so the mic indicator stayed on for the
+        // same reason the camera light did.
+        try {
+          handle?.rawStream?.getTracks?.().forEach((t) => t.stop());
+          handle?.processedTrack?.stop?.();
+          await handle?.audioContext?.close?.();
+          audioHandleRef.current = null;
+        } catch {
+          // release is best-effort; never throw out of an ending show
+        }
+
         onBroadcastEnded?.();
+        logHealthEvent('local_devices_released', { reason: 'show_ended', role, hadCamera: !!camPub });
         logHealthEvent('video_stopped_on_show_end', { hadPublication: !!camPub });
       } catch (err) {
         // Never let this throw into the ended transition -- the mute
@@ -4006,8 +4055,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           show has ended. Performers/camfeed devices are unaffected --
           always rendered, exactly as before. */}
       {(role !== 'viewer' || displayShowState === 'live') && <RoomAudioRenderer />}
-      {displayShowState === 'ended' && endedSelfViewTrack && (
-        <EndedSelfView track={endedSelfViewTrack} />
+      {displayShowState === 'ended' && endedSelfViewStill && (
+        <EndedSelfView still={endedSelfViewStill} />
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />

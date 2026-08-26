@@ -293,14 +293,11 @@ export default function Onboarding() {
         {step.key === 'identity' && (
           <div style={{ border: '1px solid rgba(1,22,39,0.12)', clipPath: CHAMFER, padding: 18, maxWidth: 560 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ width: 68, height: 68, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
-                {photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <AvatarRing name={profile?.display_name || 'You'} size={68} />
-                )}
-              </div>
+              {/* The same AvatarRing every other surface uses, rather
+                  than a bespoke <img> here and a placeholder elsewhere —
+                  which is exactly how the header ended up showing an
+                  initial while Settings showed a photo. */}
+              <AvatarRing src={photoUrl} name={profile?.display_name || 'You'} size={68} alt="Your photo" />
               <div>
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhoto} />
                 <button type="button" onClick={() => fileRef.current?.click()} disabled={photoBusy} style={secondaryStyle}>
@@ -384,7 +381,7 @@ export default function Onboarding() {
                 const isFollowing = following.has(a.id);
                 return (
                   <div key={a.id} style={{ border: '1px solid rgba(1,22,39,0.1)', clipPath: CHAMFER, padding: 13, display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <AvatarRing name={a.display_name || a.username || 'Artist'} size={44} />
+                    <AvatarRing src={a.avatar_url} name={a.display_name || a.username || 'Artist'} size={44} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {a.display_name || a.username || 'Artist'}

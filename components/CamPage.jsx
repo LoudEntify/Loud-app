@@ -44,6 +44,7 @@ import {
 } from '@livekit/components-react';
 import { Track, TrackEvent, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
+import ReleaseOnShowEnd from './ReleaseOnShowEnd';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
 
@@ -115,6 +116,9 @@ export default function CamPage() {
   // purely for the DEBUG panel's "ACQUIRE" line, same as the manual
   // try/catch this replaces used to show on screen.
   const [liveKitRoomError, setLiveKitRoomError] = useState(null);
+  // Terminal once set: the show is over, the camera is released, and
+  // there is nothing this page can usefully do next.
+  const [showOver, setShowOver] = useState(false);
 
   // Device labels only populate after permission is granted, so a
   // throwaway getUserMedia call comes first -- the track from it is
@@ -262,6 +266,20 @@ export default function CamPage() {
     ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
     : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE };
 
+  if (showOver) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#011627', color: '#fdfffc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ maxWidth: 320 }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(253,255,252,0.5)' }}>LOUDENTIFY</div>
+          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
+          <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
+            This camera is off — the light on this device should be out. Nothing is being sent.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <LiveKitRoom
       token={conn.token}
@@ -273,6 +291,11 @@ export default function CamPage() {
       data-lk-theme="default"
       style={{ height: '100vh', width: '100%' }}
     >
+      {/* End of show releases this camera too. /cam runs none of the
+          live show's components, so before this nothing here was
+          listening for SHOW_ENDED and the light stayed on indefinitely
+          after End Show. */}
+      <ReleaseOnShowEnd label="camfeed" onEnded={() => setShowOver(true)} />
       <CamPublisher onDeviceIdChange={setDeviceId} role={role} liveKitRoomError={liveKitRoomError} debugMode={debugMode} />
     </LiveKitRoom>
   );

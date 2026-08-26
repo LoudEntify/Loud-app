@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { LiveKitRoom } from '@livekit/components-react';
+import ReleaseOnShowEnd from './ReleaseOnShowEnd';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -51,6 +52,9 @@ export default function CamPair() {
   const [busy, setBusy] = useState(false);
   const [revoked, setRevoked] = useState(false);
   const [movedNotice, setMovedNotice] = useState('');
+  // Set when the show ends and this phone releases its camera. Terminal:
+  // there is nothing to reconnect to and the light is already out.
+  const [showOver, setShowOver] = useState(false);
 
   const autoRedeemedRef = useRef(false);
 
@@ -91,6 +95,9 @@ export default function CamPair() {
   // and a show-room camera.
   useEffect(() => {
     if (!conn?.pairingId || !conn?.deviceSecret) return undefined;
+    // Nothing to follow once the show is over -- polling on would ask a
+    // question whose only honest answer is "nowhere".
+    if (showOver) return undefined;
     let cancelled = false;
     let timer = null;
 
@@ -134,7 +141,19 @@ export default function CamPair() {
 
     timer = setTimeout(tick, conn.pollMs || 4000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [conn]);
+  }, [conn, showOver]);
+
+  if (showOver) {
+    return (
+      <Shell>
+        <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(253,255,252,0.5)' }}>LOUDENTIFY</div>
+        <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
+        <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
+          This camera is off — the light on this phone should be out. Nothing is being sent.
+        </div>
+      </Shell>
+    );
+  }
 
   if (revoked) {
     return (
@@ -183,6 +202,10 @@ export default function CamPair() {
           video={{ facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE }}
           style={{ flex: 1 }}
         >
+          {/* The phone's own end-of-show handling. Without this it keeps
+              filming after End Show -- it runs none of the live show's
+              components, so nothing else here was ever listening. */}
+          <ReleaseOnShowEnd label="camfeed" onEnded={() => setShowOver(true)} />
           <div style={{ padding: 20, fontSize: 12, color: 'rgba(253,255,252,0.6)', lineHeight: 1.6 }}>
             This phone is now a camera{conn.role ? ` — the ${String(conn.role).toUpperCase()} angle` : ''}. Prop it
             where you want the shot and check the framing on your other screen. Keep this page open and the screen awake.

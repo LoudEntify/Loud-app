@@ -266,7 +266,7 @@ export default function DiscoverFeed() {
                 textAlign: useGrid ? 'center' : 'left',
               }}
             >
-              <AvatarRing name={item.title} size={useGrid ? 72 : 52} />
+              <AvatarRing src={item.row?.avatar_url} name={item.title} size={useGrid ? 72 : 52} />
               <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
                 <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</div>
                 {item.subtitle && (

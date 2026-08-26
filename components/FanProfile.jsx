@@ -45,7 +45,7 @@ export default function FanProfile() {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <AvatarRing name={name} size={82} gradient="linear-gradient(135deg,#2ec4b6,#17847a)" />
+            <AvatarRing src={profile?.avatar_url} name={name} size={82} gradient="linear-gradient(135deg,#2ec4b6,#17847a)" alt="Your photo" />
             <div>
               <div style={{ fontSize: 21, fontWeight: 700, color: INK }}>{name}</div>
               <span style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)' }}>{handle} &middot; FAN</span>

@@ -167,7 +167,7 @@ export default function ProfileSurface({ artistId }) {
             artist is always looking at the page their audience sees. */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-            <AvatarRing name={name} size={92} />
+            <AvatarRing src={profile.avatar_url} name={name} size={92} alt={`${name}’s photo`} />
             <div>
               <div style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.01em' }}>{name}</div>
               <div style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>
