@@ -12,8 +12,8 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-2xhs99yds-korey-alashe.vercel.app` |
-| **Deployed from** | `0ecdf8f` — the last commit that changes code. Everything after it is documentation. |
+| **Preview** | `https://loud-g7pytimy4-korey-alashe.vercel.app` |
+| **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
 | **Production deployed** | **No.** Preview only, every time. |
@@ -28,6 +28,7 @@ and not five.
 | 3 | `3517b8a` | Token economy, provider-agnostic checkout, signed finance webhook |
 | 4 | `fe978f5` | Egress verification, reactions, share cards, resume ladder, Discover |
 | 4e | `0ecdf8f` | **B-roll live playback** — source discrimination at the root, then the clip path |
+| 4e+ | `76ac18d` | B-roll follow-up — frame watchdog, reselect, cue-sheet clips, rehearsal preview |
 
 ### Bypass-loaded confirmation, per phase
 
@@ -52,6 +53,8 @@ shipped, not just committed" line for each phase.
 | **4** | `POST /api/reactions` | `500 {"ok":false,"error":"Insert failed"}` **pre-migration** — which the client ignores by design, so reactions still work. |
 | **4e** | `/live`, `/egress` | HTTP 200 each. Served `/live` bundle grepped: contains `B-Roll Clip`, `broll`, `captureStream`, `maintain-resolution`, `targetSourceKey`. |
 | **4e** | `lib/trackSources.js` unit-exercised in node against the real module | 14/14 pass, including the exact bug case: two tracks sharing one participant identity, where a clip-targeted command matches the clip and **does not** match the camera (and the reverse). Legacy commands with no source key still match on identity alone. |
+| **4e+** | `lib/cueSheetValidation.js` exercised in node | 5/5 — a `broll` cue with and without a `clip_id` both validate; `clip_id` on a camera cue is rejected; an empty one is rejected; plain camera cues are unaffected. |
+| **4e+** | `/kit-check` bundle | Contains `B-ROLL — CHECK A CLIP`, `B-ROLL CLIP`, `nothing leaves this room` — the rehearsal preview shipped. |
 | all | `/`, `/shows`, `/notifications` | HTTP 200 each. |
 
 **What that does NOT prove**, stated plainly: no live show was run, no phone
@@ -204,6 +207,27 @@ Press **REMOVE** on the CLOSE card.
 
 Re-pair it (+ CLOSE again, scan again) — you want two cameras going into the
 show.
+
+### 2.2b B-roll in rehearsal — check the clip before anyone is watching
+
+**Only if you have a clip uploaded and are on Chrome/Edge on a computer.**
+
+Still in Kit Check with the rehearsal room open (you paired a camera in 2.2,
+so it is):
+
+> ☐ Under the composed view there is a **B-ROLL — CHECK A CLIP** row with a
+>   button per clip
+> ☐ Tap one: it appears as **another tile**, labelled **B-ROLL CLIP** in orange
+> ☐ It is the right clip, the right way up, and plays
+> ☐ **No sound from the clip** — same policy as in a show
+> ☐ The line underneath says *"Rehearsal only — nothing leaves this room."*
+> ☐ Tap it again (or let it end): the tile disappears cleanly
+> ☐ Press **END REHEARSAL** while a clip is playing — it stops, and no track
+>   is left behind
+
+This is Kit Check doing its actual job: a clip that turns out to be sideways,
+silent or the wrong file is exactly the thing to find here rather than
+mid-song.
 
 ### 2.3 Reload the tab
 > ☐ Your paired cameras are **still listed** (a reload is not a change of mind)
@@ -379,6 +403,48 @@ This is checked in 3.7 below, but note it now so you know what to look for:
 > ☐ When you review the recording, the b-roll segment is **in the file**, at
 >   the point where you cued it — not your camera at that timestamp
 
+#### ★ No recovery events in the timeline ★
+
+This is the check that proves the clip end was treated as *expected* rather
+than as a failure. After the clip has ended, in SQL:
+
+```sql
+select event_type, detail, client_ts
+  from health_events
+ where show_id = '<your show id>'
+   and client_ts > now() - interval '10 minutes'
+ order by client_ts;
+```
+
+> ☐ **`broll_published`** appears when you cued it, **`broll_clip_ended`** when
+>   it finished, **`broll_return_cut`** for the auto-return, and
+>   **`broll_source_ended`** when the track came off
+> ☐ **NO `track_liveness_impaired`** with reason `absent` or `frames_stalled`
+>   for the b-roll track around that moment
+> ☐ **NO `egress_reselect`** at the clip's end
+> ☐ **NO `publish_recovery_*`** events
+
+Any of those three appearing at the clip's end is the thing to report. Each
+has a specific meaning: `frames_stalled` means the frame watchdog is judging a
+clip it should be exempt from, `egress_reselect` means the recorder treated an
+expected ending as an orphaned track, and a `publish_recovery` means the
+unpublish tripped the reconnect machinery.
+
+#### From a cue sheet (optional — only if you use cue sheets)
+
+Cue sheets can now **start** a clip, not just cut to one already playing.
+
+In the cue editor: add a cue, set **Role** to `broll` — it is in the dropdown
+now — and a **Clip** selector appears listing your clips. Pick one, save, and
+run the show in **Cue** mode.
+
+> ☐ At the cue's timestamp, the clip starts and goes on air by itself
+> ☐ **Expected and not a bug:** it lands **a beat late** — roughly half a
+>   second to a second. Signing the URL, starting playback and publishing all
+>   have to happen first. Author slightly early to compensate.
+> ☐ Leaving **Clip** on `(whatever is playing)` gives the old behaviour: the
+>   cue cuts to a clip you cued by hand, and falls back if there isn't one
+
 #### If something looks wrong
 
 Reload `/live?show=…&debug=1` and reproduce. The console prints one
@@ -394,7 +460,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-2xhs99yds-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-g7pytimy4-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \

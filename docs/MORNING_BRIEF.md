@@ -1,7 +1,7 @@
 # MORNING BRIEF — overnight build #2
 
-25 August 2026 · branch `feature/overnight-round-2` · code head `0ecdf8f`
-Preview: `https://loud-2xhs99yds-korey-alashe.vercel.app`
+25 August 2026 · branch `feature/overnight-round-2` · code head `76ac18d`
+Preview: `https://loud-g7pytimy4-korey-alashe.vercel.app`
 
 **Nothing is merged. Nothing touched production. I did not touch the
 database.**
@@ -615,6 +615,29 @@ short:
   sheet can cut to a playing clip but cannot start one.
 * **Safari cannot do this** (`captureStream` is unimplemented) and is told so
   in plain words rather than given a button that does nothing.
+
+A follow-up round then closed three gaps found by re-reading the spec against
+what shipped, plus one claim of mine that was simply wrong:
+
+* **The frame watchdog no longer judges a clip.** It stopped an *absent* clip
+  reading as a camera failure, but not a *buffering* one — three seconds of
+  slow network would have drawn CAMERA LOST over your own b-roll. The watchdog
+  exists for deaths that cannot be announced (a phone whose JS the OS
+  suspended); a clip is published by the browser running the show and
+  unpublished deliberately, so it can only ever produce false positives there.
+* **A clip ending no longer logs as a reselect.** That event means "a track
+  vanished underneath the shot pointing at it", and the recorder logs each one
+  so an unexplained substitution can be traced. A clip ending is the opposite
+  of unexplained.
+* **Cue sheets can now START a clip.** I had written that they could already
+  cut to a playing one — they could not; the validator rejected the role
+  outright, and I had reasoned from the director's shape without checking the
+  gate. Fixed, and gone further: a cue names a clip and plays it. It lands a
+  beat late (~0.5–1s to sign, start and publish), which is stated rather than
+  left to be discovered.
+* **Kit Check can preview a clip in rehearsal** — same code path, pointed at
+  the rehearsal room, which is the only room its token can reach. Finding out a
+  clip is sideways belongs there, not mid-song.
 
 ## 4f — The resume ladder
 

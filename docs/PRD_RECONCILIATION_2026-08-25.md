@@ -1,6 +1,6 @@
 # PRD RECONCILIATION — 25 August 2026
 
-Branch `feature/overnight-round-2` · preview `https://loud-2xhs99yds-korey-alashe.vercel.app`
+Branch `feature/overnight-round-2` · preview `https://loud-g7pytimy4-korey-alashe.vercel.app`
 
 ---
 
@@ -53,7 +53,7 @@ migrated behaviour.
 
 ### Row 14 · B-roll
 **BUILT-UNTESTED** *(updated — was PARTIAL/skipped on the overnight run, then
-built as its own round, commit `0ecdf8f`)*.
+built as its own round, commits `0ecdf8f` + `76ac18d`)*.
 
 Live playback into the broadcast now exists: the artist cues an uploaded clip,
 it publishes as a real LiveKit track, and the **B-Roll Clip** shot cuts to it
@@ -69,6 +69,11 @@ unpublished so no CAMERA LOST can appear.
 - **Needs a live show to confirm** the thing that matters: cue a clip and see
   the clip, not your face, on both devices — and a clean return with no CAMERA
   LOST. `docs/OVERNIGHT2_DEVICE_TEST.md` § 3.6b.
+- **Cue sheets can start a clip**, not only cut to one already playing: a cue
+  may name a `clip_id`. It lands ~0.5–1s after its timestamp, which is named
+  rather than hidden.
+- **Kit Check previews a clip in rehearsal** — same code path, rehearsal room
+  only.
 - **Still not built:** clip audio into the broadcast (the element is muted and
   only video is published, per the upload policy — mixing it into the Web Audio
   graph is a separate feature), and Safari, where `captureStream` does not
@@ -379,6 +384,20 @@ that reads exactly like a camera dying.
 **🔴 NEW —** **A cut away from a track must reach clients before that track is
 unpublished.** Otherwise the gap renders as CAMERA LOST over a frozen frame,
 for something that ended exactly as intended.
+
+**🔴 NEW —** **The frame watchdog must only judge tracks whose death cannot be
+announced.** It exists for a client suspended by its OS. A source published and
+withdrawn deliberately by a running client is exempt, or a slow network reads
+as a failure.
+
+**🔴 NEW —** **An expected departure must not be reported as a reselect.**
+`egress_reselect` means an unexplained substitution in a recording; writing one
+for a clip reaching its end makes the event useless for the thing it exists to
+catch.
+
+**🔴 NEW —** **A cue sheet may name a b-roll clip by id and start it.**
+`slot_role: 'broll'` plus `clip_id`, validated as a pair. Previously the role
+was not even in `SLOT_ROLES`.
 
 ---
 
