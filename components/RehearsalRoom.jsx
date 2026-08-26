@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { LiveKitRoom, useTracks, VideoTrack } from '@livekit/components-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LiveKitRoom, useRoomContext, useTracks, VideoTrack } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { roleOfTrack } from '../lib/trackSources';
+import { STAGE_TRACK_SOURCES, isBrollTrack, roleOfTrack } from '../lib/trackSources';
+import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
+import { getSupabase } from '../lib/supabaseClient';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -35,10 +37,17 @@ const TEAL = '#2ec4b6';
 // Using the shared resolver anyway means that if that ever changes, this
 // tile grid gets the right answer without anyone remembering it exists.
 function Tiles({ onConnectedRoles }) {
-  const tracks = useTracks([Track.Source.Camera]);
+  // ScreenShare is here for the same reason as on the live stage: it is
+  // how b-roll clips are published. A rehearsal previously had no b-roll
+  // to see; it does now, and checking a clip actually plays and looks
+  // right is exactly what Kit Check is for.
+  const tracks = useTracks(STAGE_TRACK_SOURCES);
 
+  // CAMERAS only. This list drives the pairing panel's WAITING -> LIVE
+  // badges, and a clip is not a paired camera -- reporting 'broll' here
+  // would light up a card that does not exist.
   const roles = useMemo(
-    () => tracks.map((t) => roleOfTrack(t)).filter((r) => r && r !== 'main'),
+    () => tracks.map((t) => roleOfTrack(t)).filter((r) => r && r !== 'main' && r !== 'broll'),
     [tracks]
   );
 
@@ -69,8 +78,8 @@ function Tiles({ onConnectedRoles }) {
         return (
           <div key={`${t.participant.identity}:${t.publication?.trackSid}`} style={{ position: 'relative', aspectRatio: '9 / 16', background: INK, overflow: 'hidden' }}>
             <VideoTrack trackRef={t} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            <span style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 8.5, letterSpacing: '0.06em', color: PORCELAIN, background: 'rgba(1,22,39,0.6)', padding: '2px 6px', borderRadius: 3 }}>
-              {role && role !== 'main' ? role.toUpperCase() : 'YOUR CAMERA'}
+            <span style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 8.5, letterSpacing: '0.06em', color: isBrollTrack(t) ? '#011627' : PORCELAIN, background: isBrollTrack(t) ? ORANGE : 'rgba(1,22,39,0.6)', padding: '2px 6px', borderRadius: 3 }}>
+              {isBrollTrack(t) ? 'B-ROLL CLIP' : role && role !== 'main' ? role.toUpperCase() : 'YOUR CAMERA'}
             </span>
           </div>
         );
@@ -79,7 +88,142 @@ function Tiles({ onConnectedRoles }) {
   );
 }
 
-export default function RehearsalRoom({ session, onEnd, onConnectedRoles }) {
+// ── B-ROLL, IN REHEARSAL ──────────────────────────────────────
+// Kit Check's whole promise is "find out before anyone is watching", and
+// a clip that turns out to be silent, sideways or the wrong file is
+// exactly the thing you want to discover here rather than mid-song.
+//
+// Identical code path to the live show — the same createBrollPlayer, the
+// same track name, the same publish — pointed at the REHEARSAL room.
+// Nothing reaches a show room, because this component only ever exists
+// inside the rehearsal LiveKitRoom and the token it holds grants that
+// room and no other.
+//
+// There is no director grammar here and deliberately no attempt to
+// invent one: rehearsal is a tile grid, so a cued clip simply appears as
+// another tile, labelled B-ROLL CLIP. "Does it play, is it the right
+// way up, is it the right clip" is the whole question this answers.
+function RehearsalBroll({ accessToken }) {
+  const room = useRoomContext();
+  const [clips, setClips] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const playerRef = useRef(null);
+  const [supported, setSupported] = useState(false);
+
+  useEffect(() => { setSupported(isBrollPlaybackSupported()); }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: err } = await getSupabase()
+          .from('broll_clips')
+          .select('id, title')
+          .order('created_at', { ascending: false });
+        if (!cancelled && !err) setClips(data || []);
+      } catch {
+        // An empty library and an unreadable one look the same, and both
+        // correctly render as nothing.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const stop = useCallback(async () => {
+    const player = playerRef.current;
+    playerRef.current = null;
+    setActiveId(null);
+    if (player) await player.stop();
+  }, []);
+
+  // Unmounting mid-clip (END REHEARSAL, the 20-minute cap, navigating
+  // away) must not leave a published track behind on a room this
+  // component no longer owns.
+  useEffect(() => () => { playerRef.current?.stop?.(); }, []);
+
+  const cue = useCallback(async (clip) => {
+    setError('');
+    if (activeId === clip.id) { await stop(); return; }
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (playerRef.current) await stop();
+      const player = createBrollPlayer({
+        room,
+        // No return cut to fire: rehearsal has no shot grammar, so the
+        // tile simply disappears when the clip ends, which is the honest
+        // representation of what happened.
+        onEnded: () => { stop(); },
+        onError: ({ error: e }) => { setError(e); stop(); },
+      });
+      playerRef.current = player;
+      const result = await player.start({ clip, accessToken });
+      if (result.error) {
+        playerRef.current = null;
+        setError(result.error);
+        return;
+      }
+      setActiveId(clip.id);
+    } finally {
+      setBusy(false);
+    }
+  }, [activeId, busy, room, accessToken, stop]);
+
+  if (!supported) {
+    return clips.length === 0 ? null : (
+      <div style={{ fontSize: 10.5, color: 'rgba(253,255,252,0.55)', padding: '8px 4px 2px', lineHeight: 1.5 }}>
+        B-roll needs Chrome or Edge on a computer — this browser can&apos;t play a clip into a stream.
+      </div>
+    );
+  }
+  if (clips.length === 0) return null;
+
+  return (
+    <div style={{ padding: '10px 4px 2px' }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.1em', color: 'rgba(253,255,252,0.5)', marginBottom: 6 }}>
+        B-ROLL — CHECK A CLIP
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {clips.map((clip) => {
+          const playing = activeId === clip.id;
+          return (
+            <button
+              key={clip.id}
+              type="button"
+              onClick={() => cue(clip)}
+              disabled={busy && !playing}
+              style={{
+                padding: '7px 11px',
+                maxWidth: 170,
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                color: playing ? INK : PORCELAIN,
+                background: playing ? ORANGE : 'transparent',
+                border: `1px solid ${playing ? ORANGE : 'rgba(253,255,252,0.25)'}`,
+                borderRadius: 0,
+                cursor: busy && !playing ? 'default' : 'pointer',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {playing ? '■ ' : '▶ '}{clip.title || 'Untitled clip'}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 9.5, color: 'rgba(253,255,252,0.4)', marginTop: 6, lineHeight: 1.5 }}>
+        Rehearsal only — nothing leaves this room. Clip audio stays off, same as in a show.
+      </div>
+      {error && <div style={{ fontSize: 10.5, color: '#ff6b6b', marginTop: 6 }}>{error}</div>}
+    </div>
+  );
+}
+
+export default function RehearsalRoom({ session, onEnd, onConnectedRoles, accessToken }) {
   const [secondsLeft, setSecondsLeft] = useState(session.sessionSeconds ?? 20 * 60);
 
   // Hard stop. The token's own TTL is the real backstop -- this is the
@@ -122,6 +266,7 @@ export default function RehearsalRoom({ session, onEnd, onConnectedRoles }) {
         style={{ background: INK, padding: 6 }}
       >
         <Tiles onConnectedRoles={onConnectedRoles} />
+        <RehearsalBroll accessToken={accessToken} />
       </LiveKitRoom>
 
       <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.5)', marginTop: 8, lineHeight: 1.5 }}>

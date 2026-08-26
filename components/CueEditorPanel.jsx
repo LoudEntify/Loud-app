@@ -18,8 +18,10 @@
 // PRD: Cue-Sheet Director CD-3
 // ─────────────────────────────────────────────────────────────
 
+import { useEffect, useState } from 'react';
 import { SHOT_TYPES, CUE_EDITOR_SHOT_KEYS, shotFamilyColor } from '../lib/shotTypes';
 import { SLOT_ROLES, FALLBACK_BEHAVIOURS, MOTION_SCALE_CEILING } from '../lib/cueSheetValidation';
+import { getSupabase } from '../lib/supabaseClient';
 
 const NUDGE_STEPS_MS = [-1000, -100, 100, 1000];
 
@@ -49,6 +51,33 @@ const btnStyle = {
   cursor: 'pointer',
 };
 
+// The artist's own clip library, for naming one in a b-roll cue.
+//
+// Fetched here rather than drilled down from RoomInner through
+// BroadcastStage and AudioDeckPanel: RLS (broll_select_own) already
+// scopes it to the caller, so it is one query with no props to thread
+// through two components that have no other reason to know about clips.
+function useBrollClips() {
+  const [clips, setClips] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from('broll_clips')
+          .select('id, title')
+          .order('created_at', { ascending: false });
+        if (!cancelled && !error) setClips(data || []);
+      } catch {
+        // An empty library and an unreadable one look the same here, and
+        // both correctly render as "no clips to choose".
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return clips;
+}
+
 export default function CueEditorPanel({
   trackReady,
   cues,
@@ -63,6 +92,14 @@ export default function CueEditorPanel({
   onChangeFallbackBehaviour,
   onSave,
 }) {
+  // ABOVE the early return, deliberately. `if (!trackReady) return null`
+  // is a conditional return, so any hook below it would run on some
+  // renders and not others -- which is the "Rendered fewer hooks than
+  // expected" crash that took the live page down when Leave was pressed
+  // (DECISIONS.md, Phase 0c). Same defect, same file shape, caught here
+  // before it could ship rather than after.
+  const brollClips = useBrollClips();
+
   if (!trackReady) return null;
 
   const sortedCues = [...cues].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
@@ -174,6 +211,33 @@ export default function CueEditorPanel({
                 ))}
               </select>
             </label>
+
+            {/* WHICH clip, for a b-roll cue. Gated on the role the same
+                way Direction is gated on pan -- clip_id is a validation
+                error on any other role (lib/cueSheetValidation.js), so
+                offering it elsewhere would be offering a way to author an
+                invalid sheet.
+
+                "(whatever is playing)" is a real option, not a null
+                state: a cue with no clip_id cuts to a clip already on
+                air and falls back if there is none, which is a
+                legitimate thing to want for a sheet that expects the
+                artist to cue manually. */}
+            {activeCue.slot_role === 'broll' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+                Clip
+                <select
+                  value={activeCue.clip_id || ''}
+                  onChange={(e) => onUpdateCue(activeCue.id, { clip_id: e.target.value || undefined })}
+                  style={selectStyle}
+                >
+                  <option value="">(whatever is playing)</option>
+                  {brollClips.map((clip) => (
+                    <option key={clip.id} value={clip.id}>{clip.title || 'Untitled clip'}</option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {activeCue.shot_type === 'pan' && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>

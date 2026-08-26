@@ -3330,10 +3330,6 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // name specifically means "the auto loop is alive," which this isn't),
   // so this skips fireAutoShot's logging and just returns the built
   // command for cueDirector to log against.
-  const fireCueShot = useCallback((shotKey, decisionSource, meta = {}) => (
-    buildAndFireCommand(shotKey, decisionSource, meta)
-  ), [buildAndFireCommand]);
-
   // ══════════════════════════════════════════════════════════════
   // B-ROLL: an uploaded clip, live, as a cuttable director source
   // ══════════════════════════════════════════════════════════════
@@ -3346,6 +3342,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // Everything that makes that safe lives in lib/trackSources.js -- this
   // block is only the sequencing.
   const [brollClips, setBrollClips] = useState([]);
+  // Read by fireCueShot, which must not take `brollClips` as a dependency:
+  // it feeds the cueDirector useMemo, and recreating that on every library
+  // change would tear down and rebuild a running cue sheet mid-song.
+  const brollClipsRef = useRef([]);
   const [activeBrollClipId, setActiveBrollClipId] = useState(null);
   const [brollBusy, setBrollBusy] = useState(false);
   const [brollError, setBrollError] = useState('');
@@ -3373,7 +3373,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           .from('broll_clips')
           .select('id, title, duration_ms, size_bytes')
           .order('created_at', { ascending: false });
-        if (!cancelled && !error) setBrollClips(data || []);
+        if (!cancelled && !error) {
+          setBrollClips(data || []);
+          brollClipsRef.current = data || [];
+        }
       } catch {
         // No clips is a legitimate state and the panel renders nothing
         // for it. A failed read is indistinguishable from that, and
@@ -3528,6 +3531,39 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // Leaving, ending, or unmounting mid-clip must not leave a published
   // track behind on a room this component no longer owns.
   useEffect(() => () => { brollPlayerRef.current?.stop?.(); }, []);
+
+  // Cue-Sheet Director (Phase 1) -- cueDirector owns its own health
+  // events (cue_fired/cue_fallback), not 'director_shot_emitted' (that
+  // name specifically means "the auto loop is alive," which this isn't),
+  // so this skips fireAutoShot's logging and just returns the built
+  // command for cueDirector to log against.
+  //
+  // Defined AFTER the b-roll block on purpose: it calls cueBroll, and
+  // `npm run check:tdz` treats use-before-define as an error precisely
+  // because a const referenced before its initialiser is the
+  // temporal-dead-zone crash that took the live page down once already.
+  const fireCueShot = useCallback((shotKey, decisionSource, meta = {}) => {
+    // A b-roll cue that names a clip STARTS that clip. It does not build
+    // a command here: the cut can only be fired once the track is
+    // actually published, so cueBroll fires it itself on success.
+    //
+    // Worth knowing, and stated rather than discovered: there is real
+    // latency here. Fetching a signed URL, starting playback and
+    // publishing takes roughly half a second to a second, so a clip cued
+    // from a sheet appears slightly after its timestamp rather than on
+    // it. Authoring a beat early is the workaround; pre-warming the clip
+    // is the fix, and it is not built.
+    if (meta.sourceRole === BROLL_ROLE && meta.clipId) {
+      const clip = brollClipsRef.current.find((c) => c.id === meta.clipId);
+      if (!clip) {
+        logHealthEvent('cue_broll_clip_missing', { clipId: meta.clipId });
+        return null;
+      }
+      cueBroll(clip);
+      return null;
+    }
+    return buildAndFireCommand(shotKey, decisionSource, meta);
+  }, [buildAndFireCommand, cueBroll]);
 
   const getAutoAvailableShots = useCallback(() => {
     // Live feeds only -- auto must never offer itself a shot whose

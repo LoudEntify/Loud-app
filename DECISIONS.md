@@ -1077,6 +1077,15 @@ decision made in advance, which is precisely the distinction. **They cannot
 start one**, and that limit is stated rather than left to be discovered:
 starting playback is a deliberate act at the console.
 
+> **⚠️ CORRECTED IN THE FOLLOW-UP ROUND — this paragraph was wrong.** Cue
+> sheets could not cut to a clip at all: `SLOT_ROLES` in
+> `lib/cueSheetValidation.js` was `['main','wide','close','side']`, so
+> `validateCue` rejected `slot_role: 'broll'` outright and the editor's Role
+> dropdown never offered it. The claim was written from the shape of
+> `cueDirector` without checking the validator that gates it. Both the code
+> and the claim are fixed below — and cue sheets now **can** start a clip,
+> which is the better answer anyway.
+
 ## 3 · Egress and liveness
 
 **Egress.** The recorder uses the identical resolution — same
@@ -1133,3 +1142,152 @@ was being able to cut to a clip at all.
 **No schema changes.** The clip's meaning reaches the flywheel through the
 existing `source_role` column (`'broll'`), so `shot_commands` needed nothing
 new. `targetSourceKey` is a wire-only field.
+
+---
+
+# B-ROLL — FOLLOW-UP ROUND (2026-08-26)
+
+The first b-roll round landed the mechanism. Re-reading the spec against what
+shipped surfaced **three genuine gaps and one incorrect claim of my own**.
+This round closes all four. No schema changes were needed.
+
+## 0 · The claim I got wrong
+
+I wrote that cue sheets could already cut to a playing clip. **They could not.**
+`SLOT_ROLES` did not contain `'broll'`, so `validateCue` rejected such a cue and
+the editor never offered the role. I had reasoned from `cueDirector`'s shape
+without checking the validator that gates it — the exact mistake the
+write-path audit round was created to stop, made in prose instead of in code.
+Corrected in place above, and fixed properly below.
+
+## 1 · The liveness registry: `frames_stalled` (gap)
+
+The first round stopped a b-roll track's ABSENCE being reported as a camera
+failure. It did **not** stop the frame watchdog judging it while it was still
+present — and on every remote client a b-roll track is frame-observable, so a
+clip buffering for three seconds on a slow connection would be marked
+`frames_stalled`, dropped from the eligible set, and drawn with the **CAMERA
+LOST** treatment over the artist's own b-roll.
+
+**B-roll is now exempt from the frame watchdog**, and the reason is
+categorical rather than convenient. The watchdog exists for exactly one
+failure: *a death that cannot be announced*, because the device that would
+announce it has had its JavaScript suspended by the OS — the screen-locked
+phone in that file's own v4 note. Frames are the only signal left when the
+client itself is gone.
+
+A clip cannot suffer that failure. It is published by the artist's own
+browser — the same browser running the show, which is by definition awake, and
+which unpublishes the track deliberately when the clip ends. **Its death is
+always announced.** So the watchdog has nothing here to catch and can only
+produce false positives.
+
+The exemption went into `isFrameObservable`, the predicate **shared** by the
+sampler and the verdict, because that file's own rule is "whatever cannot be
+measured must not be judged" — one line, and the two sides cannot drift apart.
+
+## 2 · The reselect machinery (gap)
+
+`onReselect` means *"a track vanished underneath the shot that was pointing at
+it"*, and the recorder logs every one as `egress_reselect` precisely so an
+unexplained substitution in a recording can be traced later.
+
+A clip ending is the opposite of unexplained. Left alone it would have written
+a line meaning "something went wrong" into the timeline of something going
+exactly right.
+
+**`ShotVideo` now promotes silently when the departing layer was b-roll.** The
+promotion still happens — something has to be shown — it is simply not
+reported as an orphaning.
+
+This also makes the behaviour **deterministic instead of timing-dependent**. In
+the normal case the cut fires 500ms before the unpublish, so the displayed
+layer has already moved and this path never runs at all. It covers the case
+where a client applies the cut late — which is precisely when a spurious
+reselect would have been logged and believed.
+
+Implementation note: the rescue effect runs at the moment a track has *left*
+the pool, so the trackRef is gone by then. A small ref records which layer keys
+are b-roll while the track is still present, pruned to the live pool whenever
+it outgrows a couple of dozen entries.
+
+## 3 · Cue sheets can now START a clip (gap + the corrected claim)
+
+- **`SLOT_ROLES` gains `'broll'`.** Without it no b-roll cue could exist.
+- **A cue may carry `clip_id`**, gated to `slot_role: 'broll'` exactly the way
+  `motion.direction` is gated to `pan` — a field that only means something for
+  one shape of cue is a validation error everywhere else, not silently-ignored
+  noise.
+- **A `broll` cue naming a clip does not need `'broll'` to be live — it is what
+  makes it live.** `cueDirector` special-cases that one condition; every other
+  cue still requires its role to be publishing, which is what keeps a cue
+  naming a dead camera on the fallback path.
+- **The cut is not fired synchronously.** `fireCueShot` returns null for a
+  clip-starting cue and hands off to the playback path, which fires the cut once
+  the track is genuinely published. Building a command against a track that does
+  not exist yet would refuse (`strictSource`) and leave a clip on air that
+  nothing had cut to.
+
+**Judgment call — starting the clip is better than only cutting to one.** The
+first round's "cue sheets can cut to a playing clip but cannot start one" was a
+limitation dressed as a decision. A cue sheet exists to say *"at 1:42, this
+happens"*; a cue that requires the artist to have manually cued the clip
+beforehand says almost nothing.
+
+**Named limitation, stated rather than discovered:** there is real latency.
+Signing a URL, starting playback and publishing takes roughly half a second to
+a second, so a clip cued from a sheet appears slightly *after* its timestamp.
+Authoring a beat early is the workaround; pre-warming the clip is the fix, and
+it is not built.
+
+**The premise about existing vocabulary was not accurate**, so this introduces
+it rather than reusing it: nothing outside `BRollLibrary` and the `/api/broll/*`
+routes referenced `broll_clips` at all, and the cue schema had no clip concept.
+Saying so beats pretending to reuse something that was not there.
+
+**Editor UI:** a Clip dropdown appears only when the role is `broll`, listing
+the artist's own clips (fetched in the editor under RLS rather than drilled
+down through two components that have no other reason to know about clips).
+`"(whatever is playing)"` is a real option, not a null state — a sheet that
+expects the artist to cue manually is a legitimate thing to author.
+
+**A crash prevented, worth recording:** `CueEditorPanel` opens with
+`if (!trackReady) return null`. Adding the clip-fetch hook below that line
+would have been a conditional hook — the identical defect to the Leave crash
+in Phase 0c, in a different file. The hook went above the early return.
+
+## 4 · Kit Check rehearsal b-roll (was point 5 — included, not deferred)
+
+Included because it turned out small: `createBrollPlayer` was already a
+standalone controller and `trackSources` already resolved roles, so this is a
+clip list, a publish, and a tile label.
+
+**Identical code path to the live show** — same player, same track name, same
+publish — pointed at the rehearsal room. Nothing can reach a show room: the
+component only exists inside the rehearsal `LiveKitRoom`, and its token grants
+that room and no other.
+
+- **No shot grammar in rehearsal, and no attempt to invent one.** Rehearsal is
+  a tile grid, so a cued clip appears as another tile labelled **B-ROLL CLIP**
+  in orange. "Does it play, is it the right way up, is it the right file" is
+  the whole question this answers, and it is exactly the question Kit Check
+  exists for.
+- **The clip is excluded from the pairing panel's role list.** Those badges
+  mean "a paired camera arrived"; reporting `broll` would light up a card that
+  does not exist.
+- **Unmount stops the clip** — END REHEARSAL, the 20-minute cap and navigating
+  away all leave no published track behind.
+
+## What the four parse sites do with b-roll — the summary asked for
+
+| Site | Handling |
+|---|---|
+| **Artist client** (`LiveDemo`) | `belongsToSlot` keeps the clip in the rendering pool; `roleOfTrack` reports `broll` and never a camera role; `matchesTarget` resolves a clip-targeted command to the clip and never to the camera sharing its identity; every fallback resolves against cameras only. |
+| **Viewer** | The same `renderSlot` code, on the same module. There is no separate viewer resolver — that was the point of fixing it at the root. |
+| **Egress page** | Its own `tracksForSlot`/`renderSlot`/`presentSlots`, all converted to the same three functions. It must reach the identical resolution or the file disagrees with the show that happened. |
+| **Liveness registry** | Frame watchdog exempt (§1). Absence forgotten immediately under `broll_source_ended` rather than marked impaired for 30s. `ShotVideo`'s reselect suppressed for an expected clip ending (§2). |
+
+**Invariant, re-stated and now covered in both directions and in both
+lifecycles:** no parser resolves a b-roll track as a camera; no camera role
+resolves to a b-roll track; and a clip ending produces no CAMERA LOST, no
+`frames_stalled`, and no reselect event.

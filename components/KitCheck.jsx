@@ -477,7 +477,15 @@ export default function KitCheck() {
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
             {rehearsal && (
               <div style={{ marginBottom: 18 }}>
-                <RehearsalRoom session={rehearsal} onEnd={endRehearsal} onConnectedRoles={handleConnectedRoles} />
+                {/* accessToken is what lets the rehearsal room sign a
+                    b-roll clip URL — the same owner-checked route the
+                    live show uses. */}
+                <RehearsalRoom
+                  session={rehearsal}
+                  onEnd={endRehearsal}
+                  onConnectedRoles={handleConnectedRoles}
+                  accessToken={session?.access_token}
+                />
               </div>
             )}
             {!audioNodes && (

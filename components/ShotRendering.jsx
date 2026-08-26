@@ -18,6 +18,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { VideoTrack } from '@livekit/components-react';
 import { useTrackAspect } from '../lib/useSourceDimensions';
 import { SHOT_TYPES, CAMERA_CHANGE_FADE_MS } from '../lib/shotTypes';
+import { isBrollTrack } from '../lib/trackSources';
 
 // DEBUG -- investigating a reported "punch-in flash" on camera-to-camera
 // cuts: the shot briefly zooms/magnifies before settling into the
@@ -561,6 +562,14 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
     return m;
   });
 
+  // Which layer keys are b-roll. Recorded WHILE the track is present,
+  // because the orphan rescue below runs at the moment a track has left
+  // the pool -- by then the trackRef is gone and there is nothing to ask.
+  //
+  // A Set of strings, bounded by the tracks one show ever sees (a
+  // handful), and pruned to the live pool whenever it outgrows it.
+  const brollLayerKeysRef = useRef(new Set());
+
   useEffect(() => {
     setLayerTracks((prev) => {
       let changed = prev.size !== candidates.length;
@@ -568,8 +577,14 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
       candidates.forEach((t) => {
         const k = trackKey(t);
         next.set(k, t);
+        if (isBrollTrack(t)) brollLayerKeysRef.current.add(k);
         if (!prev.has(k)) changed = true;
       });
+      if (brollLayerKeysRef.current.size > 32) {
+        brollLayerKeysRef.current = new Set(
+          [...brollLayerKeysRef.current].filter((k) => next.has(k))
+        );
+      }
       // REMOVED (Finding 1/2): the previous round kept the outgoing layer
       // mounted when the pool would go empty, as a best-effort way to
       // hold its last frame. Two things were wrong with it. It FAILED its
@@ -660,8 +675,31 @@ export function ShotVideo({ candidates, activeTrackRef, command, placeholder, on
       clearTimeout(pendingSwapTimerRef.current);
       pendingSwapTimerRef.current = null;
     }
-    logCutDebug(`[ShotVideo] displayed layer ${displayedKey} left the pool -> promoting ${fallbackKey}`);
-    onReselect?.({ reason: 'displayed_track_gone', from: displayedKey, to: fallbackKey });
+
+    // ── AN ENDING CLIP IS NOT AN ORPHANED TRACK ──────────────────
+    // The promotion below still happens -- something has to be shown --
+    // but it is NOT reported through onReselect.
+    //
+    // onReselect means "a track vanished underneath the shot that was
+    // pointing at it", and the recorder logs every one as
+    // `egress_reselect` precisely so an unexplained substitution in a
+    // recording can be traced. A b-roll clip reaching its end is the
+    // opposite of unexplained: it is the entire expected outcome of
+    // playing one, and the director's return cut is already on its way.
+    // Reporting it would put a line that means "something went wrong"
+    // into the timeline of something going exactly right.
+    //
+    // This ALSO makes the behaviour deterministic rather than
+    // timing-dependent. LiveDemo cuts away 500ms before unpublishing, so
+    // in the normal case this effect never fires for b-roll at all --
+    // the displayed layer has already moved. This covers the case where
+    // a client applies the cut late, which is exactly when a spurious
+    // reselect would have been logged and believed.
+    const wasBroll = brollLayerKeysRef.current.has(displayedKey);
+    logCutDebug(`[ShotVideo] displayed layer ${displayedKey} left the pool -> promoting ${fallbackKey}${wasBroll ? ' (b-roll clip ended -- expected)' : ''}`);
+    if (!wasBroll) {
+      onReselect?.({ reason: 'displayed_track_gone', from: displayedKey, to: fallbackKey });
+    }
     setDisplayedKey(fallbackKey);
   }, [displayedKey, layerTracks, activeKey, onReselect, activeImpaired]);
 
