@@ -8,6 +8,7 @@ import EmptyState from './EmptyState';
 import AuthButton from './AuthButton';
 import ScheduleShow from './ScheduleShow';
 import BRollLibrary from './BRollLibrary';
+import CueSheetLibrary from './CueSheetLibrary';
 import RecordingsLibrary from './RecordingsLibrary';
 import { getSupabase } from '../lib/supabaseClient';
 import { getSession } from '../lib/supabaseAuth';
@@ -261,6 +262,7 @@ export default function ProfileSurface({ artistId }) {
             </div>
 
             <div style={{ marginTop: 30 }}><BRollLibrary /></div>
+            <div style={{ marginTop: 30 }}><CueSheetLibrary /></div>
 
             <div style={{ marginTop: 30 }}>
               <RecordingsLibrary artistId={artistId} owner />

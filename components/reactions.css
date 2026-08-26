@@ -2437,3 +2437,18 @@ button {
     height: 50%;
   }
 }
+
+/* Remaining-show-time chip in the live banner (Product Ruling 1).
+   Muted rather than alarming: this is information, not a warning --
+   the window carries 15 minutes' grace past zero, so running slightly
+   over is normal and the chip should not shout about it. */
+.lifecycle-banner .show-remaining {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(253, 255, 252, 0.7);
+  text-shadow: var(--text-halo);
+  border: 1px solid rgba(253, 255, 252, 0.22);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}

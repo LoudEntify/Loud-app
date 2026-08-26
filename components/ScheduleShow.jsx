@@ -6,6 +6,11 @@ import { getSupabase } from '../lib/supabaseClient';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import EmptyState from './EmptyState';
 import {
+  DEFAULT_DURATION_MINUTES,
+  DURATION_OPTIONS_MINUTES,
+  isExpired,
+  showWindowClosesAt,
+  sweepClosedShows,
   isWindowOpen,
   msUntilWindow,
   humanCountdown,
@@ -50,7 +55,7 @@ export default function ScheduleShow() {
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ title: '', date: '', time: '', mode: 'solo' });
+  const [form, setForm] = useState({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
   // Versus invites, keyed by show id. Minted on demand rather than at
   // schedule time -- an artist may schedule a versus show days before
   // they know who they are facing.
@@ -76,6 +81,12 @@ export default function ScheduleShow() {
     // Lazy reminder generation -- see lib/scheduling.js for why this
     // runs here rather than in a job.
     syncShowReminders(userId, data || []).catch(() => {});
+    // Product Ruling 1 -- the DURABLE half of the sweep. Every client
+    // already derives "window closed => ended" instantly from the clock;
+    // this is what eventually writes it down, on the artist's own
+    // console, with no cron. Fire-and-forget: a failed sweep changes
+    // nothing anyone can see.
+    sweepClosedShows(data || []).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -115,6 +126,10 @@ export default function ScheduleShow() {
         state: 'scheduled',
         title: form.title.trim() || null,
         performance_mode: form.mode,
+        // Product Ruling 1. Everything downstream -- the broadcast
+        // window, Live Now membership, the sweep to ended, Upcoming vs
+        // expired -- is computed from this one number.
+        duration_minutes: form.duration,
         // Legacy column, populated rather than left null -- see the
         // artistName note above.
         artist_name: artistName || 'Artist',
@@ -129,7 +144,7 @@ export default function ScheduleShow() {
         );
         return;
       }
-      setForm({ title: '', date: '', time: '', mode: 'solo' });
+      setForm({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
       await load(session.user.id);
     } finally {
       setCreating(false);
@@ -238,6 +253,35 @@ export default function ScheduleShow() {
           </div>
 
           <div>
+            <div style={labelStyle}>HOW LONG</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {DURATION_OPTIONS_MINUTES.map((mins) => {
+                const active = form.duration === mins;
+                return (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, duration: mins }))}
+                    style={{
+                      padding: '9px 14px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em',
+                      color: active ? TEAL : 'rgba(1,22,39,0.55)',
+                      background: active ? 'rgba(46,196,182,0.12)' : 'transparent',
+                      border: `1px solid ${active ? TEAL : 'rgba(1,22,39,0.15)'}`,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {mins >= 60 ? `${mins / 60}h${mins % 60 ? ` ${mins % 60}m` : ''}` : `${mins}m`}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.45)', marginTop: 5 }}>
+              Your show window runs from the start time to {form.duration >= 60 ? `${form.duration / 60}h${form.duration % 60 ? ` ${form.duration % 60}m` : ''}` : `${form.duration}m`} later, plus 15 minutes&rsquo; grace.
+              After that it closes on its own.
+            </div>
+          </div>
+
+          <div>
             <div style={labelStyle}>FORMAT</div>
             <div style={{ display: 'flex', gap: 8 }}>
               {['solo', 'versus'].map((m) => (
@@ -302,6 +346,11 @@ export default function ScheduleShow() {
             .filter((s) => s.state !== 'ended')
             .map((s) => {
               const open = isWindowOpen(s, now);
+              // Product Ruling 1 — a scheduled show whose window has
+              // closed without ever being run is EXPIRED, not pending.
+              // It used to sit here forever with a countdown reading
+              // "now", which is the least useful thing a diary can say.
+              const expired = isExpired(s, now);
               return (
                 <div key={s.id} style={{ padding: '11px 13px', border: '1px solid rgba(1,22,39,0.1)', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -309,6 +358,7 @@ export default function ScheduleShow() {
                     <div style={{ fontSize: 13, color: INK, fontWeight: 600 }}>{s.title || 'Untitled show'}</div>
                     <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3 }}>
                       {new Date(s.slated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {' · '}{(s.duration_minutes || DEFAULT_DURATION_MINUTES)}MIN
                       {' · '}{(s.performance_mode || 'solo').toUpperCase()}
                     </div>
                   </div>
@@ -318,17 +368,17 @@ export default function ScheduleShow() {
                     letterSpacing: '0.08em',
                     padding: '4px 8px',
                     borderRadius: 999,
-                    color: open ? ORANGE : 'rgba(1,22,39,0.45)',
-                    border: `1px solid ${open ? 'rgba(255,159,28,0.5)' : 'rgba(1,22,39,0.15)'}`,
+                    color: expired ? 'rgba(1,22,39,0.35)' : open ? ORANGE : 'rgba(1,22,39,0.45)',
+                    border: `1px solid ${expired ? 'rgba(1,22,39,0.12)' : open ? 'rgba(255,159,28,0.5)' : 'rgba(1,22,39,0.15)'}`,
                   }}>
-                    {open ? 'WINDOW OPEN' : humanCountdown(msUntilWindow(s, now)).toUpperCase()}
+                    {expired ? 'MISSED' : open ? 'WINDOW OPEN' : humanCountdown(msUntilWindow(s, now)).toUpperCase()}
                   </span>
                 </div>
 
                   {/* Versus needs a second performer, and that is now an
                       invite bound to an account rather than a code
                       anyone holding the string could use. */}
-                  {(s.performance_mode === 'versus') && !open && (
+                  {(s.performance_mode === 'versus') && !open && !expired && (
                     <div style={{ marginTop: 8 }}>
                       {invites[s.id] ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>

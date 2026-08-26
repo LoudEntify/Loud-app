@@ -1291,3 +1291,235 @@ that room and no other.
 lifecycles:** no parser resolves a b-roll track as a camera; no camera role
 resolves to a b-roll track; and a clip ending produces no CAMERA LOST, no
 `frames_stalled`, and no reselect event.
+
+---
+
+# QA BATCH — 2026-08-26
+
+Three bugs and two product rulings from the device sitting. One pass reported
+(wallet purchase → balance → ledger), untouched.
+
+## BUG 1 — the b-roll upload that hung forever
+
+**Diagnosed before fixing, and the diagnosis matters because the symptom
+pointed at the wrong layer.** The route did this:
+
+```js
+const form  = await request.formData();               // whole file into the function
+const bytes = Buffer.from(await file.arrayBuffer());  // and again, a second copy
+await admin.storage.from(BUCKET).upload(path, bytes); // then out again
+```
+
+So every byte crossed the network **twice** — browser → function → Supabase —
+and sat in the function's memory twice while it did. The browser's POST stayed
+open for the whole of that, which is why the request showed as Pending: it
+genuinely was.
+
+**Why it never errored.** A request body over the platform's limit is refused
+at the edge, before the handler is invoked. Our code never runs, so no error
+handling inside it could ever have caught it, and a client `fetch()` in that
+situation can be left holding a connection that produces neither a response nor
+an error. That is the difference between "the route is slow" and "the route was
+never reached", and it is why adding a timeout to the route would have fixed
+nothing.
+
+**A second, independent defect with the same cause:** `fetch()` has no upload
+progress. Even when it worked, "WORKING…" was the only thing an artist could be
+shown for a 50MB file.
+
+**The fix, as suspected in the report: a signed direct-to-storage upload.**
+
+- The server mints a short-lived signed upload URL and **chooses the path
+  itself**, namespaced under the caller's own id. A client never proposes a
+  path, so a signed URL can only write into the folder of whoever asked.
+- The browser PUTs straight to storage over **XHR**, purely because
+  `upload.onprogress` exists there and does not in `fetch`. That is the only
+  reason and not a pattern to spread.
+- A **register** step then reads the object's REAL size from storage,
+  re-checks the quota against it, and inserts the row.
+
+**Every number is taken from storage, not from the client.** The declared size
+is a courtesy that lets an obviously-too-big file be refused politely before any
+transfer; it is not trusted again. A signed upload URL carries no size limit of
+its own, so a client that lied could still upload something oversized — and
+that is caught at registration, which **deletes the object and refuses**. Over
+quota, over the per-clip cap, empty, unreadable, or missing entirely: all four
+delete and refuse rather than record.
+
+**The row is written only after the bytes land.** A failed or abandoned upload
+leaves a stray object at worst, never a library entry pointing at nothing — an
+artist cueing a clip that does not exist mid-show is far worse than an orphaned
+object nobody can see.
+
+**Every failure has its own message**, because the bug being replaced had none:
+timeout (15 minutes, chosen against a 100MB clip on a slow-but-real connection),
+network drop, HTTP error from storage, and cancel. There is a Cancel button now
+too — a 50MB upload you cannot stop is its own small trap.
+
+**The progress bar reaches 100 only after registration**, not after the
+transfer. A full bar for a clip that then failed to save would be the same lie
+the old spinner told, just faster.
+
+**`app/api/broll/upload` is deleted, not left in place.** A route that hangs on
+anything over a few megabytes is not a fallback.
+
+## BUG 2 — End Show left other devices' cameras on
+
+**Two independent causes, and the second is the bigger one.**
+
+**Cause 1 — the performer client stopped transmitting and did not stop the
+device.** It unpublished with `stopOnUnpublish: false`, deliberately (Round C),
+so the artist kept a live local self-view. That leaves the camera acquired: no
+longer on air, still filming, light on. It is the same distinction that made the
+original audio leak a privacy problem rather than a rendering one — and the
+light is the only thing anyone actually trusts.
+
+**That decision is overturned, and the thing it was for is kept.** A frame is
+captured to a canvas while the track is alive, the device is then released for
+real, and the self-view renders the still. The artist still sees themselves; the
+camera is genuinely off. Both properties, no trade.
+
+Also fixed alongside it: the **microphone device** was never released either.
+The processed track that gets unpublished is a `MediaStreamDestination` —
+stopping it does not release the `getUserMedia` input feeding the Web Audio
+graph, so the mic indicator stayed on for exactly the same reason.
+
+**Cause 2 — nothing on a paired phone was listening.** `/cam` and `/cam/pair`
+are their own pages with their own `<LiveKitRoom>`; they run none of the live
+show's components, so no end-of-show handling could ever have reached them. A
+propped phone kept filming indefinitely.
+
+`components/ReleaseOnShowEnd.jsx` is the piece that listens, mounted in both.
+
+- **Two triggers, because one is not enough.** `SHOW_ENDED` is the normal path.
+  `Disconnected` covers the room going away underneath the device — token
+  expiry, the room being closed, the network giving up — because a device that
+  is no longer in a room is definitively not filming for one.
+- **Deliberately NOT triggered by `Reconnecting`.** A blip is not an ending, and
+  releasing the camera on one would turn a two-second wobble into a dead camera
+  for the rest of the show.
+- **Idempotent**, because SHOW_ENDED can arrive more than once and a disconnect
+  can follow it. Releasing twice is harmless; reporting it twice is noise in the
+  one timeline someone reads to check this worked.
+- Both pages then show a terminal "the show has ended — this camera is off"
+  screen, and the paired phone stops polling for a room to follow.
+
+## BUG 3 — the profile photo that only appeared in Settings
+
+**Not a stale read, and not a re-fetch problem — which is what it looked like
+from the outside.** `AvatarRing` had no image prop at all. It took a `name` and
+drew an initial, full stop: a placeholder from before photo upload existed, left
+in place after it shipped. Settings rendered its own bespoke `<img>`, so a photo
+appeared there and nowhere else.
+
+The profile header was not showing a stale avatar. It had no code path that
+could show one.
+
+So the fix is not "make the header re-read". It is to give the **shared**
+component a `src` and pass it from every surface — profile header, fan profile,
+artist storefront, Discover cards, onboarding suggestions **and Settings
+itself**. Settings having its own avatar rendering is precisely what let the
+rest of the app disagree with it.
+
+A broken URL falls back to the initial rather than to the browser's
+broken-image glyph, which would look like a bug in a place people look at their
+own face.
+
+## PRODUCT RULING 1 — show duration and window
+
+**One missing fact was being guessed at in four places.** A show had a start and
+no end, so: the broadcast window closed after a flat three hours (a 30-minute
+set held its window open for two and a half hours after it finished); Live Now
+had no upper bound at all, so a show nobody ended sat there indefinitely
+advertising an empty room; GO LIVE had no upper bound either, so an artist could
+arm a show slated last Tuesday; and Upcoming could not tell "hasn't happened
+yet" from "never happened".
+
+**The definition, applied everywhere:**
+
+```
+show window = slated_at → slated_at + duration + 15 min grace
+```
+
+- **Duration is stored in MINUTES**, not as an end timestamp — it is what the
+  artist picks, and storing the choice means it survives a change to how the
+  window is computed. An `ends_at` would bake today's grace period into every
+  historical row. `ends_at` still exists and still wins when set: it is the
+  explicit override, duration is the default path.
+- **Default 60, options 30/60/90/120/180, hard cap 180**, with the cap as a DB
+  CHECK as well as a UI constraint.
+- **The 15-minute grace** exists because a show running three minutes long is a
+  show running slightly long, not one breaking a rule.
+
+**The sweep is free, and that is the point.** `effectiveState` returns `'ended'`
+once the window has closed. Every client derives that independently, on load and
+on every clock tick — the same pattern `'live'` already used, with no cron and
+nothing to fall behind. A durable write follows from the artist's own console
+(`sweepClosedShows`), so the row eventually matches what every client already
+believes.
+
+**Consequence stated rather than hidden:** a swept show's row can sit as
+`'soundcheck'` until its owner next opens the app. Nothing user-facing depends
+on the row — Discover filters by window, the live page derives ended by clock —
+so the lag is invisible except to someone reading the table directly.
+
+**Judgment call — GO LIVE still arms from T−30, not from `slated_at`.** The
+ruling says "GO LIVE arms only inside the window", and the window is defined as
+starting at `slated_at`. Read literally that would **delete soundcheck**: GO
+LIVE is the control that moves a show `'scheduled' → 'soundcheck'`, and arming
+only from the slated time would leave an artist no way to be set up and warm
+when their audience arrives. So the *upper* bound is the new constraint — you
+cannot arm a show whose window has closed, which is the actual bug — and the
+lower bound stays where it was. Flagged because it is the one place I
+interpreted rather than followed; it is a one-line change if the literal
+reading was meant.
+
+**One definition, two consumers, no copies.** The window math moved into
+`lib/showWindow.js` — a plain module with no imports — because the browser and
+`app/api/performer/join-show` both need it, and they each used to hold their own
+three-hour constant. A screen and a route disagreeing about whether a window is
+shut is the bug that produces "the button says no but the server let me in".
+
+**Pre-migration behaviour:** `duration_minutes` arrives with
+`docs/overnight2_12_shows_duration.sql`. Until it is run, every show behaves as
+a 60-minute show rather than the rules switching off.
+
+## PRODUCT RULING 2 — named cue sheets
+
+**Half of this already existed and had never been connected.** The table has a
+`name` column, the route upserts on `(track_hash, artist_email, name)` and has
+returned the whole list as `sheets` since the scheduling round. Nothing in the
+app ever set a name or read the list — so every save upserted onto `'Default'`,
+and an artist wanting a slow version and a festival cut of the same song had
+nowhere to put the second one.
+
+Finished, in two halves:
+
+**In the editor — load by name, first-class.** A Sheet name field and a Load
+picker of everything saved for the current track. **Typing a new name and
+pressing Save IS "save as"** — the upsert key includes the name, so a name that
+does not exist yet creates a sheet rather than overwriting one. That is the
+whole affordance: no second button, and no way to accidentally clobber the sheet
+you loaded. When the name does match a saved sheet, it says so out loud
+("Saving overwrites …") rather than letting you find out.
+
+**On the console — the management surface.** Every sheet across every track,
+with rename and delete. `?all=1` lists them, scoped to the verified session's
+own id/email with nothing to point at somebody else.
+
+- **Rename and delete live here, not in the editor.** They are housekeeping, not
+  authoring, and putting a Delete next to a Save while somebody is mid-edit is
+  asking for a bad afternoon.
+- **Ownership is re-checked against the row**, and against BOTH `artist_id` and
+  `artist_email`. Those are two eras of the same fact: sheets authored before
+  `docs/ownership_migration.sql` have a null `artist_id`, so checking only the
+  modern column would lock an artist out of their own oldest sheets — the ones
+  most likely to need a better name.
+- **A rename collision is a 409 with a real sentence**, not a 500. The unique
+  index means two sheets for one track cannot share a name, which is a genuine
+  user mistake with a genuine answer.
+- **Delete is a hard delete.** A cue sheet is the artist's own working material
+  with no downstream references and nothing financial attached; a soft delete
+  would be a hidden row nobody could ever see again. (Contrast
+  `wallet_transactions`, which is append-only for exactly the opposite reason.)
+  It asks first, inline, where the thing being deleted is still named on screen.

@@ -75,6 +75,11 @@ export default function AudioDeckPanel({
   const [cues, setCues] = useState([]);
   const [activeCueId, setActiveCueId] = useState(null);
   const [fallbackBehaviour, setFallbackBehaviour] = useState('hold_last');
+  // Product Ruling 2 -- named sheets. `cueSheets` is every sheet this
+  // artist has for the LOADED TRACK; `sheetName` is which one the editor
+  // is currently working on, and is what the save is keyed to.
+  const [cueSheets, setCueSheets] = useState([]);
+  const [sheetName, setSheetName] = useState('Default');
   const [cueSheetDirty, setCueSheetDirty] = useState(false);
   const [cueSheetSaving, setCueSheetSaving] = useState(false);
   const [cueSheetSaveError, setCueSheetSaveError] = useState(null);
@@ -159,10 +164,23 @@ export default function AudioDeckPanel({
     setCues([]);
     setActiveCueId(null);
     setFallbackBehaviour('hold_last');
+    setCueSheets([]);
+    setSheetName('Default');
     setCueSheetDirty(false);
     setCueSheetSaveError(null);
     onCueSheetChange?.(null);
     if (newTrackHash) loadCueSheet(newTrackHash);
+  }
+
+  async function loadNamedSheet(name) {
+    const sheet = (cueSheets || []).find((x) => x.name === name);
+    if (!sheet) return;
+    setSheetName(sheet.name);
+    setCues((sheet.cues || []).map((c) => ({ ...c, id: crypto.randomUUID() })));
+    setFallbackBehaviour(sheet.fallback_behaviour);
+    setActiveCueId(null);
+    setCueSheetDirty(false);
+    onCueSheetChange?.(sheet);
   }
 
   async function loadCueSheet(hash) {
@@ -176,8 +194,14 @@ export default function AudioDeckPanel({
       // Guard against a slower earlier fetch resolving after a faster
       // later track swap already changed what's "current."
       if (loadedTrackHashRef.current !== hash) return;
+      // Product Ruling 2 -- the whole library for this track, not just
+      // the most recent sheet. The route has returned `sheets` alongside
+      // `sheet` since the scheduling round; nothing had ever read it, so
+      // every save silently overwrote one sheet called "Default".
+      setCueSheets(data.sheets || []);
       const sheet = data.sheet;
       if (sheet) {
+        setSheetName(sheet.name || 'Default');
         setCues(sheet.cues.map((c) => ({ ...c, id: crypto.randomUUID() })));
         setFallbackBehaviour(sheet.fallback_behaviour);
         onCueSheetChange?.(sheet);
@@ -229,6 +253,9 @@ export default function AudioDeckPanel({
           artist_email: artistEmail,
           track_label: lastTrackLabelRef.current || null,
           fallback_behaviour: fallbackBehaviour,
+          // THE NAME. Without this every save upserted onto 'Default'
+          // and the library could only ever hold one sheet per track.
+          name: (sheetName || 'Default').trim() || 'Default',
           cues: cues.map(({ id, ...rest }) => rest),
         }),
       });
@@ -239,7 +266,14 @@ export default function AudioDeckPanel({
       }
       setCueSheetDirty(false);
       onCueSheetChange?.(data.sheet);
-      logHealthEvent('cue_sheet_saved', { trackHash, cueCount: data.sheet.cues.length });
+      // Keep the picker in step with what was just saved -- a "Save as"
+      // that did not appear in the list until a reload would look like
+      // it had not worked.
+      setCueSheets((prev) => {
+        const rest = (prev || []).filter((x) => x.id !== data.sheet.id);
+        return [data.sheet, ...rest];
+      });
+      logHealthEvent('cue_sheet_saved', { trackHash, name: data.sheet.name, cueCount: data.sheet.cues.length });
     } catch (err) {
       setCueSheetSaveError(String(err?.message || err));
     } finally {
@@ -436,6 +470,10 @@ export default function AudioDeckPanel({
           onDeleteCue={deleteCue}
           onChangeFallbackBehaviour={changeFallbackBehaviour}
           onSave={saveCueSheet}
+          sheets={cueSheets}
+          sheetName={sheetName}
+          onLoadSheet={loadNamedSheet}
+          onRenameSheet={setSheetName}
         />
       </div>
     </div>

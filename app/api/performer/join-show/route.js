@@ -1,6 +1,7 @@
 import { AccessToken } from 'livekit-server-sdk';
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { WINDOW_OPENS_BEFORE_MS, showWindowClosesAt } from '../../../../lib/showWindow';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
 
@@ -23,15 +24,18 @@ import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
 // the actual rule, and it is what keeps LiveKit from being billable
 // outside a scheduled show.
 
-const WINDOW_OPENS_BEFORE_MS = 30 * 60 * 1000;
-const DEFAULT_WINDOW_LENGTH_MS = 3 * 60 * 60 * 1000;
+// The window rule comes from lib/showWindow.js -- the SAME functions the
+// browser uses. This route used to hold its own copy of a three-hour
+// constant, so a change on one side silently disagreed with the other:
+// an artist could be told their window was shut by a screen and let in
+// by this route, or the reverse.
 
 function windowState(show, now = Date.now()) {
   const slated = new Date(show.slated_at).getTime();
   if (Number.isNaN(slated)) return { open: false, reason: 'This show has no valid start time.' };
   if (show.state === 'ended') return { open: false, reason: 'This show has ended.' };
   const opens = slated - WINDOW_OPENS_BEFORE_MS;
-  const closes = show.ends_at ? new Date(show.ends_at).getTime() : slated + DEFAULT_WINDOW_LENGTH_MS;
+  const closes = showWindowClosesAt(show);
   if (now < opens) {
     const mins = Math.ceil((opens - now) / 60000);
     return { open: false, reason: `Too early — your window opens in ${mins} minute${mins === 1 ? '' : 's'}.` };

@@ -91,6 +91,15 @@ export default function CueEditorPanel({
   onDeleteCue,
   onChangeFallbackBehaviour,
   onSave,
+  // ── Named sheets (Product Ruling 2) ──
+  //   sheets        — every sheet this artist has for the loaded track
+  //   sheetName     — which one is being edited; what SAVE writes to
+  //   onLoadSheet   — (name) => void, replaces the editor's contents
+  //   onRenameSheet — (name) => void, local only until the next save
+  sheets = [],
+  sheetName = 'Default',
+  onLoadSheet,
+  onRenameSheet,
 }) {
   // ABOVE the early return, deliberately. `if (!trackReady) return null`
   // is a conditional return, so any hook below it would run on some
@@ -121,6 +130,51 @@ export default function CueEditorPanel({
             Save
           </button>
         </div>
+      </div>
+
+      {/* ── NAMED SHEETS (Product Ruling 2) ─────────────────────
+          An artist keeps several treatments of the same song -- a slow
+          version, a festival cut -- and picks one. The plumbing for this
+          has existed since the scheduling round (the table has a `name`
+          column, the route upserts on it and returns the whole list);
+          nothing had ever read it, so every save landed on one sheet
+          called "Default" and the library could only hold one.
+
+          Typing a NEW name and pressing Save is "save as": the upsert
+          key is (track, artist, name), so a name that does not exist yet
+          creates a sheet rather than overwriting one. That is the whole
+          save-as affordance -- no second button, and no way to
+          accidentally clobber the sheet you loaded. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+          Sheet
+          <input
+            value={sheetName}
+            onChange={(e) => onRenameSheet?.(e.target.value)}
+            placeholder="Default"
+            style={{ ...selectStyle, width: 130 }}
+          />
+        </label>
+        {sheets.length > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+            Load
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) onLoadSheet?.(e.target.value); }}
+              style={selectStyle}
+            >
+              <option value="">{sheets.length} saved…</option>
+              {sheets.map((sheet) => (
+                <option key={sheet.id} value={sheet.name}>
+                  {sheet.name} ({(sheet.cues || []).length})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {dirty && sheets.some((x) => x.name === sheetName) && (
+          <span style={{ fontSize: 10.5, color: '#ff9f1c' }}>Saving overwrites “{sheetName}”</span>
+        )}
       </div>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#B4B2A9' }}>

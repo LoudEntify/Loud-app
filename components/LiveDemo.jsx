@@ -48,7 +48,7 @@ import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
 import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
-import { isWindowOpen, humanCountdown, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
+import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
 import { REACTIONS_COST_TOKENS, chargeReaction, logReaction } from '../lib/reactions';
 import { SPEND_ACTIONS } from '../lib/tokens';
 import { forgetPerformerSession, recallPerformerSession, rememberPerformerSession } from '../lib/sessionResume';
@@ -3172,6 +3172,19 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     );
   };
 
+  // How much of the scheduled show is left, for the live banner.
+  // Recomputed off the same `now` tick everything else uses, so it
+  // costs nothing extra and cannot drift from the countdown.
+  const showTimeLeftLabel = (() => {
+    if (displayShowState !== 'live') return null;
+    const remaining = msRemainingInShow(show, now);
+    if (remaining === null) return null;
+    if (remaining <= 0) return 'OVER TIME';
+    const mins = Math.ceil(remaining / 60000);
+    if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m LEFT`;
+    return `${mins}m LEFT`;
+  })();
+
   // Tapping the video collapses an expanded (mobile) comments drawer --
   // a no-op on desktop, where the comments column has no expand/collapse
   // state to begin with.
@@ -4081,6 +4094,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       {isMainPerformer && displayShowState === 'live' && (
         <div className="lifecycle-banner live">
           <span>● LIVE</span>
+          {/* Product Ruling 1 -- how long is left of the show the artist
+              scheduled. Not a countdown to a hard cut-off: the window
+              carries 15 minutes' grace past this, so running a little
+              over is fine and the label says so once it goes negative
+              rather than reading "-3m" at somebody mid-encore. */}
+          {showTimeLeftLabel && <span className="show-remaining">{showTimeLeftLabel}</span>}
           <button type="button" className="end-show-btn" onClick={endShow}>END SHOW</button>
           {/* Fix (c) (SHOW-1 diagnosis round) -- persistent, visible warning
               for the "publishes are silently failing" state. Ships
