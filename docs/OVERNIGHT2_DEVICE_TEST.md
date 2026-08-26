@@ -12,7 +12,7 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-g7pytimy4-korey-alashe.vercel.app` |
+| **Preview** | `https://loud-ltt8fzrhy-korey-alashe.vercel.app` |
 | **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
@@ -29,6 +29,9 @@ and not five.
 | 4 | `fe978f5` | Egress verification, reactions, share cards, resume ladder, Discover |
 | 4e | `0ecdf8f` | **B-roll live playback** — source discrimination at the root, then the clip path |
 | 4e+ | `76ac18d` | B-roll follow-up — frame watchdog, reselect, cue-sheet clips, rehearsal preview |
+| QA | `740dc0c` | BUG 1 b-roll upload · BUG 2 device release on End Show · BUG 3 one avatar source |
+| QA | `a9e0345` | RULING 1 show duration + window · RULING 2 named cue sheets |
+| QA | `d51b16c` | QA script sections; fixed an onboarding link pointing at Recorded Shows |
 
 ### Bypass-loaded confirmation, per phase
 
@@ -55,6 +58,14 @@ shipped, not just committed" line for each phase.
 | **4e** | `lib/trackSources.js` unit-exercised in node against the real module | 14/14 pass, including the exact bug case: two tracks sharing one participant identity, where a clip-targeted command matches the clip and **does not** match the camera (and the reverse). Legacy commands with no source key still match on identity alone. |
 | **4e+** | `lib/cueSheetValidation.js` exercised in node | 5/5 — a `broll` cue with and without a `clip_id` both validate; `clip_id` on a camera cue is rejected; an empty one is rejected; plain camera cues are unaffected. |
 | **4e+** | `/kit-check` bundle | Contains `B-ROLL — CHECK A CLIP`, `B-ROLL CLIP`, `nothing leaves this room` — the rehearsal preview shipped. |
+| **QA** | `/`, `/live`, `/kit-check`, `/cam`, `/cam/pair`, `/discover`, `/shows`, `/settings`, `/wallet`, `/welcome`, `/egress`, `/artist/{uuid}` | HTTP 200 each. |
+| **QA** | `POST /api/broll/upload-url`, `/api/broll/register` | `401` — both gated. |
+| **QA** | `GET /api/broll/upload` (the route that hung) | **`404`** — deleted, not left as a fallback. |
+| **QA** | `PATCH` / `DELETE` / `GET ?all=1` on `/api/cue-sheets` | `401` each — rename, delete and library all deployed and gated. |
+| **QA** | Artist-console chunk, fetched from the deployment | Contains `HOW LONG` (duration picker), `MISSED` (expired badge), `grace`, `CUE SHEETS`, `broll/upload-url`, `broll/register`, `Saving to your library`. |
+| **QA** | `/live` chunks | Contain `show-remaining`, `OVER TIME`, `Saving overwrites`, `local_devices_released`. |
+| **QA** | `/cam` and `/cam/pair` chunks | Both contain `SHOW_ENDED` and the ended screen — the two pages that previously had no end-of-show handling at all. |
+| **QA** | `lib/showWindow.js` exercised in node | 14/14 — duration default and clamp, `ends_at` override, window open/shut either side of the grace, expired classification, remaining-time. |
 | all | `/`, `/shows`, `/notifications` | HTTP 200 each. |
 
 **What that does NOT prove**, stated plainly: no live show was run, no phone
@@ -578,7 +589,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-g7pytimy4-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-ltt8fzrhy-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \
