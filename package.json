@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "check:tdz": "npx --yes eslint@8 --no-eslintrc --no-inline-config --parser-options ecmaVersion:2022 --parser-options sourceType:module --parser-options ecmaFeatures:{jsx:true} --rule '{\"no-use-before-define\":[\"error\",{\"functions\":false,\"classes\":false,\"variables\":true}]}' --ext .js,.jsx app components lib"
+    "check:tdz": "npx --yes eslint@8 --no-eslintrc --no-inline-config --parser-options ecmaVersion:2022 --parser-options sourceType:module --parser-options ecmaFeatures:{jsx:true} --rule '{\"no-use-before-define\":[\"error\",{\"functions\":false,\"classes\":false,\"variables\":true}]}' --ext .js,.jsx app components lib",
+    "check:undef": "npx --yes eslint@8 --no-eslintrc --no-inline-config --parser-options ecmaVersion:2022 --parser-options sourceType:module --parser-options ecmaFeatures:{jsx:true} --env browser --env es2022 --env node --rule '{\"no-undef\":\"error\"}' --ext .js,.jsx app components lib",
+    "check": "npm run check:tdz && npm run check:undef"
   },
   "dependencies": {
     "@livekit/components-react": "^2.5.0",
