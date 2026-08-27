@@ -11,7 +11,7 @@ import RehearsalRoom from './RehearsalRoom';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
-import { isWindowOpen, nextUpcomingShow, msUntilWindow, humanCountdown } from '../lib/scheduling';
+import { isWindowOpen, nextUpcomingShow, msUntilWindow, humanCountdown, canHandOverNow, handoverState } from '../lib/scheduling';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -40,7 +40,9 @@ const TEAL = '#2ec4b6';
 // The audio graph is unchanged from the live path -- createPilotAudioTrack
 // was always local-only (getUserMedia + Web Audio), which is why the
 // same AudioDeckPanel works here with no LiveKit anywhere near it.
-const COUNTDOWN_SECONDS = 60;
+// How long the handover waits for the camera migration before going to
+// the stage regardless. See handOverToShow.
+const HANDOVER_MIGRATE_CEILING_MS = 2500;
 
 export default function KitCheck() {
   const router = useRouter();
@@ -58,6 +60,8 @@ export default function KitCheck() {
   const [session, setSession] = useState(null);
   const [artistEmail, setArtistEmail] = useState('');
   const [upcoming, setUpcoming] = useState(null);
+  const [showLoadError, setShowLoadError] = useState('');
+  const [handoverError, setHandoverError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   // `countdown` is derived from the clock further down, not stored --
   // this only records that the handover has already fired, so a second
@@ -265,50 +269,92 @@ export default function KitCheck() {
       setArtistEmail(s.user.email || '');
       const { profile } = await getProfile(s.user.id);
       if (!cancelled && profile?.display_name) { /* profile loaded; name unused here */ }
-      const { data } = await getSupabase().from('shows').select('*').eq('artist_id', s.user.id);
-      if (!cancelled) setUpcoming(nextUpcomingShow(data || []));
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // ── The last minute before SHOWTIME → countdown, then live ──
+  // ── The next show, RE-FETCHED (Finding 1) ──────────────────
   //
-  // THIS COUNTED DOWN TO THE WRONG MOMENT. It was keyed to the broadcast
-  // window opening -- which is T-30min -- so a show scheduled five
-  // minutes out had an already-open window the instant Kit Check
-  // loaded, the 60 seconds started immediately, and the artist was
-  // thrown on stage roughly four minutes before their own showtime. Not
-  // a timezone problem and not a wrong constant: the trigger was reading
-  // `windowOpensAt`, and what it wanted was `slated_at`.
+  // Two things went wrong here and only one of them was the crash.
   //
-  // Now: derived from the clock every tick rather than stored and
-  // decremented, so it can't drift, and so opening Kit Check at T-20s
-  // shows twenty seconds rather than a fresh sixty. Still gated on the
-  // window being open -- that rule is about cost and hasn't changed --
-  // but the window merely PERMITS this; showtime is what triggers it.
+  // 1. This used to run ONCE, on mount, inside the session effect above.
+  //    An artist who had Kit Check already open and then scheduled a show
+  //    (in another tab, or on their phone) never picked it up — no
+  //    countdown, no handover, forever. Kit Check is a page people sit on
+  //    for half an hour; assuming nothing changes while they do was the
+  //    wrong assumption.
   //
-  // The knock-on is the good kind: the artist now gets the full ~29
-  // minutes of the window in Kit Check instead of being yanked out of it
-  // the moment the window opened.
-  const secondsToShowtime = upcoming?.slated_at
-    ? Math.ceil((new Date(upcoming.slated_at).getTime() - now) / 1000)
-    : null;
-
-  const countdownVisible =
-    !!upcoming?.id &&
-    isWindowOpen(upcoming, now) &&
-    secondsToShowtime !== null &&
-    secondsToShowtime <= COUNTDOWN_SECONDS;
-
-  // Clamped at zero so a late arrival (Kit Check opened after showtime,
-  // window still open) reads 0 and hands over immediately rather than
-  // rendering a negative number.
-  const countdown = countdownVisible ? Math.max(0, secondsToShowtime) : null;
+  // 2. `nextUpcomingShow` threw (the re-export/scope bug fixed in
+  //    68cb676) and, because this is an ASYNC EFFECT rather than render,
+  //    the throw became an unhandled promise rejection. `setUpcoming`
+  //    never ran, `upcoming` stayed null, and every condition downstream
+  //    was silently false. THE SAME DEFECT crashed the artist console
+  //    loudly (it calls nextUpcomingShow during render) and made Kit
+  //    Check do nothing at all. Silence is the worse of the two.
+  //
+  // So: a try/catch that puts a real message ON SCREEN, and a poll.
+  const loadUpcoming = useCallback(async (userId) => {
+    try {
+      const { data, error } = await getSupabase().from('shows').select('*').eq('artist_id', userId);
+      if (error) throw error;
+      setUpcoming(nextUpcomingShow(data || []));
+      setShowLoadError('');
+    } catch (err) {
+      // Never silent again. If Kit Check cannot work out when the artist
+      // is on, the artist has to be told — they are sitting here waiting
+      // for it to take them to their own show.
+      console.error('[kit-check] could not load the next show', err);
+      setShowLoadError('Could not check your schedule. The automatic hand-over may not fire — use GO LIVE NOW when it is time.');
+    }
+  }, []);
 
   useEffect(() => {
-    if (!countdownVisible || handingOver) return;
-    if (secondsToShowtime > 0) return;
+    const userId = session?.user?.id;
+    if (!userId) return undefined;
+    loadUpcoming(userId);
+    // Cheap: one indexed query per artist per 20s, only while this page
+    // is open. Far cheaper than an artist missing their own show.
+    const id = setInterval(() => loadUpcoming(userId), 20000);
+    const onVisible = () => { if (document.visibilityState === 'visible') loadUpcoming(userId); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+  }, [session, loadUpcoming]);
+
+  // ── THE HANDOVER — ONE PATH, TWO TRIGGERS ──────────────────
+  //
+  // The automatic transition at showtime and the manual GO LIVE NOW
+  // button call THE SAME FUNCTION. That is the whole requirement of
+  // Finding 2 and it is why this is written as one function rather than
+  // two similar ones: a parallel manual path would be a second place to
+  // forget the camera migration, and the artist reaching for the manual
+  // button is precisely the moment the automatic one has already let
+  // them down.
+  //
+  // What "everything the automatic transition carries" actually means,
+  // concretely, because it is worth being able to check:
+  //   * PAIRED CAMERAS -- the same POST to /api/camfeed/pair {migrate},
+  //     which rewrites target_room and bumps generation, so every propped
+  //     phone follows within one poll (lib/camfeedPairing.js).
+  //   * THE DEVICES -- camera and audio graph released here, because the
+  //     live path acquires its own and two owners of one device is a
+  //     black frame on stage.
+  //   * THE SESSION -- router.push, not a page load, so the Supabase
+  //     session in this tab carries over warm.
+  //   * THE CUE SHEET AND B-ROLL -- neither is held in this component's
+  //     state at all. Both are keyed to the artist and re-read on the
+  //     live page (cue sheets by track hash, b-roll by artist id), so
+  //     they arrive because of WHERE they live, not because this
+  //     function carries them. Nothing to pass, and nothing that can be
+  //     dropped by taking the manual route.
+  //
+  // `handingOver` is the no-op guard: pressing the button after the
+  // automatic transition has already fired does nothing, rather than
+  // firing a second migrate and a second navigation.
+  const handOverToShow = useCallback((reason) => {
+    if (handingOver) return;
+    if (!upcoming?.id) return;
     setHandingOver(true);
+    setHandoverError('');
 
     // Release BEFORE handing over: the live path acquires its own
     // camera, and two owners of one device is how you get a black
@@ -316,11 +362,11 @@ export default function KitCheck() {
     stopCamera();
     stopAudio();
 
-    // ── PHASE 0b: THE RIG COMES TOO ────────────────────────────
+    // ── THE RIG COMES TOO ──────────────────────────────────────
     // This is the whole reason Kit Check exists: position once, go live
     // with everything already in place. The rehearsal room and the show
     // room are different LiveKit rooms, so "everything" has to include
-    // the phones — and a phone cannot follow a room it was told about
+    // the phones -- and a phone cannot follow a room it was told about
     // once, at redeem time.
     //
     // So it doesn't. Each paired phone polls its own pairing row for the
@@ -329,18 +375,18 @@ export default function KitCheck() {
     // phone sees the change on its next poll (~4s) and reconnects itself
     // to the show room with a fresh token. Nobody walks across the room.
     //
-    // Fire-and-forget with a hard 2.5s ceiling. The artist's own handover
-    // is the thing that must not be late — a camera arriving four seconds
+    // Fire-and-forget with a hard ceiling. The artist's own handover is
+    // the thing that must not be late -- a camera arriving four seconds
     // into a show is a shrug; an artist arriving four seconds late is the
-    // show starting without them. If the migrate call is slow or fails,
-    // the phones simply stay in the rehearsal room and can be re-paired
-    // from the live screen, which is the pre-tonight behaviour.
+    // show starting without them. If migrate is slow or fails, the phones
+    // stay in the rehearsal room and can be re-paired from the live
+    // screen, which is the pre-Phase-0b behaviour.
     const go = () => router.push(`/live?show=${upcoming.id}`);
     const token = session?.access_token;
     if (!token) { go(); return; }
 
     let done = false;
-    const guard = setTimeout(() => { if (!done) { done = true; go(); } }, 2500);
+    const guard = setTimeout(() => { if (!done) { done = true; go(); } }, HANDOVER_MIGRATE_CEILING_MS);
     fetch('/api/camfeed/pair', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -353,7 +399,27 @@ export default function KitCheck() {
         clearTimeout(guard);
         go();
       });
-  }, [countdownVisible, secondsToShowtime, handingOver, router, upcoming, stopCamera, stopAudio, session]);
+  }, [handingOver, upcoming, session, router, stopCamera, stopAudio]);
+
+  // ── The last minute before SHOWTIME → countdown, then live ──
+  //
+  // The decision itself lives in lib/showWindow.js's handoverState and is
+  // unit-tested (scripts/window-tests.mjs). It used to be an inline
+  // four-clause boolean here, which is how it managed to break twice:
+  // once counting down from the window opening instead of from showtime,
+  // and once not firing at all.
+  const handover = handoverState(upcoming, now);
+  const countdown = handover.status === 'countdown' || handover.status === 'due' ? handover.countdown : null;
+
+  useEffect(() => {
+    if (handover.status !== 'due') return;
+    handOverToShow('automatic');
+  }, [handover.status, handOverToShow]);
+
+  // Manual GO LIVE NOW (Finding 2). Available whenever the broadcast
+  // window is open -- see canHandOverNow for why that bound and not the
+  // show window.
+  const canGoLiveNow = canHandOverNow(upcoming, now);
 
   if (session === null) {
     return <div style={{ padding: 40, fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>;
@@ -393,6 +459,10 @@ export default function KitCheck() {
           </div>
         )}
 
+        {showLoadError && (
+          <div style={{ marginTop: 12, fontSize: 11.5, color: '#e71d36', lineHeight: 1.5 }}>{showLoadError}</div>
+        )}
+
         {upcoming && (
           <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)' }}>
             Next show: <strong style={{ color: INK }}>{upcoming.title || 'Untitled show'}</strong>{' '}
@@ -408,6 +478,48 @@ export default function KitCheck() {
               <>— window opens {humanCountdown(msUntilWindow(upcoming, now))}.</>
             )}
           </div>
+        )}
+
+        {/* ── GO LIVE NOW (Finding 2) ────────────────────────────
+            The manual path. Automation is the happy path, not the only
+            path — and the moment an artist reaches for this is exactly
+            the moment the automatic hand-over has already failed them,
+            so it runs the IDENTICAL function rather than a parallel one.
+
+            Always rendered once a show exists, disabled with a reason
+            outside the window. A button that appears only when it works
+            teaches nobody what the rule is; a disabled button that says
+            "your window opens in 12m" does. */}
+        {upcoming && (
+          <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => handOverToShow('manual')}
+              disabled={!canGoLiveNow || handingOver}
+              title={canGoLiveNow ? 'Take me to my show now' : 'Your broadcast window is not open yet'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                padding: '13px 20px', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+                color: canGoLiveNow && !handingOver ? PORCELAIN : 'rgba(1,22,39,0.4)',
+                background: canGoLiveNow && !handingOver ? '#e71d36' : 'transparent',
+                border: canGoLiveNow && !handingOver ? 'none' : '1px solid rgba(1,22,39,0.18)',
+                cursor: canGoLiveNow && !handingOver ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {handingOver ? 'TAKING YOU THROUGH…' : 'GO LIVE NOW'}
+            </button>
+            <span style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.5)', lineHeight: 1.5, flex: '1 1 240px' }}>
+              {handingOver
+                ? 'Moving your cameras across and putting you on stage.'
+                : canGoLiveNow
+                  ? 'Skips the wait. Your paired cameras come with you, exactly as they would at showtime.'
+                  : `Opens ${humanCountdown(msUntilWindow(upcoming, now))} — 30 minutes before your show.`}
+            </span>
+          </div>
+        )}
+
+        {handoverError && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: '#e71d36' }}>{handoverError}</div>
         )}
 
         <div style={{ display: 'flex', gap: 20, marginTop: 22, flexWrap: 'wrap', alignItems: 'flex-start' }}>
