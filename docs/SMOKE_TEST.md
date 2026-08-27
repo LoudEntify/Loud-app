@@ -107,41 +107,26 @@ built-in quota is hit.
 I could not run it: the service-role key is marked Sensitive in Vercel and
 cannot be read back.
 
-### Option A — create the account (recommended, ~1 minute)
+### The admin-API seeding script, if you prefer it
 
-Get your service-role key from **Supabase → Project Settings → API**, then:
+`npm run smoke:bootstrap` creates the account directly with
+`email_confirm: true`, skipping the email entirely. It needs the
+service-role key, which is why I could not run it:
 
 ```bash
 export NEXT_PUBLIC_SUPABASE_URL='https://YOUR-PROJECT.supabase.co'
-export SUPABASE_SERVICE_ROLE_KEY='eyJ...'          # not stored anywhere
+export SUPABASE_SERVICE_ROLE_KEY='eyJ...'      # not stored anywhere
 export SMOKE_EMAIL='loud-smoke@loudentify.test'
-export SMOKE_PASSWORD='pick-something-long'
+export SMOKE_PASSWORD='...'                    # match ./smoke.env
 
-npm run smoke:bootstrap
+npm run smoke:bootstrap            # create (or adopt the existing user)
+npm run smoke:bootstrap -- --delete # remove it again, profile and all
 ```
 
-**What it writes:** one row in `auth.users` with `email_confirm: true`, plus
-its `profiles` row (role `artist`). Nothing else. No schema change — the
-migration boundary is untouched.
-
-`npm run smoke:bootstrap -- --delete` removes it again, profile and all.
-
-> **Why the admin API and not the signup form?** I tried the form first. On
-> this project it returns
-> `500 {"code":"unexpected_failure","message":"Error sending confirmation
-> email"}` — email confirmation is on and SMTP is not configured, so no user
-> is created at all. `email_confirm: true` is the documented way to seed an
-> account past that. (That 500 also surfaced a real bug, now fixed: it
-> rendered on screen as the literal string `{}`.)
-
-### Option B — turn off email confirmation on the preview project
-
-**Supabase → Authentication → Providers → Email → Confirm email: off.** Then
-the normal signup form works and you can create the account by hand, or with
-the browser-driven version of the bootstrap. No admin call anywhere.
-
-Worth considering on its own merits: with confirmation on and no SMTP, **real
-signups on this project are currently failing too**.
+**What it writes:** one row in `auth.users`, plus its `profiles` row. No
+schema change — the migration boundary is untouched. It is flagged loudly in
+the script itself because it crosses your database boundary; it is a test
+fixture, and no check ever reads the database to decide whether a page worked.
 
 ## Running it
 
@@ -157,7 +142,7 @@ npm run smoke
 Green looks like:
 
 ```
-ALL 8 ROUTES RENDERED CLEAN (5 of them GATED), SIGNED IN AS loud-smoke@loudentify.test
+ALL 9 ROUTES RENDERED CLEAN (6 of them GATED), SIGNED IN AS loud-smoke@loudentify.test
 ```
 
 Exit code is 0 only if **every** route rendered **and** the sign-in
@@ -169,13 +154,14 @@ green tick on nothing.
 
 | Check | Catches | Cost |
 |---|---|---|
-| `npm run build` | syntax, imports that don't resolve, type-ish errors | seconds |
-| `npm run check:tdz` | use-before-define (crash 2's class) | seconds |
-| `npm run check:undef` | **undefined identifiers (crash 3's class)** | seconds |
-| `npm run smoke` | **anything that throws or fails to render, signed in** (crash 1's class, and the other two as a backstop) | ~40s |
+| `npm run check:tdz` | use-before-define — crash 2's class | seconds |
+| `npm run check:undef` | undefined identifiers — **crash 3's class** | seconds |
+| `node scripts/window-tests.mjs` | the show-window and Kit Check handover predicates — **the countdown's class** | instant |
+| `npm run check:build` | a build that WARNS about a missing import and still exits 0 — the same silent class as crash 3 | ~30s |
+| `npm run smoke` | **anything that throws or fails to render, signed in** — crash 1's class, and the others as a backstop | ~40s |
 
-`npm run check` runs the two static sweeps together. `npm run smoke` needs a
-deployment and credentials, so it stays separate.
+`npm run check` runs the first four. `npm run smoke` needs a deployment and
+credentials, so it stays separate.
 
 **None of these replace the device script.** They catch *dead pages*. They
 cannot tell you a camera didn't appear, a clip didn't cut, or a countdown
