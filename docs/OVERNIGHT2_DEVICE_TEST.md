@@ -12,7 +12,7 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-ltt8fzrhy-korey-alashe.vercel.app` |
+| **Preview** | `https://loud-bh9n24u2t-korey-alashe.vercel.app` |
 | **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
@@ -32,6 +32,8 @@ and not five.
 | QA | `740dc0c` | BUG 1 b-roll upload · BUG 2 device release on End Show · BUG 3 one avatar source |
 | QA | `a9e0345` | RULING 1 show duration + window · RULING 2 named cue sheets |
 | QA | `d51b16c` | QA script sections; fixed an onboarding link pointing at Recorded Shows |
+| FIX | `68cb676` | **Artist-console crash** — a re-export is not a local binding; added `check:undef` |
+| FIX | `4a56e7d` | The authenticated smoke check (`npm run smoke`) + a signup error that rendered as `{}` |
 
 ### Bypass-loaded confirmation, per phase
 
@@ -608,7 +610,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-ltt8fzrhy-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-bh9n24u2t-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \
