@@ -9,7 +9,9 @@
     "lint": "next lint",
     "check:tdz": "npx --yes eslint@8 --no-eslintrc --no-inline-config --parser-options ecmaVersion:2022 --parser-options sourceType:module --parser-options ecmaFeatures:{jsx:true} --rule '{\"no-use-before-define\":[\"error\",{\"functions\":false,\"classes\":false,\"variables\":true}]}' --ext .js,.jsx app components lib",
     "check:undef": "npx --yes eslint@8 --no-eslintrc --no-inline-config --parser-options ecmaVersion:2022 --parser-options sourceType:module --parser-options ecmaFeatures:{jsx:true} --env browser --env es2022 --env node --rule '{\"no-undef\":\"error\"}' --ext .js,.jsx app components lib",
-    "check": "npm run check:tdz && npm run check:undef"
+    "check": "npm run check:tdz && npm run check:undef",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:bootstrap": "node scripts/smoke-bootstrap.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.5.0",
@@ -25,5 +27,8 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
   }
 }

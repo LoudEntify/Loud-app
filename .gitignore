@@ -32,3 +32,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*
+
+# Smoke-check credentials (see docs/SMOKE_TEST.md) -- never committed.
+smoke.env
+.smoke.env

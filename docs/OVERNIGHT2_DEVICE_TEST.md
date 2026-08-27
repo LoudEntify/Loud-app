@@ -68,9 +68,28 @@ shipped, not just committed" line for each phase.
 | **QA** | `lib/showWindow.js` exercised in node | 14/14 — duration default and clamp, `ends_at` override, window open/shut either side of the grace, expired classification, remaining-time. |
 | all | `/`, `/shows`, `/notifications` | HTTP 200 each. |
 
-**What that does NOT prove**, stated plainly: no live show was run, no phone
-was paired, no payment was simulated end to end. Everything in the sittings
-below is the part I could not do.
+### ⚠️ What "bypass-loaded, 200 OK" does and does not prove
+
+Everything above is an HTTP status behind Vercel's deployment protection. That
+gets past **Vercel's** wall and stops there — it never gets past
+**Loudentify's** login. An authenticated page like `/artist/{id}` returns
+`200` as the *login-redirect shell*, so those rows went green on surfaces that
+were dead.
+
+Three crashes shipped that way (Leave, a TDZ ReferenceError, and
+`windowClosesAt is not defined`) — every one on an authenticated surface,
+which is exactly the set that check could not reach.
+
+**`npm run smoke` now closes that** — it signs in through the real login form
+in a headless browser and requires each gated route to actually render, not
+merely respond. See `docs/SMOKE_TEST.md`; it needs a one-time test account.
+
+From here on, a definition-of-done names **which authenticated routes were
+loaded signed-in and confirmed rendered**.
+
+**What none of it proves**, stated plainly: no live show was run, no phone was
+paired, no payment was simulated end to end. Everything in the sittings below
+is the part I could not do.
 
 ---
 

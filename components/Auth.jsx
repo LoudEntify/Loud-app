@@ -29,6 +29,25 @@ function ageFrom(dob) {
 // (see the DB constraint in docs/age_policy_migration.sql).
 export const MIN_AGE = 18;
 
+/**
+ * A human-readable message out of ANY error shape.
+ *
+ * Found while building the authenticated smoke check: a 500 from
+ * Supabase signup ("Error sending confirmation email", i.e. the project's
+ * SMTP is not configured) rendered on screen as the literal string
+ * `{}`. Someone creating an account sees two braces and no idea what to
+ * do. Error objects arrive here from three different libraries with
+ * three different shapes, so this stops guessing that any one of them
+ * has `.message`.
+ */
+function errorMessage(err, fallback) {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err.trim() || fallback;
+  const msg = err.message || err.error_description || err.error || err.msg;
+  if (typeof msg === 'string' && msg.trim() && msg.trim() !== '{}') return msg.trim();
+  return fallback;
+}
+
 const labelStyle = { fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)', fontWeight: 700, marginBottom: 4 };
 
 const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '13px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' };
@@ -179,7 +198,7 @@ export default function Auth() {
           genres,
         });
         if (result.error) {
-          setError(result.error.message || 'Sign up failed.');
+          setError(errorMessage(result.error, 'Sign up failed. If this keeps happening, the email service may be down — try again shortly.'));
           return;
         }
         if (result.needsEmailConfirmation) {
@@ -192,7 +211,7 @@ export default function Auth() {
       } else {
         const result = await signIn({ email: email.trim(), password });
         if (result.error) {
-          setError(result.error.message || 'Log in failed.');
+          setError(errorMessage(result.error, 'Log in failed. Check the email and password.'));
           return;
         }
         const dbRole = result.profile?.role;
