@@ -100,7 +100,13 @@ const ROUTES = [
   { path: '/settings',        marker: 'REQUEST MY DATA',  auth: true,  note: 'account controls' },
   { path: '/wallet',          marker: 'TOKEN BALANCE',    auth: true,  note: 'wallet + purchase tiers' },
   { path: '/welcome',         marker: 'DO THIS LATER',    auth: true,  note: 'onboarding walkthrough' },
-  { path: '/kit-check',       marker: 'Kit Check',        auth: true,  note: 'studio + camera pairing' },
+  { path: '/kit-check',       marker: 'Kit Check',        auth: true,  note: 'studio + camera pairing + GO LIVE NOW' },
+  // /live with no ?show= lands on the "this link is missing a show"
+  // screen for a signed-in artist with nothing scheduled -- which is
+  // still a RENDER of LiveDemo, and therefore still catches a crash in
+  // it. A live show itself needs a real room and is the device script's
+  // job, not this one's.
+  { path: '/live',            marker: 'LOUDENTIFY',       auth: true,  note: 'live page shell (LiveDemo mounts)' },
   // THE ONE THAT KEEPS BREAKING. Resolved from the signed-in session, so
   // it is the artist's own console in OWNER mode -- the surface all
   // three crashes were on, and the one a signed-out load cannot reach:

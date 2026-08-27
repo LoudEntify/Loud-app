@@ -59,15 +59,53 @@ The marker is the important half. `/settings` has to contain
 login screen contains neither, so **a redirect to login cannot pass as a
 render** — which is precisely how the old check was fooled.
 
-## One-time setup
+## One-time setup — ONE CLICK REMAINS
 
 The check signs in **through the app's own login form**. No preview-only auth
 bypass: a deployed auth side door is a real hazard for a saving of about ten
 lines, and signing in normally also proves the login path still works.
 
-That means it needs a dedicated test account. **You need to do one of these
-two things once** — I could not, because the service-role key is marked
-Sensitive in Vercel and cannot be read back.
+**The account already exists.** I created it through the normal signup form:
+
+| | |
+|---|---|
+| Email | `loud-smoke@loudentify.test` |
+| Password | in `./smoke.env` (gitignored, on your machine) |
+| Role | artist, handle `loud_smoke_test` |
+
+*(The first attempt returned `500 "Error sending confirmation email"`. That
+turned out to be Supabase's built-in email RATE LIMIT, not broken SMTP —
+retrying the next day succeeded. Worth knowing on its own: during a heavy
+testing session, real signups will start failing the same way.)*
+
+**What is left is one click, and only you can do it** — the address is not a
+real inbox, so the confirmation email cannot be opened:
+
+> **Supabase → Authentication → Users → `loud-smoke@loudentify.test` → ⋯ →
+> Confirm email**
+
+Then:
+
+```bash
+set -a; . ./smoke.env; set +a
+npm run smoke
+```
+
+Sign-in currently fails with **"Email not confirmed"** — the check reports
+that exact message, which is the error-extractor fix working.
+
+### If you would rather not confirm by hand
+
+Either of these removes the need entirely:
+
+**Turn off Confirm-email for the preview project** — Supabase →
+Authentication → Providers → Email → *Confirm email: off*. Worth weighing on
+its own merits: with it on and no custom SMTP, signups fail whenever the
+built-in quota is hit.
+
+**Or seed the account with the admin API** — the original Option A below.
+I could not run it: the service-role key is marked Sensitive in Vercel and
+cannot be read back.
 
 ### Option A — create the account (recommended, ~1 minute)
 

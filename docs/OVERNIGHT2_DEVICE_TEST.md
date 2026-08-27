@@ -12,7 +12,7 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-bh9n24u2t-korey-alashe.vercel.app` |
+| **Preview** | `https://loud-9od01j297-korey-alashe.vercel.app` |
 | **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
@@ -34,6 +34,7 @@ and not five.
 | QA | `d51b16c` | QA script sections; fixed an onboarding link pointing at Recorded Shows |
 | FIX | `68cb676` | **Artist-console crash** — a re-export is not a local binding; added `check:undef` |
 | FIX | `4a56e7d` | The authenticated smoke check (`npm run smoke`) + a signup error that rendered as `{}` |
+| FIX | `0709c8f` | **Countdown to live** (Finding 1) + **GO LIVE NOW in Kit Check** (Finding 2) |
 
 ### Bypass-loaded confirmation, per phase
 
@@ -318,12 +319,34 @@ mid-song.
 ### 2.3 Reload the tab
 > ☐ Your paired cameras are **still listed** (a reload is not a change of mind)
 
-### 2.4 Wait for the countdown
+### 2.4 ★ Wait for the countdown ★ *(re-test — Finding 1)*
 Stay in Kit Check. At **T−60 seconds** a full-screen countdown appears.
 
+> ☐ It appears **at all** — it did not last round: `nextUpcomingShow` threw
+>   inside an async effect, so `upcoming` stayed null and every condition was
+>   silently false
 > ☐ It says **YOU'RE ON IN** and counts to your *showtime* — not to the window
 >   opening half an hour ago
 > ☐ You get the whole window in Kit Check, not yanked out at T−30
+> ☐ At zero you land on the stage **with your paired cameras carried over**
+
+**And the case that never worked**: with Kit Check ALREADY OPEN, schedule a
+show in another tab for ~2 minutes out.
+
+> ☐ Within ~20 seconds Kit Check picks it up ("Next show: …") without a reload
+> ☐ The countdown then fires normally
+
+### 2.4b ★ GO LIVE NOW ★ *(Finding 2)*
+
+> ☐ With a show scheduled but the window **not** open, the red **GO LIVE NOW**
+>   button is visible but **disabled**, and says when it opens
+> ☐ Inside the window it enables
+> ☐ Pressing it takes you to the stage immediately — **and your paired cameras
+>   come across exactly as they do at showtime** (watch the phones: PAIRED →
+>   LIVE within a few seconds, untouched)
+> ☐ Your audio deck, cue sheet and b-roll are all there on the live page
+> ☐ Go back to Kit Check and press it again after the automatic hand-over has
+>   already fired — it must be a **no-op**, not a second start
 
 ---
 
@@ -610,7 +633,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-bh9n24u2t-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-9od01j297-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \
