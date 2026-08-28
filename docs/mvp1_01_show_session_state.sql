@@ -53,7 +53,27 @@ create table if not exists show_session_state (
   -- ── Cue sheet binding ──
   -- The sheet currently bound to that track. Null is a real state and
   -- means "a track is loaded, no sheet chosen" — not an error.
-  cue_sheet_id uuid references cue_sheets(id) on delete set null,
+  --
+  -- ⚠️ bigint, NOT uuid, and the difference is not cosmetic.
+  -- cue_sheets.id is `bigint generated always as identity`
+  -- (docs/cue_sheets_migration.sql) — v2 rekeyed the table on
+  -- (track_hash, artist_email) but never touched the primary key. A uuid
+  -- column cannot carry a foreign key to a bigint one: Postgres rejects
+  -- it outright at create-table time with 42804, "foreign key constraint
+  -- cannot be implemented ... incompatible types: uuid and bigint".
+  --
+  -- The version of this file committed in 026be67 said `uuid`, so it had
+  -- never successfully run anywhere. What made that survivable — and what
+  -- makes it worth this comment rather than a silent one-word fix — is
+  -- the `create table if not exists` above: on any environment where the
+  -- table already exists, the whole statement short-circuits and the bad
+  -- column type is never evaluated, so re-running the file looks clean.
+  -- The environment that would actually have failed is a FRESH one, i.e.
+  -- staging or production on first apply, which is the worst possible
+  -- place to discover it. Idempotency hid the defect instead of
+  -- surfacing it; verification query 1 below is what catches this class
+  -- of thing, and it is why the expected column count is stated.
+  cue_sheet_id bigint references cue_sheets(id) on delete set null,
 
   -- ── Playback ──
   -- Milliseconds, integer. Never a float second: a float invites drift

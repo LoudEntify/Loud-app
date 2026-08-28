@@ -24,6 +24,10 @@ import ConnectionRecovery from './ConnectionRecovery';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
+// The live path is now the SOLE owner of the audio host's lifecycle: it
+// adopts the graph (or reuses Kit Check's), and it is the only surface
+// that releases. See the note on releaseLocalDevices below.
+import { adoptAudioGraph, releaseAudioHost, audioHostActive, getAudioHost } from '../lib/audioHost';
 import { useWakeLock } from '../lib/useWakeLock';
 import { usePublisherStats } from '../lib/publisherStats';
 import { useShowSession } from '../lib/useShowSession';
@@ -1584,6 +1588,19 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // the whole Case 2 graph exactly like the mount effect does, and
         // re-attaches the same health listeners to the new handle.
         const freshHandle = await createPilotAudioTrack();
+        // Hand the replacement to the host too, or the host keeps
+        // pointing at the graph this line just abandoned — and now that
+        // release goes through releaseAudioHost (see releaseLocalDevices
+        // below), a stale host would close the OLD context on leave and
+        // leak this one, keeping the microphone open after the show.
+        //
+        // adoptAudioGraph releases what it replaces, backing player
+        // included. That is correct rather than collateral here: the
+        // player's nodes hang off the old graph's outputBus and the old
+        // context is being closed, so the track is already silent. The
+        // artist has to re-pick it — which is exactly what the
+        // show_session_state row is for, once the read path is built.
+        adoptAudioGraph(freshHandle);
         audioHandleRef.current = freshHandle;
         setAudioNodes(freshHandle.nodes);
         setAudioContext(freshHandle.audioContext);
@@ -2499,7 +2516,27 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   useEffect(() => {
     if (!isMainPerformer) return;
     (async () => {
-      const handle = await createPilotAudioTrack();
+      // ── REUSE THE HOST'S GRAPH IF THERE IS ONE ──────────────────
+      // The other half of the round-1 Test 2 fix, and it only works as a
+      // pair with Kit Check no longer releasing on handover
+      // (components/KitCheck.jsx). Arriving from Kit Check, the artist
+      // already has an open microphone, a live AudioContext and — the
+      // part that matters — a decoded backing track hanging off its
+      // outputBus. Calling createPilotAudioTrack() unconditionally here
+      // opened a SECOND microphone on the same device and built a second
+      // graph the loaded track was not connected to, which is why simply
+      // deleting the release over there would have traded a dropped
+      // backing track for two live mics.
+      //
+      // Same audioHostActive() check KitCheck.startAudio uses, for the
+      // same reason and with the same meaning: a graph is live, adopt it,
+      // do not build another.
+      const existing = audioHostActive() ? getAudioHost() : null;
+      const handle = existing || await createPilotAudioTrack();
+      // Adopt only what we created. adoptAudioGraph() releases whatever
+      // it is replacing, so handing it the graph it is already holding
+      // would tear down the thing we just decided to keep.
+      if (!existing) adoptAudioGraph(handle);
       audioHandleRef.current = handle;
       // audioHandleRef is a ref, not state -- setting it alone doesn't
       // trigger a re-render, so AudioDeckPanel (rendered via SwipePages in
@@ -2642,10 +2679,22 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // never let cleanup throw out of a leave/failure path
     }
     try {
-      const handle = audioHandleRef.current;
-      handle?.rawStream?.getTracks?.().forEach((t) => t.stop());
-      handle?.processedTrack?.stop?.();
-      handle?.audioContext?.close?.();
+      // Through the host, not around it. This used to stop the raw stream
+      // and close the AudioContext directly off audioHandleRef, which
+      // released the DEVICES but left lib/audioHost.js still holding a
+      // player, a trackHash and a pointer to a now-closed context — a
+      // host describing audio that no longer exists. Kit Check's
+      // audioHostActive() and the reuse check in the publish effect above
+      // both read that state, so a stale host is how you get the next
+      // session adopting a dead graph.
+      //
+      // releaseAudioHost does the same three device teardowns plus
+      // stopping the backing player and clearing the track identity, and
+      // leaving is one of exactly two events that genuinely mean the
+      // session is over. It is safe that this is now the only path: Kit
+      // Check no longer releases at all.
+      releaseAudioHost('leave');
+      audioHandleRef.current = null;
     } catch {
       // same
     }
@@ -2827,9 +2876,15 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // the Web Audio graph, so the mic indicator stayed on for the
         // same reason the camera light did.
         try {
-          handle?.rawStream?.getTracks?.().forEach((t) => t.stop());
-          handle?.processedTrack?.stop?.();
-          await handle?.audioContext?.close?.();
+          // Through the host — same reasoning as releaseLocalDevices
+          // above. Show-end is the second of the two events that mean
+          // the session is genuinely over, and it is the one where
+          // stopping the BACKING TRACK matters most: the graph's
+          // outputBus outlives the show, so a track left running plays
+          // on into nothing. BackingTrackPanel's showEnded effect stops
+          // it from the UI side; this makes it true even if that panel
+          // is not mounted.
+          releaseAudioHost('show_ended');
           audioHandleRef.current = null;
         } catch {
           // release is best-effort; never throw out of an ending show
