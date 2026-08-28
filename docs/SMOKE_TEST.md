@@ -166,9 +166,11 @@ green tick on nothing.
 | `npm run check:undef` | undefined identifiers — **crash 3's class** | seconds |
 | `node scripts/window-tests.mjs` | the show-window and Kit Check handover predicates — **the countdown's class** | instant |
 | `npm run check:build` | a build that WARNS about a missing import and still exits 0 — the same silent class as crash 3 | ~30s |
-| `npm run smoke` | **anything that throws or fails to render, signed in** — crash 1's class, and the others as a backstop | ~40s |
+| `npm run check:routes` | an API route shipped with **no stated auth model** — the 2026-08-28 CRITICAL's class | instant |
+| `npm run smoke` | **anything that throws or fails to render, signed in** — crash 1's class, and the others as a backstop; plus a signed-out pass proving gated pages do NOT render for a stranger | ~60s |
+| `npm run probe:auth` | **a capability handed to an unauthenticated caller** — decodes the minted LiveKit grant rather than reading a status code | ~10s |
 
-`npm run check` runs the first four. `npm run smoke` needs a deployment and
+`npm run check` runs the first five. `npm run smoke` needs a deployment and
 credentials, so it stays separate.
 
 **None of these replace the device script.** They catch *dead pages*. They

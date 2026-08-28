@@ -1523,3 +1523,63 @@ own id/email with nothing to point at somebody else.
   would be a hidden row nobody could ever see again. (Contrast
   `wallet_transactions`, which is append-only for exactly the opposite reason.)
   It asks first, inline, where the thing being deleted is still named on screen.
+
+---
+
+## 2026-08-28 — Retrospective security audit
+
+**Safari finding withdrawn by the user, and correctly.** Signed-out
+`/artist/{id}` renders the public storefront with no console and no
+editable fields; the owner/public split works as designed. Independently
+confirmed by the new signed-out gate pass, which finds no `Schedule a
+show` for a stranger on the same URL. Dropped as an item.
+
+**One CRITICAL, fixed: `/api/token?camfeed=` handed publish rights to
+anyone.** Full chain and measurements in
+`docs/SECURITY_AUDIT_2026-08-28.md`.
+
+Three judgment calls worth recording:
+
+**1. Closed the branch rather than authenticating it.** The instinct is
+to bolt a check onto `?camfeed=`. Wrong instinct: pairing (Phase 0a)
+already IS that capability with a real auth model, and adding a second
+way to get a publish token means two things to keep correct forever.
+Nothing in the UI linked to the legacy path, so closing it costs
+nothing. Same reasoning as the `?contestant=` closure, and the precedent
+sitting in that file is what made the call obvious.
+
+**2. Did NOT fix egress start/stop, though they are unauthenticated and
+I proved it.** Both call sites are in the live broadcast path and I
+cannot verify a change there without a real show and a real device. A
+wrong fix means recordings silently stop working mid-performance. The
+user's instruction was explicit — fix CRITICAL, queue the rest, do not
+rewrite auth mid-QA — and this is exactly the case it was written for.
+Queued with the patch described.
+
+**3. Invented a `pending` allowlist status rather than choose between
+two bad options.** A known-unauthenticated route either fails the build
+(blocking a QA sitting over something already understood) or gets
+allowlisted (going green and being forgotten). Neither is right for an
+open finding. `pending` entries warn loudly on every run, never go
+quiet, and do not fail the build. Clearing one means deleting it, not
+rewording it.
+
+**What this round says about the checks so far.** Four checks deep, and
+every one asked whether the code RUNS. A route that hands publish rights
+to strangers runs perfectly. That gap was structural, not an oversight
+in any individual check, and `check:routes` + `probe:auth` exist to
+close it. `probe:auth` decodes the LiveKit grant rather than reading a
+status code, because the bug was three fields inside a healthy 200.
+
+**Stated plainly: `check:routes` would not have caught the cue-sheets
+IDOR** (finding 4), because that route does call `verifyArtistAuth` — it
+just then trusts an `artist_email` from the query string. A file-level
+grep cannot see that, and pretending otherwise would make the check more
+dangerous than no check. Found by reading the source; documented as a
+limit in both the script header and the audit.
+
+**A correction to my own documentation.** `docs/OVERNIGHT2_DEVICE_TEST.md`
+told the user to verify `/api/broll/upload` returns 404. It returns 405 —
+`68cb676` re-added the file that `740dc0c` deleted, while fixing an
+unrelated crash. Both places corrected in place rather than quietly
+edited.

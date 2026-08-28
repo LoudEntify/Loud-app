@@ -63,7 +63,7 @@ shipped, not just committed" line for each phase.
 | **4e+** | `/kit-check` bundle | Contains `B-ROLL — CHECK A CLIP`, `B-ROLL CLIP`, `nothing leaves this room` — the rehearsal preview shipped. |
 | **QA** | `/`, `/live`, `/kit-check`, `/cam`, `/cam/pair`, `/discover`, `/shows`, `/settings`, `/wallet`, `/welcome`, `/egress`, `/artist/{uuid}` | HTTP 200 each. |
 | **QA** | `POST /api/broll/upload-url`, `/api/broll/register` | `401` — both gated. |
-| **QA** | `GET /api/broll/upload` (the route that hung) | **`404`** — deleted, not left as a fallback. |
+| **QA** | `GET /api/broll/upload` (the route that hung) | ⚠️ **CORRECTED 2026-08-28 — this said `404` and it was wrong.** The route returns **`405`**: `740dc0c` deleted it, then `68cb676` (the artist-console crash fix) accidentally re-added it. It is gated (`POST` → 401), so it is not a hole — but it is the original body-buffering path, live again. See `docs/SECURITY_AUDIT_2026-08-28.md` finding 5. |
 | **QA** | `PATCH` / `DELETE` / `GET ?all=1` on `/api/cue-sheets` | `401` each — rename, delete and library all deployed and gated. |
 | **QA** | Artist-console chunk, fetched from the deployment | Contains `HOW LONG` (duration picker), `MISSED` (expired badge), `grace`, `CUE SHEETS`, `broll/upload-url`, `broll/register`, `Saving to your library`. |
 | **QA** | `/live` chunks | Contain `show-remaining`, `OVER TIME`, `Saving overwrites`, `local_devices_released`. |
@@ -266,7 +266,11 @@ On your artist console (`/profile`), find the **B-ROLL** section.
 **In the network tab**, the big request should now go to
 `…supabase.co/storage/v1/object/upload/sign/…`, **not** to `/api/broll/upload`.
 That is the whole fix: the bytes no longer pass through a serverless function.
-`/api/broll/upload` is gone entirely — a GET to it returns 404.
+⚠️ **`/api/broll/upload` is NOT gone** — corrected 2026-08-28. It was deleted in
+`740dc0c` and accidentally restored by `68cb676`; a GET returns `405`, not `404`.
+The bytes still go to the signed Supabase URL, so the fix itself holds and this
+step passes — but the dead route is back on disk and queued for deletion
+(`docs/SECURITY_AUDIT_2026-08-28.md`, finding 5).
 
 ### 2.2 Kit Check, and the thing that could not be done before
 Open `/kit-check`.

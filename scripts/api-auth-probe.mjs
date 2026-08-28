@@ -32,7 +32,8 @@
 // leaves nothing behind and touches nobody's data. That limits it — it
 // cannot detect an authorization bug that only shows up against a real
 // row, like the cue-sheets IDOR from the same round — and that limit is
-// stated in docs/SECURITY_CHECKS.md rather than left to be discovered.
+// stated in docs/SECURITY_AUDIT_2026-08-28.md rather than left to be
+// discovered later by someone trusting a green run.
 // ─────────────────────────────────────────────────────────────
 
 const BASE = (process.env.SMOKE_URL || '').replace(/\/+$/, '');
