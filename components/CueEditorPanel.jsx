@@ -18,8 +18,10 @@
 // PRD: Cue-Sheet Director CD-3
 // ─────────────────────────────────────────────────────────────
 
+import { useEffect, useState } from 'react';
 import { SHOT_TYPES, CUE_EDITOR_SHOT_KEYS, shotFamilyColor } from '../lib/shotTypes';
 import { SLOT_ROLES, FALLBACK_BEHAVIOURS, MOTION_SCALE_CEILING } from '../lib/cueSheetValidation';
+import { getSupabase } from '../lib/supabaseClient';
 
 const NUDGE_STEPS_MS = [-1000, -100, 100, 1000];
 
@@ -49,6 +51,33 @@ const btnStyle = {
   cursor: 'pointer',
 };
 
+// The artist's own clip library, for naming one in a b-roll cue.
+//
+// Fetched here rather than drilled down from RoomInner through
+// BroadcastStage and AudioDeckPanel: RLS (broll_select_own) already
+// scopes it to the caller, so it is one query with no props to thread
+// through two components that have no other reason to know about clips.
+function useBrollClips() {
+  const [clips, setClips] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from('broll_clips')
+          .select('id, title')
+          .order('created_at', { ascending: false });
+        if (!cancelled && !error) setClips(data || []);
+      } catch {
+        // An empty library and an unreadable one look the same here, and
+        // both correctly render as "no clips to choose".
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return clips;
+}
+
 export default function CueEditorPanel({
   trackReady,
   cues,
@@ -62,7 +91,24 @@ export default function CueEditorPanel({
   onDeleteCue,
   onChangeFallbackBehaviour,
   onSave,
+  // ── Named sheets (Product Ruling 2) ──
+  //   sheets        — every sheet this artist has for the loaded track
+  //   sheetName     — which one is being edited; what SAVE writes to
+  //   onLoadSheet   — (name) => void, replaces the editor's contents
+  //   onRenameSheet — (name) => void, local only until the next save
+  sheets = [],
+  sheetName = 'Default',
+  onLoadSheet,
+  onRenameSheet,
 }) {
+  // ABOVE the early return, deliberately. `if (!trackReady) return null`
+  // is a conditional return, so any hook below it would run on some
+  // renders and not others -- which is the "Rendered fewer hooks than
+  // expected" crash that took the live page down when Leave was pressed
+  // (DECISIONS.md, Phase 0c). Same defect, same file shape, caught here
+  // before it could ship rather than after.
+  const brollClips = useBrollClips();
+
   if (!trackReady) return null;
 
   const sortedCues = [...cues].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
@@ -84,6 +130,51 @@ export default function CueEditorPanel({
             Save
           </button>
         </div>
+      </div>
+
+      {/* ── NAMED SHEETS (Product Ruling 2) ─────────────────────
+          An artist keeps several treatments of the same song -- a slow
+          version, a festival cut -- and picks one. The plumbing for this
+          has existed since the scheduling round (the table has a `name`
+          column, the route upserts on it and returns the whole list);
+          nothing had ever read it, so every save landed on one sheet
+          called "Default" and the library could only hold one.
+
+          Typing a NEW name and pressing Save is "save as": the upsert
+          key is (track, artist, name), so a name that does not exist yet
+          creates a sheet rather than overwriting one. That is the whole
+          save-as affordance -- no second button, and no way to
+          accidentally clobber the sheet you loaded. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+          Sheet
+          <input
+            value={sheetName}
+            onChange={(e) => onRenameSheet?.(e.target.value)}
+            placeholder="Default"
+            style={{ ...selectStyle, width: 130 }}
+          />
+        </label>
+        {sheets.length > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+            Load
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) onLoadSheet?.(e.target.value); }}
+              style={selectStyle}
+            >
+              <option value="">{sheets.length} saved…</option>
+              {sheets.map((sheet) => (
+                <option key={sheet.id} value={sheet.name}>
+                  {sheet.name} ({(sheet.cues || []).length})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {dirty && sheets.some((x) => x.name === sheetName) && (
+          <span style={{ fontSize: 10.5, color: '#ff9f1c' }}>Saving overwrites “{sheetName}”</span>
+        )}
       </div>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#B4B2A9' }}>
@@ -174,6 +265,33 @@ export default function CueEditorPanel({
                 ))}
               </select>
             </label>
+
+            {/* WHICH clip, for a b-roll cue. Gated on the role the same
+                way Direction is gated on pan -- clip_id is a validation
+                error on any other role (lib/cueSheetValidation.js), so
+                offering it elsewhere would be offering a way to author an
+                invalid sheet.
+
+                "(whatever is playing)" is a real option, not a null
+                state: a cue with no clip_id cuts to a clip already on
+                air and falls back if there is none, which is a
+                legitimate thing to want for a sheet that expects the
+                artist to cue manually. */}
+            {activeCue.slot_role === 'broll' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>
+                Clip
+                <select
+                  value={activeCue.clip_id || ''}
+                  onChange={(e) => onUpdateCue(activeCue.id, { clip_id: e.target.value || undefined })}
+                  style={selectStyle}
+                >
+                  <option value="">(whatever is playing)</option>
+                  {brollClips.map((clip) => (
+                    <option key={clip.id} value={clip.id}>{clip.title || 'Untitled clip'}</option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {activeCue.shot_type === 'pan' && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#B4B2A9' }}>

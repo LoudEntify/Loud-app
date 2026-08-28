@@ -54,6 +54,13 @@ import SpotlightStage from './SpotlightStage';
 import { ShotVideo } from './ShotRendering';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
+import {
+  STAGE_TRACK_SOURCES,
+  belongsToSlot,
+  cameraTracksOnly,
+  isPerformerCameraTrack,
+  matchesTarget,
+} from '../lib/trackSources';
 
 // Plain Ink fill, no text -- the live viewer's own placeholder shows
 // "waiting for performer..."/the "be right back" card, which is exactly
@@ -93,13 +100,13 @@ function signalRecordingReady() {
 // RENDERING pool, and a dead camera has to stay in it so an explicit cut
 // to it can be honoured rather than silently re-picked. renderSlot below
 // derives the live subset for every automatic fallback.
+// B-roll is IN this pool, exactly as it is in LiveDemo's own version.
+// The recorder composes the same directed view a viewer sees, so if a
+// clip can be cut to live it has to be a candidate here or the recording
+// would show the artist's camera at the moment the show showed a clip --
+// a file that quietly disagrees with the performance that happened.
 function tracksForSlot(tracks, letter) {
-  return tracks.filter(
-    (t) =>
-      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-      !t.publication?.isMuted
-  );
+  return tracks.filter((t) => belongsToSlot(t, letter) && !t.publication?.isMuted);
 }
 
 // Connected-room view -- mirrors RoomInner's own renderSlot/ShotVideo
@@ -107,7 +114,9 @@ function tracksForSlot(tracks, letter) {
 // that isn't the video layer itself.
 function EgressStage({ layout }) {
   const room = useRoomContext();
-  const tracks = useTracks([Track.Source.Camera]);
+  // Same source list as the live stage -- ScreenShare is here only
+  // because that is how b-roll clips are published (lib/trackSources.js).
+  const tracks = useTracks(STAGE_TRACK_SOURCES);
   // Finding 1 -- liveness registry with revival probation. See
   // lib/trackLiveness.js for why reappearing in the list is not enough
   // to become selectable again.
@@ -288,13 +297,22 @@ function EgressStage({ layout }) {
     // (confirmed above) -- the "wide/first available shot, not black"
     // requirement is satisfied by this SAME existing fallback, not a
     // new rule written for egress specifically.
+    // matchesTarget, not an identity comparison -- identical to
+    // LiveDemo's renderSlot and for the identical reason: a b-roll clip
+    // carries the artist's own participant identity, so identity alone
+    // would resolve a "cut to the clip" command to the artist's camera
+    // and bake their face into the recording where the clip should be.
     const matched = cmd?.targetIdentity
-      ? candidates.find((t) => t.participant.identity === cmd.targetIdentity)
+      ? candidates.find((t) => matchesTarget(t, cmd))
       : undefined;
+    // Fallbacks resolve against CAMERAS only, same as live: a shot whose
+    // target has gone must never land on a playing clip by accident.
+    const eligibleCameras = cameraTracksOnly(eligible);
     const chosen =
       matched ||
-      eligible.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
-      eligible[0] ||
+      eligibleCameras.find((t) => isPerformerCameraTrack(t)) ||
+      eligibleCameras[0] ||
+      cameraTracksOnly(candidates)[0] ||
       candidates[0];
     const activeImpaired = !!chosen && !eligible.includes(chosen);
 
@@ -320,11 +338,12 @@ function EgressStage({ layout }) {
   const presentSlots = useMemo(() => {
     const set = new Set();
     tracks.forEach((t) => {
-      const identity = t.participant.identity;
-      if (identity.startsWith('contestant-')) {
-        const slot = identity.split('-')[1];
-        if (slot) set.add(slot);
-      }
+      // isPerformerCameraTrack, not a bare identity prefix: a b-roll clip
+      // is published by the artist's own participant, and a clip playing
+      // must never make a slot read as occupied by a person.
+      if (!isPerformerCameraTrack(t)) return;
+      const slot = t.participant.identity.split('-')[1];
+      if (slot) set.add(slot);
     });
     return Array.from(set).sort();
   }, [tracks]);

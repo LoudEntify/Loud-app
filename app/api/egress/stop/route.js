@@ -1,6 +1,22 @@
 import { EgressClient } from 'livekit-server-sdk';
 import { EgressStatus } from '@livekit/protocol';
 import { NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
+import { verifyShowOwner } from '../../../../lib/verifyShowOwner';
+
+// AUTH MODEL: the verified artist who owns the show running in this room.
+//
+// Security round finding 2 (docs/SECURITY_AUDIT_2026-08-28.md). This
+// route had no authentication of any kind, and `room_name` is not a
+// secret: components/LiveDemo.jsx resolves a show with select('*')
+// through the anon client, so every viewer of a public show link already
+// has the one input this needed.
+//
+// Of the two egress routes this is the one with teeth. Starting a
+// recording nobody wanted costs money. Stopping one costs the
+// PERFORMANCE — a stopped recording is not re-recordable, and the artist
+// finds out afterwards.
 
 function toHttpUrl(wsUrl) {
   return wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
@@ -16,17 +32,30 @@ function describeEgress(info) {
 
 export async function POST(request) {
   try {
+    // ORDER MATTERS: identity, then ownership, then configuration, then
+    // act. Nothing touches LiveKit until the first two have passed — a
+    // caller who fails the check must not learn from a timing difference
+    // whether a room has an active recording — and the env-var guard
+    // comes after them so a stranger is never told the server's own
+    // configuration state. Answer WHO ARE YOU before WHAT IS WRONG WITH ME.
+    const { room } = await request.json();
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
+
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
+
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     const livekitUrl = process.env.LIVEKIT_URL;
 
     if (!apiKey || !apiSecret || !livekitUrl) {
       return NextResponse.json({ error: 'Server missing LiveKit environment variables' }, { status: 500 });
-    }
-
-    const { room } = await request.json();
-    if (!room) {
-      return NextResponse.json({ error: 'room is required' }, { status: 400 });
     }
 
     const egressClient = new EgressClient(toHttpUrl(livekitUrl), apiKey, apiSecret);

@@ -54,7 +54,11 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
 
   const items = [
     ...BASE_ITEMS.slice(0, 2),
-    { key: 'profile', label: 'PROFILE', href: accountType === 'artist' ? '/dashboard' : '/profile', Icon: UserCircle },
+    // One profile destination for everyone. /profile resolves to the
+    // artist's own console or the viewer's profile depending on who is
+    // asking, so the nav no longer needs to know -- and no longer reads
+    // the legacy localStorage accountType flag to decide.
+    { key: 'profile', label: 'PROFILE', href: '/profile', Icon: UserCircle },
     ...BASE_ITEMS.slice(2),
   ];
 
@@ -88,7 +92,7 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
           </button>
         )}
         <div className="sidebar-header">
-          <div className="sidebar-title">Neon Meridian</div>
+          <div className="sidebar-title">Loudentify</div>
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
         </div>
         <div className="sidebar-nav">

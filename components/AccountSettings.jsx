@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
+import AccountDataControls from './AccountDataControls';
+import AvatarRing from './AvatarRing';
 import GenreSelect from './GenreSelect';
 
 const INK = '#011627';
@@ -42,6 +44,61 @@ export default function AccountSettings() {
   const [saveError, setSaveError] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const fileInputRef = useRef(null);
+  // Viewer -> artist upgrade. Goes through a server route rather than a
+  // direct profile update so there is one place to add the checks this
+  // will eventually need (terms, age, verification).
+  const [upgrading, setUpgrading] = useState(false);
+  const [stageName, setStageName] = useState('');
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeError, setUpgradeError] = useState('');
+
+  // Downgrade. Two-step by construction: the consequences are listed and
+  // a second, explicit confirm is required. A one-click role flip that
+  // silently hides an artist's public work would be indefensible.
+  const [downgrading, setDowngrading] = useState(false);
+  const [downgradeBusy, setDowngradeBusy] = useState(false);
+  const [downgradeError, setDowngradeError] = useState('');
+
+  async function becomeViewer() {
+    setDowngradeError('');
+    setDowngradeBusy(true);
+    try {
+      const res = await fetch('/api/profile/become-viewer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) { setDowngradeError(body.error || 'Could not switch your account.'); return; }
+      window.location.href = '/profile';
+    } catch {
+      setDowngradeError('Could not switch your account.');
+    } finally {
+      setDowngradeBusy(false);
+    }
+  }
+
+  async function becomeArtist() {
+    setUpgradeError('');
+    if (!stageName.trim()) { setUpgradeError('Pick a stage name.'); return; }
+    setUpgradeBusy(true);
+    try {
+      const res = await fetch('/api/profile/become-artist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ stage_name: stageName.trim(), genres, bio }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setUpgradeError(body.error || 'Could not upgrade this account.'); return; }
+      // Straight to the console they just unlocked -- landing back on a
+      // settings page after an upgrade hides the thing that changed.
+      window.location.href = `/artist/${session.user.id}`;
+    } catch {
+      setUpgradeError('Could not upgrade this account.');
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
 
   useEffect(() => {
     let cancelled = false;
@@ -137,12 +194,12 @@ export default function AccountSettings() {
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>PROFILE INFO</span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12 }}>
-            <div style={{ width: 64, height: 64, borderRadius: '50%', overflow: 'hidden', background: 'rgba(1,22,39,0.08)', flexShrink: 0 }}>
-              {photoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              )}
-            </div>
+            {/* AvatarRing, not a bespoke <img>. Settings having its own
+                avatar rendering is what let the rest of the app disagree
+                with it -- one component now, so "what my photo looks
+                like here" and "what it looks like everywhere else"
+                cannot drift apart again. */}
+            <AvatarRing src={photoUrl} name={displayName || profile?.username || 'You'} size={64} alt="Your photo" />
             <div>
               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoChange} />
               <button
@@ -197,11 +254,118 @@ export default function AccountSettings() {
             <div style={{ fontSize: 13, color: INK }}>
               Signed in as an <strong>{isArtist ? 'artist' : 'viewer'}</strong> account
             </div>
-            <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
-              Account type is set at signup and can&apos;t be changed here.
-            </div>
+            {isArtist ? (
+              <>
+                <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 3 }}>
+                  You have the full artist console on your profile.
+                </div>
+
+                {!downgrading ? (
+                  <button
+                    type="button"
+                    onClick={() => setDowngrading(true)}
+                    style={{ marginTop: 12, padding: '10px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                  >
+                    SWITCH TO A VIEWER ACCOUNT
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 12, border: '1px solid rgba(231,29,54,0.4)', clipPath: 'polygon(10px 0,100% 0,100% 100%,0 100%,0 10px)', padding: 14 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: INK }}>Switch to a viewer account?</div>
+                    <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12, color: 'rgba(1,22,39,0.65)', lineHeight: 1.7 }}>
+                      <li>Your public recordings become <strong>private</strong>. Nothing is deleted.</li>
+                      <li>Any <strong>upcoming shows are cancelled</strong>, and anyone holding a slot is told.</li>
+                      <li>Your <strong>wallet balance and history are untouched</strong>.</li>
+                      <li>Your stage name, B-roll and cue sheets are <strong>kept</strong>.</li>
+                      <li>The artist console disappears from your profile.</li>
+                    </ul>
+                    <div style={{ fontSize: 11.5, color: 'rgba(1,22,39,0.55)', marginTop: 10, lineHeight: 1.55 }}>
+                      You can switch back any time with Become an artist, and everything returns as you left it.
+                    </div>
+
+                    {downgradeError && <div style={{ fontSize: 12, color: '#e71d36', marginTop: 10 }}>{downgradeError}</div>}
+
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={becomeViewer}
+                        disabled={downgradeBusy}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: '#fdfffc', background: '#e71d36', border: 'none', cursor: downgradeBusy ? 'default' : 'pointer', opacity: downgradeBusy ? 0.6 : 1 }}
+                      >
+                        {downgradeBusy ? 'SWITCHING…' : 'YES, SWITCH TO VIEWER'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDowngrading(false); setDowngradeError(''); }}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                      >
+                        KEEP MY ARTIST ACCOUNT
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.55)', marginTop: 8, lineHeight: 1.55 }}>
+                  Becoming an artist keeps everything you already have — same account, same wallet,
+                  same history — and adds scheduling, Kit Check, recordings and B-roll to your profile.
+                  It can&apos;t be undone for now.
+                </div>
+
+                {!upgrading ? (
+                  <button
+                    type="button"
+                    onClick={() => { setUpgrading(true); setStageName(displayName || ''); }}
+                    style={{ marginTop: 12, padding: '10px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: TEAL, background: 'transparent', border: `1px solid ${TEAL}`, cursor: 'pointer' }}
+                  >
+                    BECOME AN ARTIST
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.5)', fontWeight: 700, marginBottom: 4 }}>STAGE NAME</div>
+                      <input
+                        value={stageName}
+                        onChange={(e) => setStageName(e.target.value)}
+                        placeholder="How you appear on stage"
+                        style={{ width: '100%', boxSizing: 'border-box', border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '11px 12px', fontSize: 13, color: INK, outline: 'none', fontFamily: 'inherit' }}
+                      />
+                      <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
+                        Your handle @{profile?.username || '…'} stays the same — artists and fans share one namespace.
+                      </div>
+                    </div>
+
+                    {upgradeError && <div style={{ fontSize: 12, color: '#e71d36' }}>{upgradeError}</div>}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={becomeArtist}
+                        disabled={upgradeBusy}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: '#fdfffc', background: INK, border: 'none', cursor: upgradeBusy ? 'default' : 'pointer', opacity: upgradeBusy ? 0.6 : 1 }}
+                      >
+                        {upgradeBusy ? 'UPGRADING…' : 'CONFIRM'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setUpgrading(false); setUpgradeError(''); }}
+                        style={{ padding: '11px 15px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.6)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', cursor: 'pointer' }}
+                      >
+                        CANCEL
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
+
+        {/* Data export, session revocation and account closure. Their own
+            component because they are the highest-consequence controls in
+            the product and should be read together in one file rather
+            than found three screens apart in this form. */}
+        <AccountDataControls session={session} profile={profile} />
 
       </div>
     </div>

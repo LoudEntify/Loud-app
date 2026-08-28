@@ -44,6 +44,7 @@ import {
 } from '@livekit/components-react';
 import { Track, TrackEvent, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
+import ReleaseOnShowEnd from './ReleaseOnShowEnd';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
 
@@ -85,7 +86,12 @@ const ROLE_OPTIONS = [
 
 export default function CamPage() {
   const searchParams = useSearchParams();
-  const room = searchParams.get('room') || 'pilot-room';
+  // No default room (Go Live threading round). The QR panel always
+  // encodes the show's own room_name; a link arriving without one is a
+  // stale/hand-edited link, and quietly publishing this camera into a
+  // fixed fallback room is the worst possible answer to that -- same
+  // reasoning, and now the same treatment, as a missing slot below.
+  const room = searchParams.get('room');
   const slot = searchParams.get('slot');
   // Stage 1 (portrait capture + rotation) is verified on real hardware --
   // the verbose on-screen diagnostic panel that found the LiveKitRoom
@@ -110,6 +116,9 @@ export default function CamPage() {
   // purely for the DEBUG panel's "ACQUIRE" line, same as the manual
   // try/catch this replaces used to show on screen.
   const [liveKitRoomError, setLiveKitRoomError] = useState(null);
+  // Terminal once set: the show is over, the camera is released, and
+  // there is nothing this page can usefully do next.
+  const [showOver, setShowOver] = useState(false);
 
   // Device labels only populate after permission is granted, so a
   // throwaway getUserMedia call comes first -- the track from it is
@@ -149,19 +158,23 @@ export default function CamPage() {
     return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
   }, []);
 
-  async function handleGoLive() {
-    setConnectError('');
-    try {
-      const identity = `camfeed-${slot}-${role}-${Date.now()}-qr`;
-      const res = await fetch(
-        `/api/token?room=${encodeURIComponent(room)}&identity=${encodeURIComponent(identity)}&camfeed=${slot}`
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Token request failed');
-      setConn({ token: data.token, url: data.url });
-    } catch (e) {
-      setConnectError(e.message);
-    }
+  // ── RETIRED: this page can no longer publish ─────────────────
+  //
+  // Security round, 2026-08-28. This was the only caller of
+  // `/api/token?camfeed=`, which handed out CAMERA-publish rights into
+  // any room to anyone who asked — no code, no account, no check. That
+  // branch is closed (app/api/token/route.js), so asking again would
+  // now return a subscribe-only token and this page would sit there
+  // failing to publish for reasons nobody could see.
+  //
+  // Saying so is better than a mystery. Pairing is the replacement and
+  // it is strictly better: a six-character code, a per-device secret,
+  // and a phone that follows the artist from Kit Check into the show
+  // without being picked up again.
+  function handleGoLive() {
+    setConnectError(
+      'This camera link is retired. Open Kit Check on your main device, tap ADD A CAMERA, and scan the code it shows you.'
+    );
   }
 
   const pageStyle = {
@@ -179,10 +192,13 @@ export default function CamPage() {
     textAlign: 'center',
   };
 
-  if (!slot) {
+  if (!room || !slot) {
     return (
       <div style={pageStyle}>
-        <p>This link is missing a slot -- scan the QR code from the artist&apos;s broadcast screen again.</p>
+        <p>
+          This link is missing a {!room ? 'show' : 'slot'} -- scan the QR code from the artist&apos;s broadcast
+          screen again.
+        </p>
       </div>
     );
   }
@@ -254,6 +270,20 @@ export default function CamPage() {
     ? { deviceId, ...HIGH_RES_VIDEO_CAPTURE }
     : { facingMode: 'environment', ...HIGH_RES_VIDEO_CAPTURE };
 
+  if (showOver) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#011627', color: '#fdfffc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
+        <div style={{ maxWidth: 320 }}>
+          <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(253,255,252,0.5)' }}>LOUDENTIFY</div>
+          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
+          <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
+            This camera is off — the light on this device should be out. Nothing is being sent.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <LiveKitRoom
       token={conn.token}
@@ -265,6 +295,11 @@ export default function CamPage() {
       data-lk-theme="default"
       style={{ height: '100vh', width: '100%' }}
     >
+      {/* End of show releases this camera too. /cam runs none of the
+          live show's components, so before this nothing here was
+          listening for SHOW_ENDED and the light stayed on indefinitely
+          after End Show. */}
+      <ReleaseOnShowEnd label="camfeed" onEnded={() => setShowOver(true)} />
       <CamPublisher onDeviceIdChange={setDeviceId} role={role} liveKitRoomError={liveKitRoomError} debugMode={debugMode} />
     </LiveKitRoom>
   );

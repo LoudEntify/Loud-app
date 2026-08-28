@@ -1,15 +1,20 @@
 import { Suspense } from 'react';
-import LiveDemo from '../components/LiveDemo';
+import Auth from '../components/Auth';
 
+export const metadata = {
+  title: 'Loudentify',
+  description: 'Live music platform — log in or create an account',
+};
+
+// Auth-first landing. The live show moved to /live; this is now the
+// front door for both roles, and anyone already signed in is bounced
+// straight to their home surface by Auth itself rather than being shown
+// a login form they don't need.
 export default function HomePage() {
   return (
     <main>
-      {/* useSearchParams() (inside LiveShowRail, mounted deep under
-          LiveDemo on the viewer path) requires a Suspense boundary in
-          the app router, or the build fails -- same convention as
-          app/cam/page.js and app/egress/page.js. */}
       <Suspense fallback={null}>
-        <LiveDemo />
+        <Auth />
       </Suspense>
     </main>
   );

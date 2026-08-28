@@ -1,4 +1,6 @@
-import { AccessToken, TrackSource } from 'livekit-server-sdk';
+// TrackSource is gone with the camfeed publish branch below — this route
+// now mints exactly one kind of grant, and it is subscribe-only.
+import { AccessToken } from 'livekit-server-sdk';
 import { NextResponse } from 'next/server';
 
 // This route is the only place the LiveKit API secret is ever touched.
@@ -25,24 +27,53 @@ export async function GET(request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const room = searchParams.get('room') || 'pilot-room';
+    // NO DEFAULT ROOM. This used to fall back to 'pilot-room', which
+    // meant any caller that failed to resolve a show still got a valid
+    // token -- into somebody else's room. A missing room is now a 400:
+    // the caller has a bug, and a token is the wrong way to find out.
+    const room = searchParams.get('room');
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
     const identity = searchParams.get('identity') || `guest-${Date.now()}`;
-    const camfeed = searchParams.get('camfeed'); // 'a' | 'b' | null -- extra camera-only device
 
-    // Extra camera feeds: video-only, no data messages, no slot-exclusivity
-    // check (multiple camera devices per artist are expected and allowed).
-    if (camfeed === 'a' || camfeed === 'b') {
-      const at = new AccessToken(apiKey, apiSecret, { identity });
-      at.addGrant({
-        room,
-        roomJoin: true,
-        canPublish: true,
-        canPublishSources: [TrackSource.CAMERA],
-        canSubscribe: true,
-        canPublishData: false,
-      });
-      const token = await at.toJwt();
-      return NextResponse.json({ token, url: livekitUrl, slotTaken: false, assignedRole: `camfeed-${camfeed}` });
+    // ── CLOSED: `?camfeed=a|b` no longer grants publish ──────────
+    //
+    // Security round, 2026-08-28. This branch minted a CAMERA-publish
+    // token into ANY room, for ANY caller, with no authentication of
+    // any kind. That is a live stage invasion, and the full chain was
+    // short and needed no account:
+    //
+    //   1. Open any show's public link, /live?show={uuid}.
+    //   2. LiveDemo resolves the show with `select('*')` through the
+    //      anon client, so `room_name` is in the browser's own network
+    //      response — visible to every viewer.
+    //   3. GET /api/token?room={room_name}&camfeed=a
+    //      → { canPublish: true, canPublishSources: ['camera'] }
+    //   4. Publish a camera track into a running broadcast.
+    //
+    // Verified against the deployed preview before this change: HTTP
+    // 200 with exactly that grant, no Authorization header sent.
+    //
+    // WHAT REPLACED IT, and why removing this breaks nothing real:
+    // multi-camera pairing (Phase 0a). A phone redeems a six-character
+    // code at /cam/pair, and app/api/camfeed/session hands it camera
+    // tokens against a hashed device secret it must present on every
+    // poll. That is the same capability with an actual auth model, and
+    // it is what PairingPanel's QR code and link both point at.
+    //
+    // The ONLY caller of `?camfeed=` was components/CamPage.jsx — the
+    // legacy `/cam?room=…&slot=…` page, which nothing in the current UI
+    // links to (confirmed by grep across app/, components/, lib/: every
+    // pairing link is /cam/pair?code=…). That page now explains itself
+    // and points at pairing rather than failing to publish.
+    //
+    // Identical reasoning, and identical treatment, to the
+    // `?contestant=` bypass closed below — a directly-callable API
+    // surface with no button behind it is still API surface.
+    const requestedCamfeed = searchParams.get('camfeed');
+    if (requestedCamfeed === 'a' || requestedCamfeed === 'b') {
+      console.warn('[token] camfeed= requested but no longer grants publish (bypass closed)', { room, requestedCamfeed, identity });
     }
 
     // Accounts & Identity Day 1: `?contestant=a|b` no longer grants publish

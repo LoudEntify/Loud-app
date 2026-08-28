@@ -40,8 +40,9 @@ import {
   buildShotCommand,
   broadcastShotCommand,
   createStaccatoSequencer,
-  resolveTargetIdentity,
+  resolveTarget,
 } from '../lib/shotCommands';
+import { BROLL_ROLE } from '../lib/trackSources';
 
 // Loudentify palette — Ink Black base, Porcelain text,
 // Teal = live/selected, Orange = running mode, Red = stop states.
@@ -53,8 +54,12 @@ const C = {
   orange: '#ff9f1c',
 };
 
+// bRollClip sits in Static beside bRoll, which is where a director will
+// look for it: they are the same editorial family (the cutaway), one
+// pointed at a side camera and one pointed at a file. See lib/shotTypes.js
+// for why they are two shots rather than one shot that prefers a clip.
 const GROUPS = [
-  { title: 'Static', keys: ['wide', 'mediumCU', 'closeUp', 'bRoll'] },
+  { title: 'Static', keys: ['wide', 'mediumCU', 'closeUp', 'bRoll', 'bRollClip'] },
   { title: 'Moving', keys: ['zoomIn', 'zoomOut', 'pan'] },
   { title: 'Camera Op', keys: ['dolly', 'follow'] },
   { title: 'Mode', keys: ['staccato'] },
@@ -82,6 +87,18 @@ export default function DirectorShotPanel({
   onModeChange,
   cueModeAvailable = false,
   autoState = 'off', // 'running' | 'suspended' | 'off' -- display only, see prop doc above
+  // ── B-roll (owned by RoomInner, rendered here) ──
+  //   brollClips        — the artist's own library, [{id, title, ...}]
+  //   onCueBroll        — (clip) => void. Tapping the playing clip again
+  //                       is "take it off air", not a second cue.
+  //   activeBrollClipId — which clip is on air, or null
+  //   brollSupported    — false where captureStream doesn't exist
+  brollClips = [],
+  onCueBroll,
+  activeBrollClipId = null,
+  brollBusy = false,
+  brollError = '',
+  brollSupported = true,
 }) {
   const [activeShot, setActiveShot] = useState(null);
   const [staccatoOn, setStaccatoOn] = useState(false);
@@ -114,7 +131,7 @@ export default function DirectorShotPanel({
             showId,
             slot,
             availableRoles,
-            resolveTarget: (role) => resolveTargetIdentity(tracksRef.current, slot, role),
+            resolveTargetFor: (role) => resolveTarget(tracksRef.current, slot, role),
             showPhase: () => showPhaseRef.current,
           })
         : null,
@@ -165,7 +182,14 @@ export default function DirectorShotPanel({
       // Resolved from the live `tracks` prop at tap time, never from
       // stale state -- the same per-cut resolution pattern as the
       // sequencer above.
-      const targetIdentity = resolveTargetIdentity(tracks, slot, sourceRole);
+      // A strict-source shot (bRollClip) with nothing to resolve to
+      // returns null rather than falling back. Firing anyway would put
+      // whatever happened to be first on air under a command that says
+      // "clip" -- which is the exact confusion this round removes. The
+      // button is disabled in that state too; this is the second lock.
+      if (!sourceRole) return;
+
+      const { targetIdentity, targetSourceKey } = resolveTarget(tracks, slot, sourceRole);
 
       const command = buildShotCommand({
         showId,
@@ -174,6 +198,7 @@ export default function DirectorShotPanel({
         fromShotKey: lastShotRef.current, // negative signal for the flywheel
         sourceRole,
         targetIdentity,
+        targetSourceKey,
         params,
         decisionSource: 'human', // gold label
         showPhase,
@@ -351,6 +376,87 @@ export default function DirectorShotPanel({
           </div>
         </div>
       ))}
+
+      {/* ── B-ROLL ────────────────────────────────────────────────
+          The simplest honest version, deliberately: a list of the
+          artist's clips, one tap to put one on air, tap again to take it
+          off. No scrub bar, no queue, no thumbnails, no in/out points —
+          every one of those is a real feature and none of them is the
+          thing that was missing, which was being able to cut to a clip
+          at all.
+
+          Tapping a clip CUES AND CUTS in one action. Splitting "load"
+          from "take" would be the broadcast-desk metaphor, and it would
+          be wrong here: there is one operator, they are also performing,
+          and a two-step control during a song is a step they will get
+          wrong.
+
+          The B-ROLL CLIP button above enables itself when a clip is
+          actually publishing (its role appears in availableRoles), which
+          is the honest gate — you cannot cut to a clip that is not
+          playing. This list is gated on clips EXISTING, which is a
+          different question. */}
+      {(brollClips.length > 0 || !brollSupported) && (
+        <div>
+          <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6, letterSpacing: 1, textShadow: 'var(--text-halo)' }}>
+            B-ROLL
+          </div>
+
+          {!brollSupported ? (
+            <div style={{ fontSize: 11, lineHeight: 1.5, color: '#fdfffcaa', textShadow: 'var(--text-halo)' }}>
+              This browser can&apos;t play a clip into a live show. Chrome or Edge on a computer can.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {brollClips.map((clip) => {
+                  const isPlaying = activeBrollClipId === clip.id;
+                  return (
+                    <button
+                      key={clip.id}
+                      type="button"
+                      onClick={() => onCueBroll?.(clip)}
+                      disabled={brollBusy && !isPlaying}
+                      title={isPlaying ? 'Take this clip off air' : 'Put this clip on air'}
+                      style={{
+                        padding: '10px 14px',
+                        maxWidth: 190,
+                        borderRadius: 8,
+                        border: `1.5px solid ${isPlaying ? C.orange : '#fdfffc22'}`,
+                        background: isPlaying ? `${C.orange}22` : 'transparent',
+                        boxShadow: isPlaying ? `0 0 10px ${C.orange}66` : 'none',
+                        color: brollBusy && !isPlaying ? '#fdfffc44' : C.porcelain,
+                        textShadow: 'var(--text-halo)',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: brollBusy && !isPlaying ? 'not-allowed' : 'pointer',
+                        transition: 'all 120ms ease',
+                        touchAction: 'manipulation',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {isPlaying ? '■ ' : '▶ '}{clip.title || 'Untitled clip'}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.45, marginTop: 6, lineHeight: 1.5, textShadow: 'var(--text-halo)' }}>
+                {activeBrollClipId
+                  ? 'On air. Cuts back to your camera when it ends.'
+                  : 'Clip audio stays off — the show keeps your sound.'}
+              </div>
+            </>
+          )}
+
+          {brollError && (
+            <div style={{ fontSize: 11, color: C.red, marginTop: 6, textShadow: 'var(--text-halo)' }}>
+              {brollError}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

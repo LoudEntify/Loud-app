@@ -8,6 +8,7 @@ import TopBar from './TopBar';
 import CommentsDock from './CommentsDock';
 import SwipePages from './SwipePages';
 import DirectorShotPanel from './DirectorShotPanel';
+import { cameraTracksOnly } from '../lib/trackSources';
 import AudioDeckPanel from './AudioDeckPanel';
 import VideoDeckPanel from './VideoDeckPanel';
 import { useIsDesktopViewport } from '../lib/useIsDesktopViewport';
@@ -105,9 +106,23 @@ export default function BroadcastStage({
   onToggleFeedsCollapsed,
   controlsCollapsed,
   onToggleControlsCollapsed,
+  // B-roll -- passed straight through to DirectorShotPanel. This
+  // component stays a layout component and knows nothing about clips.
+  brollClips,
+  onCueBroll,
+  activeBrollClipId,
+  brollBusy,
+  brollError,
+  brollSupported,
 }) {
   const otherSlot = role === 'a' ? 'b' : 'a';
-  const candidates = tracksForSlot(role);
+  // CAMERAS ONLY for the feed strip. tracksForSlot deliberately includes
+  // a playing b-roll clip (renderSlot needs it as a layer to cut to),
+  // but VideoDeckPanel is a camera picker: it shows thumbnails to pick
+  // between angles, and it hands back a bare participant identity, which
+  // cannot distinguish the artist's camera from the artist's clip. So
+  // the clip is filtered out here rather than made ambiguous there.
+  const candidates = cameraTracksOnly(tracksForSlot(role));
 
   const stageRef = useRef(null);
   const draggingRef = useRef(false);
@@ -365,6 +380,12 @@ export default function BroadcastStage({
                         onModeChange={onModeChange}
                         cueModeAvailable={cueModeAvailable}
                         autoState={autoState}
+                        brollClips={brollClips}
+                        onCueBroll={onCueBroll}
+                        activeBrollClipId={activeBrollClipId}
+                        brollBusy={brollBusy}
+                        brollError={brollError}
+                        brollSupported={brollSupported}
                       />
                     ),
                   },
@@ -440,6 +461,12 @@ export default function BroadcastStage({
               onModeChange={onModeChange}
               cueModeAvailable={cueModeAvailable}
               autoState={autoState}
+              brollClips={brollClips}
+              onCueBroll={onCueBroll}
+              activeBrollClipId={activeBrollClipId}
+              brollBusy={brollBusy}
+              brollError={brollError}
+              brollSupported={brollSupported}
             />
             <AudioDeckPanel
               nodes={audioNodes}

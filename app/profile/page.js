@@ -1,15 +1,18 @@
-import FanProfile from '../../components/FanProfile';
+import { Suspense } from 'react';
+import MyProfileRedirect from '../../components/MyProfileRedirect';
 import PageShell from '../../components/PageShell';
 
 export const metadata = {
-  title: 'Profile · Loudentify pilot',
-  description: 'Your fan profile',
+  title: 'Your profile · Loudentify',
+  description: 'Your Loudentify profile',
 };
 
-export default function FanProfilePage() {
+export default function ProfilePage() {
   return (
     <PageShell active="profile">
-      <FanProfile />
+      <Suspense fallback={null}>
+        <MyProfileRedirect />
+      </Suspense>
     </PageShell>
   );
 }

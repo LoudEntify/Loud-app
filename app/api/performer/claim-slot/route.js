@@ -22,6 +22,18 @@ import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
 // supabaseAdmin.js) since show_slots has zero RLS policies -- only a
 // service-role client can ever read a code or write a session token.
 
+// ⚠️ DEPRECATED (post-wipe access ruling) ⚠️
+//
+// Performer codes are retired. Solo shows authorize on the scheduling
+// artist's ACCOUNT; versus slot B is bound by accepting a single-use
+// invite. Both now go through app/api/performer/join-show.
+//
+// This route is kept, unmodified, for one reason: rows created before
+// the ruling still carry a `code`, and deleting the only path that
+// understands them would strand any legacy show mid-flight. Nothing in
+// the current UI calls it. Remove it once no pre-ruling show can still
+// be joined.
+
 export async function POST(request) {
   try {
     const apiKey = process.env.LIVEKIT_API_KEY;

@@ -2311,3 +2311,144 @@ button {
   padding: 14px;
   box-sizing: border-box;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   TAP-TO-REACT (PRD row 54)
+   Added by overnight build #2, Phase 4b.
+
+   The layer is pointer-events:none in its entirety so a floating emoji
+   can never eat a click meant for the video underneath it. The bar sits
+   above it and re-enables pointer events on itself only.
+
+   Every reaction's path (drift, rise, scale) comes in as a custom
+   property set once at creation in ReactionLayer.jsx — randomising in
+   CSS is impossible and randomising per frame in JS would be a re-render
+   per frame per emoji. This way each one gets its own trajectory and
+   then nothing touches it again.
+   ───────────────────────────────────────────────────────────── */
+
+.reaction-layer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 200px;
+  height: 60%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.reaction-float {
+  position: absolute;
+  bottom: 0;
+  right: 64px;
+  font-size: 26px;
+  line-height: 1;
+  /* forwards, so the emoji holds its final (invisible) state rather than
+     snapping back to full opacity for the frame before React removes it. */
+  animation: reactionRise 2.6s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes reactionRise {
+  0%   { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  12%  { transform: translate(0, -12px) scale(var(--reaction-scale, 1)); opacity: 1; }
+  70%  { opacity: 1; }
+  100% {
+    transform: translate(var(--reaction-drift, 0px), calc(-1 * var(--reaction-rise, 200px)))
+               scale(var(--reaction-scale, 1));
+    opacity: 0;
+  }
+}
+
+/* Respect the setting. A wall of drifting emoji is exactly the kind of
+   motion that triggers vestibular symptoms, and a reaction that appears
+   and fades in place still communicates everything it needs to. */
+@media (prefers-reduced-motion: reduce) {
+  .reaction-float {
+    animation: reactionFadeOnly 2.6s ease-out forwards;
+  }
+  @keyframes reactionFadeOnly {
+    0%   { opacity: 0; transform: none; }
+    15%  { opacity: 1; transform: none; }
+    70%  { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: none; }
+  }
+}
+
+.reaction-bar {
+  position: absolute;
+  right: 10px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 7;
+  /* No background fill, in line with every other live-screen panel
+     (build 3c) — legibility comes from the halo, not from a box laid
+     over the performance. */
+}
+
+.reaction-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  line-height: 1;
+  background: rgba(1, 22, 39, 0.42);
+  border: 1px solid rgba(253, 255, 252, 0.16);
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+  filter: var(--icon-halo);
+  transition: transform 90ms ease-out, background 120ms ease-out;
+}
+
+.reaction-btn:hover {
+  background: rgba(1, 22, 39, 0.62);
+}
+
+/* The tap acknowledgement. Fires on :active rather than on a state
+   change, so it happens on the press itself with no React involved —
+   which is the whole difference between a button that feels instant and
+   one that feels like it is thinking. */
+.reaction-btn:active {
+  transform: scale(0.86);
+}
+
+.reaction-cost {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: rgba(253, 255, 252, 0.7);
+  text-shadow: var(--text-halo);
+  margin-left: 4px;
+}
+
+/* Phones: smaller targets would be wrong (44px is the floor for a thumb),
+   so the bar keeps its size and moves clear of the comments drawer
+   instead. */
+@media (max-width: 640px) {
+  .reaction-bar {
+    bottom: 68px;
+  }
+  .reaction-layer {
+    height: 50%;
+  }
+}
+
+/* Remaining-show-time chip in the live banner (Product Ruling 1).
+   Muted rather than alarming: this is information, not a warning --
+   the window carries 15 minutes' grace past zero, so running slightly
+   over is normal and the chip should not shout about it. */
+.lifecycle-banner .show-remaining {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(253, 255, 252, 0.7);
+  text-shadow: var(--text-halo);
+  border: 1px solid rgba(253, 255, 252, 0.22);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}

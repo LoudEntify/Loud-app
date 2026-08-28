@@ -1,6 +1,7 @@
 'use client';
 
 import Sidebar from './Sidebar';
+import OnboardingNudge from './OnboardingNudge';
 import './reactions.css';
 
 // Desktop-first shell: sidebar left, page content fills the rest of the
@@ -31,7 +32,14 @@ export default function PageShell({ active = 'live', hideSidebar = false, autoHi
           onToggleCollapse={onToggleSidebarCollapse}
         />
       )}
-      <main className="page-shell-main">{children}</main>
+      <main className="page-shell-main">
+        {/* Deliberately gated on !liveOverlay: a setup reminder laid over
+            someone's live performance is indefensible, and gating it here
+            (rather than inside the component) means no live surface can
+            accidentally opt back in. */}
+        {!liveOverlay && <OnboardingNudge />}
+        {children}
+      </main>
     </div>
   );
 }

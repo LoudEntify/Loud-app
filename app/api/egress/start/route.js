@@ -1,6 +1,15 @@
-import { EgressClient } from 'livekit-server-sdk';
+import { EgressClient, WebhookConfig } from 'livekit-server-sdk';
 import { EncodedFileOutput, EncodedFileType, EncodingOptions, EgressStatus, S3Upload } from '@livekit/protocol';
 import { NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
+import { verifyShowOwner } from '../../../../lib/verifyShowOwner';
+
+// AUTH MODEL: the verified artist who owns the show running in this room.
+// Security round finding 3 (docs/SECURITY_AUDIT_2026-08-28.md) — this
+// route previously started a billed LiveKit egress, writing into the S3
+// bucket, for anyone who knew a room name. See the note in
+// app/api/egress/stop/route.js for why a room name is not a secret.
 
 // Stage 4: directed portrait egress -- replaces Stage 3's stock grid
 // template with LiveKit's customBaseUrl mechanism, pointed at this app's
@@ -43,6 +52,29 @@ function describeEgress(info) {
 
 export async function POST(request) {
   try {
+    // ── IDENTITY BEFORE CONFIGURATION ─────────────────────────
+    // The env-var guard used to run first, which meant an anonymous
+    // caller got `500 "Server missing egress environment variables"` —
+    // the server's own configuration state, handed to a stranger, from
+    // a route that should have refused them at the door. It also made
+    // the auth gate untestable: scripts/api-auth-probe.mjs expects a
+    // 401 and was getting the 500 instead, so the check could not tell
+    // a closed route from an open one.
+    //
+    // Answer WHO ARE YOU before WHAT IS WRONG WITH ME.
+    const body = await request.json();
+    const { room, performanceMode } = body;
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
+
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
+
     const {
       LIVEKIT_API_KEY: apiKey,
       LIVEKIT_API_SECRET: apiSecret,
@@ -59,10 +91,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Server missing egress environment variables' }, { status: 500 });
     }
 
-    const { room, performanceMode } = await request.json();
-    if (!room) {
-      return NextResponse.json({ error: 'room is required' }, { status: 400 });
-    }
+
     // Defaults to 'solo' for anything other than exactly 'versus' --
     // EgressPage.jsx's own layout handling has the identical fallback
     // (components/EgressPage.jsx), so an unexpected/missing value here
@@ -116,10 +145,39 @@ export async function POST(request) {
     // @livekit/protocol's own EncodingOptions defaults), which is why
     // the old grid recording came out landscape/letterboxed even though
     // the feeds themselves were already portrait.
+    // Phase 4a — attach the completion webhook TO THIS REQUEST rather
+    // than configuring one in the LiveKit dashboard.
+    //
+    // Two reasons, and the second is the one that matters. First, a
+    // per-request webhook needs no manual setup step, so a fresh
+    // deployment records and verifies with nothing to remember. Second,
+    // and more importantly, a project-wide dashboard webhook points at
+    // ONE url — which means a preview deployment's recordings would be
+    // reported to production, or the other way round. Carrying the url on
+    // the request keeps each deployment's results with that deployment.
+    //
+    // EGRESS_WEBHOOK_URL overrides, for the case where the template base
+    // (which must be a stable public origin, since a headless browser
+    // navigates to it) is not where the webhook should land.
+    //
+    // STATED PLAINLY: LiveKit's servers must be able to reach this url.
+    // On a deployment-protected preview they cannot — the POST is
+    // intercepted before it arrives. That is not a silent failure: it
+    // simply means no automatic verification on a protected preview, and
+    // app/api/egress/verify runs the identical checks from the artist's
+    // own session instead.
+    const webhookUrl =
+      process.env.EGRESS_WEBHOOK_URL ||
+      `${templateBaseUrl.replace(/\/+$/, '')}/api/egress/webhook`;
+
     const info = await egressClient.startRoomCompositeEgress(room, { file: output }, {
       layout,
       customBaseUrl: `${templateBaseUrl.replace(/\/+$/, '')}/egress`,
       encodingOptions: new EncodingOptions({ width: 1080, height: 1920 }),
+      // signingKey names WHICH of the project's API keys LiveKit signs
+      // the callback with. app/api/egress/webhook verifies with the same
+      // pair, so they have to agree.
+      webhooks: [new WebhookConfig({ url: webhookUrl, signingKey: apiKey })],
     });
     // info.status/error here only reflect the SYNCHRONOUS start call --
     // the actual S3 upload happens after this returns, so a bad

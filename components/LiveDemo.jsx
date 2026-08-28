@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -16,24 +18,57 @@ import '@livekit/components-styles';
 import PageShell from './PageShell';
 import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
-import CameraQRPanel from './CameraQRPanel';
+import PairingPanel from './PairingPanel';
+import ReactionLayer from './ReactionLayer';
+import ConnectionRecovery from './ConnectionRecovery';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
+import { useWakeLock } from '../lib/useWakeLock';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
-import { buildShotCommand, broadcastShotCommand, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
+import { buildShotCommand, broadcastShotCommand, resolveTarget, resolveTargetIdentity, onPublishOutcome, publishHealthProbe } from '../lib/shotCommands';
+import {
+  BROLL_ROLE,
+  STAGE_TRACK_SOURCES,
+  belongsToSlot,
+  cameraRolesOnly,
+  cameraTracksOnly,
+  isPerformerCameraTrack,
+  matchesTarget,
+  roleOfTrack,
+  sourceKey,
+} from '../lib/trackSources';
+import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
-import { effectiveState, canGoLive } from '../lib/showState';
+import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
-import { signUp, signIn } from '../lib/supabaseAuth';
+import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
+import { getSupabase } from '../lib/supabaseClient';
+import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
+import { REACTIONS_COST_TOKENS, chargeReaction, logReaction } from '../lib/reactions';
+import { SPEND_ACTIONS } from '../lib/tokens';
+import { forgetPerformerSession, recallPerformerSession, rememberPerformerSession } from '../lib/sessionResume';
 import './reactions.css';
 
-const ROOM_NAME = 'pilot-room';
+// THE ROOM IS THE SHOW'S ROOM. There is no default.
+//
+// This file used to open with `const ROOM_NAME = 'pilot-room'` and use it
+// in eleven places (docs/WRITE_PATH_AUDIT.md's finding): the show lookup,
+// the token request, the state write, both egress triggers, the
+// director's showId, the QR panel. Every scheduled show therefore
+// resolved to whatever row happened to own that one string -- which is
+// why GO LIVE on a real scheduled show reached "Couldn't reach the show
+// yet" the first time it was pressed post-wipe.
+//
+// Now: `?show={uuid}` is resolved to a row, and that row's `room_name` is
+// threaded through all of those call sites. Nothing falls back to a
+// literal. A missing or unknown id lands on a readable screen, never on
+// someone else's room.
 
 // Fix (b2) -- ceiling on automatic publish recoveries per session.
 // recoveryAttempted now resets whenever an episode resolves (so one bad
@@ -104,6 +139,22 @@ const CAMERA_LOST_OVERLAY = (
 // can undo. A phone already delivering ~9:16 content is unaffected.
 const HIGH_RES_VIDEO_CAPTURE = { resolution: { height: 1920, aspectRatio: 9 / 16 }, frameRate: { ideal: 30 } };
 
+// How long a finished b-roll clip stays PUBLISHED after the shot has cut
+// away from it.
+//
+// Not a cosmetic delay. The return cut travels over the data channel and
+// each client applies it on arrival; unpublishing the instant we fire
+// would mean any client that had not yet applied it was looking at a
+// shot whose target had just disappeared — which renders as a frozen
+// frame under the CAMERA LOST pill, for a clip that ended exactly as
+// intended. Holding the clip's final frame for this long costs nothing
+// and makes that window impossible.
+//
+// 500ms comfortably covers a reliable data message plus the 250ms
+// camera-change crossfade, without leaving a dead track around long
+// enough to matter.
+const BROLL_OFFAIR_GRACE_MS = 500;
+
 // DEBUG -- surfaces what useSourceDimensions actually detected, for
 // verifying the portrait capture work on real hardware. Safe to delete
 // once capture is verified; not meant for artist-facing use. Shows
@@ -168,11 +219,17 @@ function formatCountdown(ms) {
 // every viewer, not just a cosmetic one on the artist's own screen.
 // Retries once before giving up; caller shows a persistent warning on
 // final failure rather than pretending it worked.
-async function updateShowStateWithRetry(nextState) {
+//
+// Keyed on the show's PRIMARY KEY now, not on room_name. Same row either
+// way (room_name is unique per show), but the id is what every other
+// write in this path already uses, and a lookup that can only ever match
+// one row is the right shape for a write that decides whether every
+// viewer sees a show at all.
+async function updateShowStateWithRetry(nextState, showId) {
   const write = async () => {
-    const { getSupabase } = await import('../lib/supabaseClient');
+    if (!showId) throw new Error('no show id');
     const supabase = getSupabase();
-    const { error } = await supabase.from('shows').update({ state: nextState }).eq('room_name', ROOM_NAME);
+    const { error } = await supabase.from('shows').update({ state: nextState }).eq('id', showId);
     if (error) throw error;
   };
   try {
@@ -196,30 +253,75 @@ async function updateShowStateWithRetry(nextState) {
 // flywheel logging in lib/shotCommands.js (a broken recorder must never
 // take the show down). performanceMode (Stage 4) is only meaningful for
 // 'start' -- the route ignores it for 'stop', harmless to always pass.
-function triggerEgress(action, room, performanceMode) {
-  fetch(`/api/egress/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ room, performanceMode }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data?.error) {
-        console.warn(`[egress] ${action} failed:`, data.error, data.detail);
-        return;
+// ── THE TOKEN IS FETCHED HERE, NOT PASSED IN ──────────────────
+// Both egress routes now require the show's artist (security round
+// findings 2 and 3), so these calls carry a bearer. It is read from the
+// live session at the moment of the call rather than taken from the
+// `artistAccessToken` prop, and that is the single most important line
+// in this function.
+//
+// A Supabase access token lives about an hour. A show can be scheduled
+// for three (DURATION_OPTIONS_MINUTES goes to 180, capped there). A
+// token captured when the room mounted is therefore quite likely to be
+// EXPIRED by the time End Show is pressed — and the failure would be
+// the worst-shaped one available: the recording starts fine, the show
+// runs, and the stop silently 401s. Nobody finds out until a recorder
+// has run to its own timeout, uploading, long after the audience left.
+//
+// supabase-js refreshes the session in the background, so asking for it
+// now always gets a current one. It also removes the whole class of bug
+// where a stale token is captured in a useCallback dependency array.
+async function triggerEgress(action, room, performanceMode) {
+  const failed = (stage, detail) => {
+    console.warn(`[egress] ${action} ${stage}:`, detail);
+    // On the record, not just in a console nobody had open. A recording
+    // that never started and a recording that never stopped are both
+    // invisible at the time and both matter afterwards.
+    logHealthEvent('egress_command_failed', { action, room, stage, detail: String(detail) });
+  };
+
+  let accessToken = null;
+  try {
+    accessToken = (await getSession())?.access_token || null;
+  } catch (e) {
+    failed('could not read the session', e?.message || e);
+  }
+  if (!accessToken) {
+    // Deliberately still attempted. The route will refuse it and say so,
+    // which puts a real 401 in the network log — strictly more
+    // diagnosable than a request that was never sent.
+    failed('no session token available', 'signed out, or the session could not be read');
+  }
+
+  try {
+    const res = await fetch(`/api/egress/${action}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ room, performanceMode }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || data?.error) {
+      failed(`refused (${res.status})`, data?.error || data?.detail || res.statusText);
+      return;
+    }
+    // status/error here is per-egress EgressInfo (see the route) --
+    // logged even on an HTTP-200 response so an upload-side failure
+    // (bad bucket/credential) isn't invisible just because the request
+    // itself succeeded.
+    const egresses = data?.egresses || (data?.egressId ? [data] : []);
+    egresses.forEach((e) => {
+      if (e.status === 'EGRESS_FAILED' || e.status === 'EGRESS_ABORTED' || e.error) {
+        failed('reported failure', `${e.status} ${e.error || ''}`.trim());
       }
-      // status/error here is per-egress EgressInfo (see the route) --
-      // logged even on an HTTP-200 response so an upload-side failure
-      // (bad bucket/credential) isn't invisible just because the request
-      // itself succeeded.
-      const egresses = data?.egresses || (data?.egressId ? [data] : []);
-      egresses.forEach((e) => {
-        if (e.status === 'EGRESS_FAILED' || e.status === 'EGRESS_ABORTED' || e.error) {
-          console.warn(`[egress] ${action} reported failure:`, e.status, e.error);
-        }
-      });
-    })
-    .catch((e) => console.warn(`[egress] ${action} request failed:`, e));
+    });
+    logHealthEvent('egress_command_ok', { action, room, count: egresses.length });
+  } catch (e) {
+    failed('request failed', e?.message || e);
+  }
 }
 
 // PAN_VECTORS/ShotTransformFrame/ShotFadeLayer/ShotVideo moved to
@@ -371,31 +473,54 @@ function probeWithTimeout(room) {
 // through VideoTrack/TrackReference: this track is deliberately no
 // longer published, so it has no publication for a TrackReference to
 // point at.
-function EndedSelfView({ track }) {
-  const videoRef = useRef(null);
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!track || !el) return undefined;
-    track.attach(el);
-    return () => {
-      try {
-        track.detach(el);
-      } catch {
-        // detach on an already-torn-down element is not worth throwing over
-      }
-    };
-  }, [track]);
+// The artist's own last frame, after the show.
+//
+// A STILL, not a live track. It used to attach the real camera track,
+// which is what kept the camera acquired -- and the light on -- after
+// End Show. Rendering the final frame instead keeps what that was for
+// (the artist is not dropped to a black screen the instant they end)
+// while the device is genuinely released.
+function EndedSelfView({ still }) {
+  if (!still) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 8, background: '#011627', overflow: 'hidden' }}>
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={still} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
     </div>
   );
+}
+
+/**
+ * Grab one frame from a live video track as a data URL.
+ *
+ * Must run BEFORE the track is stopped -- a stopped track paints
+ * nothing, which is the same reason ShotVideo snapshots continuously
+ * rather than at the moment a camera dies. Returns null on any failure;
+ * a missing still is a black panel, never a thrown error in an
+ * end-of-show path.
+ */
+async function captureStillFrom(track) {
+  let el = null;
+  try {
+    el = track.attach();
+    el.muted = true;
+    el.playsInline = true;
+    await el.play?.().catch(() => {});
+    if (!el.videoWidth) {
+      // One short wait for the first frame; past that, no still.
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    if (!el.videoWidth || !el.videoHeight) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = el.videoWidth;
+    canvas.height = el.videoHeight;
+    canvas.getContext('2d')?.drawImage(el, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  } catch {
+    return null;
+  } finally {
+    try { if (el) track.detach(el); } catch { /* nothing worth throwing over */ }
+  }
 }
 
 function classifyDirectorStartReason(showId, role) {
@@ -416,51 +541,57 @@ function classifyDirectorStartReason(showId, role) {
 // this scales the same way the rest of the room does.
 
 export default function LiveDemo() {
-  const [step, setStep] = useState('gate');
-  // Entry gate (MULTI_PERFORMER_SPEC.md section 3) -- the one screen
-  // every joiner (performer or viewer) hits before the existing
-  // mode/role flow below. participantId is kept so a later slot-code
-  // claim (Stage 3) can UPDATE this same row instead of inserting a
-  // second one.
-  const [email, setEmail] = useState('');
-  const [marketingConsent, setMarketingConsent] = useState(false);
-  const [gateError, setGateError] = useState('');
-  const [gateSubmitting, setGateSubmitting] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const showIdParam = searchParams?.get('show') || '';
+
+  // ── Entry ────────────────────────────────────────────────────
+  // THE GATE IS GONE. It used to be three screens deep: watch-or-perform,
+  // then an "Artist sign in" form, then a mode/role picker. Every one of
+  // them ran AFTER RequireAuth had already proven there was a session --
+  // so an artist who walked out of Kit Check on a 60-second countdown
+  // landed on a login form and had to type their password again at the
+  // single worst moment in the product. That screen is deleted, not
+  // hidden: the session RequireAuth verified is read here directly, the
+  // show says whether it's solo or versus, and the server says which
+  // slot this account is entitled to. Nothing left to ask.
+  //
+  // 'resolving' -> looking up the show and the session
+  // 'waiting'   -> resolved, but the broadcast window isn't open yet
+  //                (deliberately does NOT connect -- lib/scheduling.js's
+  //                rule, the same one Kit Check exists to honour)
+  // 'entering'  -> joining
+  // 'joined'    -> connected, RoomInner owns the screen
+  // 'blocked'   -> resolved to nothing usable; readable message, no room
+  const [step, setStep] = useState('resolving');
+  const [blockedReason, setBlockedReason] = useState('');
+  const [session, setSession] = useState(undefined); // undefined = unknown yet
+  const [identityReady, setIdentityReady] = useState(false); // session AND profile settled
   const [participantId, setParticipantId] = useState(null);
   const [performanceMode, setPerformanceMode] = useState(null);
   const [name, setName] = useState('');
-  // 'performer' is a selection-screen-only sentinel (MULTI_PERFORMER_
-  // SPEC.md Stage 3) -- the code determines the real slot, so nothing
-  // ever sets role to 'a'/'b' directly anymore. handleClaimAndGoLive
-  // overwrites role with whatever slot the server's code check
-  // resolves, once a claim actually succeeds.
-  const [role, setRole] = useState('viewer'); // 'viewer' | 'performer' | 'a' | 'b' (post-claim only) | 'camfeed-a' | 'camfeed-b'
-  const [performerCode, setPerformerCode] = useState('');
-  // Accounts & Identity Day 1 -- artist login/signup branch at the gate.
-  // gateAudience is the new top-level choice: 'viewer' keeps the
-  // existing anonymous form (below) byte-for-byte; 'artist' is the new
-  // real-auth path. artistSession holds the Supabase session once an
-  // artist authenticates -- its presence is what gates
-  // handleClaimAndGoLive's Authorization header, and what step==='role'
-  // branches on to skip the free role dropdown entirely (an
-  // authenticated artist only ever goes to the performer flow, so
-  // `role` is set to 'performer' programmatically once auth succeeds,
-  // same sentinel isContestantRole already checks for below).
-  const [gateAudience, setGateAudience] = useState(null); // null | 'viewer' | 'artist'
-  const [artistAuthTab, setArtistAuthTab] = useState('login'); // 'login' | 'signup'
-  const [artistEmailInput, setArtistEmailInput] = useState('');
-  const [artistPassword, setArtistPassword] = useState('');
-  const [artistDisplayName, setArtistDisplayName] = useState('');
-  const [artistAuthError, setArtistAuthError] = useState('');
-  const [artistAuthSubmitting, setArtistAuthSubmitting] = useState(false);
-  const [artistSession, setArtistSession] = useState(null);
+  // 'viewer' until the server hands back a real slot letter. Nothing
+  // sets 'a'/'b' locally -- entitlement is join-show's answer, not this
+  // component's guess.
+  const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' (post-join only)
   // Held for Stage 4's active-performer switch control -- only ever
   // non-null on the device that most recently claimed slot 'a'.
   const [sessionToken, setSessionToken] = useState(null);
-  const [camRole, setCamRole] = useState('wide'); // camera position for camfeed devices: 'wide' | 'close' | 'side'
   const [conn, setConn] = useState(null);
-  const [error, setError] = useState('');
+  // The one ephemeral stage banner (.stage-notice). Used for the rejoin
+  // case: a performer whose device dropped mid-show and came back needs
+  // to know they landed on the same slot rather than as a spectator.
+  // Ephemeral is enforced here, not in CSS -- the class has no
+  // auto-dismiss, and a banner parked over the stage for the rest of the
+  // show would be clutter charged for one moment of reassurance.
   const [notice, setNotice] = useState('');
+  const noticeTimerRef = useRef(null);
+  const showNotice = useCallback((text) => {
+    setNotice(text);
+    clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNotice(''), 6000);
+  }, []);
+  useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
   // Phase 4 (redesign) -- true browser Fullscreen API, not the CSS-only
   // "fill the stage box" toggle this used to be (that CSS effect no
   // longer exists at all since Phase 2 made full-bleed the permanent
@@ -483,6 +614,32 @@ export default function LiveDemo() {
   // Gates the `video` prop below so nothing can republish the camera.
   const [broadcastEnded, setBroadcastEnded] = useState(false);
   const handleBroadcastEnded = useCallback(() => setBroadcastEnded(true), []);
+
+  // ── LEAVE ────────────────────────────────────────────────────
+  // Owned HERE, not in RoomInner, and that placement is the fix for the
+  // white-screen crash rather than a stylistic preference: this
+  // component renders <LiveKitRoom>, so flipping this unmounts the room
+  // outright. RoomInner used to hold the same flag and render a message
+  // from inside a room it had just disconnected from — see the long note
+  // where that state used to live.
+  const [leftShow, setLeftShow] = useState(false);
+  const handleLeave = useCallback(() => {
+    // Leaving is a decision, so the resume marker goes with it. Without
+    // this, a performer who deliberately walked off stage and then
+    // reopened the tab would be greeted with "you're back on" — which is
+    // the app arguing with something they meant to do.
+    forgetPerformerSession();
+    setLeftShow(true);
+  }, []);
+
+  // The account's own role, kept because Leave has to route somewhere
+  // and "somewhere" is different for the two kinds of person who can be
+  // in a show. An artist walking off stage wants their console — the
+  // recordings, the next show, the numbers. A viewer wants the next
+  // thing to watch. Sending either to the other's destination is a small
+  // insult, and sending both to a dead-end "you left the show" card
+  // (which is what this used to do, when it worked at all) is worse.
+  const [profileRole, setProfileRole] = useState(null);
   const canUseFullscreenApi =
     typeof document !== 'undefined' &&
     !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
@@ -566,24 +723,120 @@ export default function LiveDemo() {
   // from the same artist at once.
   const [showWriteError, setShowWriteError] = useState(null);
 
+  // THE ONE RESOLUTION. Everything downstream -- token, state write,
+  // egress, director showId, QR panel -- reads `show.room_name` from
+  // here and from nowhere else.
+  //
+  // A ref, not `show` itself, decides whether a failed lookup is fatal:
+  // this callback is memoized on the id (so the 15s poll doesn't restart
+  // every time it lands), which means any state it closed over is stale
+  // by the second call. Once a show HAS resolved, a later blip is a
+  // network hiccup and must never blank a running room.
+  const showResolvedRef = useRef(false);
   const fetchShow = useCallback(async () => {
+    if (!showIdParam) return;
     try {
-      const { getSupabase } = await import('../lib/supabaseClient');
       const supabase = getSupabase();
       const { data, error } = await supabase
         .from('shows')
         .select('*')
-        .eq('room_name', ROOM_NAME)
+        .eq('id', showIdParam)
         .maybeSingle();
-      if (!error) setShow(data);
+      // A malformed id (not a uuid) comes back as a Postgres 22P02, not
+      // as an empty result -- both mean "this link doesn't name a show",
+      // and both have to land on the same readable screen rather than on
+      // a silent null that later reads as "no show scheduled yet".
+      if (error || !data) {
+        if (error) console.warn('[show-lifecycle] show lookup failed', error);
+        if (showResolvedRef.current) return; // transient; keep the room we have
+        setBlockedReason(
+          error
+            ? 'That link doesn’t point at a show we can find.'
+            : 'That link doesn’t point at a show we can find. It may have been cancelled.'
+        );
+        setStep((s) => (s === 'joined' ? s : 'blocked'));
+        return;
+      }
+      showResolvedRef.current = true;
+      setShow(data);
     } catch (e) {
       console.warn('[show-lifecycle] show fetch failed', e);
     }
-  }, []);
+  }, [showIdParam]);
 
   useEffect(() => {
     fetchShow();
   }, [fetchShow]);
+
+  // ── Session (Finding 1) ──────────────────────────────────────
+  // RequireAuth has already established there IS a session before this
+  // component mounts; this reads the same one rather than asking for it
+  // again. onAuthStateChange keeps it truthful if the token refreshes
+  // mid-show (a long show outlives an access token's lifetime, and the
+  // Bearer used by End Show / active-performer has to still be valid).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await getSession();
+      if (cancelled) return;
+      setSession(s ?? null);
+      if (!s?.user) {
+        setIdentityReady(true);
+        return;
+      }
+      try {
+        const { profile } = await getProfile(s.user.id);
+        // Never the email address. selfName is what comments are
+        // published under, to everyone in the room -- an email in that
+        // position would be a live privacy leak, not a fallback.
+        if (!cancelled) {
+          setName(profile?.display_name || profile?.username || 'guest');
+          setProfileRole(profile?.role || null);
+        }
+      } finally {
+        // Settled either way: the stage must not be held up by a profile
+        // read, but it also shouldn't start under a name that's about to
+        // change a beat later.
+        if (!cancelled) setIdentityReady(true);
+      }
+    })();
+    const unsub = onAuthStateChange((_event, s) => {
+      if (!cancelled) setSession(s ?? null);
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
+
+  // ── No ?show= at all ─────────────────────────────────────────
+  // One graceful recovery, then a plain message. If this account has a
+  // show whose window hasn't closed, that is unambiguously the show they
+  // meant, so resolve it AND rewrite the URL -- the address bar then
+  // holds a link that is correct to share, which the bare /live never
+  // was. Anything else gets told what's missing instead of being dropped
+  // into someone else's room.
+  useEffect(() => {
+    if (showIdParam || session === undefined) return;
+    if (!session?.user) {
+      setStep('blocked');
+      setBlockedReason('This link is missing a show.');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase().from('shows').select('*').eq('artist_id', session.user.id);
+      if (cancelled) return;
+      const mine = nextUpcomingShow(data || []);
+      if (mine) {
+        router.replace(`/live?show=${mine.id}`);
+        return;
+      }
+      setStep('blocked');
+      setBlockedReason('This link is missing a show.');
+    })();
+    return () => { cancelled = true; };
+  }, [showIdParam, session, router]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -627,451 +880,373 @@ export default function LiveDemo() {
     }
   }, [now, show, fetchShow]);
 
+  // Where Leave goes. Computed here rather than at the click so the
+  // destination is already resolved by the time anyone presses the
+  // button — a leave that pauses to look up your own role would be a
+  // pause at exactly the moment someone has decided to go.
+  //
+  // Falls back to Discover when the role is unknown (profile read failed,
+  // or hasn't landed). Discover is the safe default: it works for every
+  // account, signed in or not, and it is never a dead end.
+  const leaveHref =
+    profileRole === 'artist' && session?.user?.id ? `/artist/${session.user.id}` : '/discover';
+
+  useEffect(() => {
+    if (!leftShow) return undefined;
+    // A beat, deliberately. room.disconnect() has already been called by
+    // the time this runs; giving the teardown a moment before yanking the
+    // route out from under it avoids racing LiveKit's own cleanup, and
+    // gives the person who just pressed Leave a half-second of
+    // confirmation that it worked rather than an instant screen swap that
+    // reads as a glitch.
+    const id = setTimeout(() => router.replace(leaveHref), 600);
+    return () => clearTimeout(id);
+  }, [leftShow, leaveHref, router]);
+
   const showState = effectiveState(show, now);
 
-  async function handleJoin() {
-    setError('');
-    setNotice('');
+  // The resolved room. Read by the token request, the egress triggers,
+  // the director's showId and the QR panel -- all of which used to read
+  // a module-level constant.
+  const roomName = show?.room_name || null;
+  const windowOpen = !!show && isWindowOpen(show, now);
 
-    const isCamFeed = role.startsWith('camfeed-');
-    const contestantRequest = (!isCamFeed && role !== 'viewer') ? role : null;
-    const camfeedSlot = isCamFeed ? role.split('-')[1] : null;
-
-    let identity;
-    let extraParam = '';
-    if (contestantRequest) {
-      identity = `contestant-${contestantRequest}-${name || Date.now()}`;
-      extraParam = `&contestant=${contestantRequest}`;
-    } else if (camfeedSlot) {
-      identity = `camfeed-${camfeedSlot}-${camRole}-${Date.now()}-${name || 'cam'}`;
-      extraParam = `&camfeed=${camfeedSlot}`;
-    } else {
-      identity = name || `viewer-${Date.now()}`;
-    }
-
+  // Registering the join in `participants` (email + consent) is a
+  // mailing-list write, not a precondition for being in the show. It
+  // used to THROW "Couldn't reach the show yet -- try again in a moment."
+  // into the artist's face at the gate -- the second half of what the
+  // window-opening test hit. Now it's best-effort: a failed insert costs
+  // an email address, a blocked join costs the show.
+  const registerParticipant = useCallback(async (emailValue) => {
+    if (!show?.id || !emailValue) return null;
     try {
-      const res = await fetch(
-        `/api/token?room=${ROOM_NAME}&identity=${encodeURIComponent(identity)}${extraParam}`
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Token request failed');
-
-      if (data.slotTaken) {
-        setNotice(`Performer ${contestantRequest?.toUpperCase()} is already in the show -- joining you as a viewer instead.`);
-      }
-
-      setConn({ token: data.token, url: data.url, assignedRole: data.assignedRole, name: name || 'guest' });
-      setStep('joined');
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  const primaryBtnStyle = { padding: 12, background: '#2ec4b6', color: '#011627' };
-  const fieldStyle = {
-    padding: 8,
-    background: 'rgba(253, 255, 252, 0.06)',
-    border: '1px solid rgba(253, 255, 252, 0.2)',
-    borderRadius: 8,
-    color: '#fdfffc',
-  };
-
-  // Go Live (SHOW_LIFECYCLE_SPEC.md L2). Only performer roles drive show
-  // state -- viewers/camfeed devices join exactly as before, ungated.
-  // canGoLive() isn't null-safe (throws on show.slated_at if show is
-  // null), so it's only ever called behind the `show &&` guard here.
-  // 'performer' here means "authenticated as an artist, about to claim
-  // a code" (MULTI_PERFORMER_SPEC.md Stage 3, now gated by Accounts &
-  // Identity Day 1's auth layer -- see handleArtistAuth, the only place
-  // role is ever set to 'performer') -- role only ever becomes the real
-  // 'a'/'b' after a successful claim, by which point this screen is no
-  // longer rendered.
-  const isContestantRole = role === 'performer';
-  const goLiveDisabledReason = !isContestantRole
-    ? null
-    : showState === 'ended'
-      ? 'This show has ended.'
-      : !show
-        ? 'No show scheduled yet.'
-        : showState === 'scheduled' && !canGoLive(show, now)
-          ? `Soundcheck opens at ${new Date(show.slated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`
-          : null;
-
-  function handleGoLive() {
-    if (goLiveDisabledReason) return;
-    if (show && show.state === 'scheduled') {
-      // Optimistic local update -- instant countdown on this device
-      // without waiting on the round trip; the artist never taps a
-      // second button, so this has to feel immediate.
-      setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
-      setShowWriteError(null);
-      // Not awaited -- handleJoin() below must not wait on the network
-      // round trip (or the retry). The write resolves in the background;
-      // if it ultimately fails, the soundcheck banner picks up the
-      // warning whenever this settles, even after the artist has already
-      // joined and is looking at it.
-      updateShowStateWithRetry('soundcheck').then((ok) => {
-        setShowWriteError(ok ? null : 'soundcheck');
-      });
-    }
-    handleJoin();
-  }
-
-  // Stage 3 (MULTI_PERFORMER_SPEC.md) -- replaces handleJoin for the
-  // performer path entirely. Deliberately does NOT call /api/token:
-  // /api/performer/claim-slot mints its own LiveKit AccessToken, gated
-  // on the code rather than the client asserting a slot letter. Reuses
-  // handleGoLive's optimistic soundcheck write since a performer join
-  // is still a "go live" action either way.
-  async function handleClaimAndGoLive() {
-    setError('');
-    setNotice('');
-    if (goLiveDisabledReason) return;
-    if (!performerCode.trim()) {
-      setError('Enter your performer code.');
-      return;
-    }
-    if (!artistSession) {
-      setError('Sign in as an artist to claim a slot.');
-      return;
-    }
-    try {
-      const res = await fetch('/api/performer/claim-slot', {
+      // The route derives the email from the session now (security round
+      // finding 6) and no longer reads it from the body. Still sent, so
+      // a client and a server that disagree about who is joining show up
+      // as a mismatch rather than being silently reconciled — and the
+      // bearer is read fresh here for the same reason triggerEgress
+      // does: this can fire well into a long show.
+      const accessToken = (await getSession())?.access_token || null;
+      const res = await fetch('/api/participants', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // claim-slot now verifies this server-side (lib/verifyArtistAuth.js)
-          // and derives claimed_by_email from it -- email is no longer sent
-          // in the body at all.
-          Authorization: `Bearer ${artistSession.access_token}`,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
-        body: JSON.stringify({
-          show_id: show?.id,
-          code: performerCode.trim(),
-          participantId,
-        }),
+        body: JSON.stringify({ show_id: show.id, email: emailValue, consent: false }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Code not recognized');
-      if (data.warning) setNotice(data.warning);
-
-      if (show && show.state === 'scheduled') {
-        setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
-        setShowWriteError(null);
-        updateShowStateWithRetry('soundcheck').then((ok) => {
-          setShowWriteError(ok ? null : 'soundcheck');
-        });
+      if (!res.ok) {
+        console.warn('[live] participant registration failed (non-fatal):', data.error);
+        return null;
       }
+      return data.participantId;
+    } catch (e) {
+      console.warn('[live] participant registration failed (non-fatal):', e);
+      return null;
+    }
+  }, [show?.id]);
 
-      setRole(data.slot); // 'a' | 'b' -- everything downstream (isMainPerformer, BroadcastStage, renderSlot) now just works unchanged
-      setSessionToken(data.sessionToken);
-      setConn({ token: data.livekitToken, url: data.url, assignedRole: data.slot, name: name || 'guest' });
+  // ── Entering the show ────────────────────────────────────────
+  // Performer first, viewer second, and the SERVER decides which. This
+  // client makes no entitlement guess at all: join-show re-checks
+  // ownership (solo), invite binding (versus) and the broadcast window,
+  // and a 403 from it is not an error to display -- it is the ordinary
+  // answer for everyone in the audience, and it routes to the viewer
+  // token instead.
+  const enterShow = useCallback(async () => {
+    if (!show?.id || !show.room_name) return;
+
+    const emailValue = session?.user?.email || '';
+    const pid = await registerParticipant(emailValue);
+    if (pid) setParticipantId(pid);
+
+    // Known client-side, and it decides how loud a failure should be: if
+    // this account OWNS the show, a broken performer entry has to be
+    // shown to them, because silently seating an artist in the audience
+    // of their own show is the worst way to learn something went wrong.
+    // For everyone else the same failure is just "not on the line-up",
+    // and they should be watching, not reading an error.
+    const ownsShow = !!session?.user?.id && show.artist_id === session.user.id;
+
+    if (session?.access_token) {
+      try {
+        const res = await fetch('/api/performer/join-show', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ show_id: show.id, participantId: pid }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          setRole(data.slot); // 'a' | 'b' -- isMainPerformer, BroadcastStage and renderSlot all key off this unchanged
+          setSessionToken(data.sessionToken);
+          setPerformanceMode(data.performanceMode || show.performance_mode || 'solo');
+          setConn({
+            token: data.livekitToken,
+            url: data.url,
+            assignedRole: data.slot,
+            name: name || emailValue || 'guest',
+          });
+          setStep('joined');
+          // GO LIVE, in the only place it can honestly happen: this
+          // performer is now connected to THIS show's own room.
+          // 'scheduled' -> 'soundcheck' is what lets effectiveState
+          // derive 'live' for every viewer once slated_at passes.
+          // Optimistic locally (the artist never taps a second button),
+          // retried in the background, warned about on final failure.
+          if (show.state === 'scheduled') {
+            setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
+            setShowWriteError(null);
+            updateShowStateWithRetry('soundcheck', show.id).then((ok) => {
+              setShowWriteError(ok ? null : 'soundcheck');
+            });
+          } else {
+            // Already running: this is a rejoin (a refresh, a dropped
+            // connection, a second device). join-show rebinds the same
+            // slot by account, and saying so out loud is the difference
+            // between "I'm back on" and "am I a spectator now?".
+            //
+            // Round D — the marker (lib/sessionResume.js) is what lets
+            // this distinguish a performer COMING BACK from one arriving
+            // late. No credential is stored; the Supabase session already
+            // in this tab is what made the silent re-claim possible, and
+            // this only decides which sentence to show.
+            const returning = recallPerformerSession(show.id);
+            showNotice(
+              returning
+                ? `You're back on slot ${String(data.slot).toUpperCase()} — nothing was lost.`
+                : `Back on slot ${String(data.slot).toUpperCase()}.`
+            );
+          }
+          rememberPerformerSession({ showId: show.id, slot: data.slot });
+          return;
+        }
+
+        // A 403 while the window is genuinely shut is a real refusal --
+        // showing it beats silently seating anyone as a viewer in a room
+        // nothing is being sent to.
+        const windowShut = !isWindowOpen(show, Date.now());
+        if (windowShut || res.status !== 403 || ownsShow) {
+          setBlockedReason(data.error || 'Could not join this show.');
+          setStep('blocked');
+          return;
+        }
+        // Otherwise: a plain "not on the line-up". That's the audience.
+      } catch (e) {
+        console.warn('[live] performer entry request failed:', e);
+        if (ownsShow) {
+          setBlockedReason('Could not reach the show service. Check your connection and try again.');
+          setStep('blocked');
+          return;
+        }
+      }
+    }
+
+    try {
+      // Identity is derived from the account rather than a typed name --
+      // the same account on a second device gets a distinct identity
+      // (the timestamp) so the two can't collide and evict each other.
+      const identity = `viewer-${(session?.user?.id || 'anon').slice(0, 8)}-${Date.now()}`;
+      const res = await fetch(
+        `/api/token?room=${encodeURIComponent(show.room_name)}&identity=${encodeURIComponent(identity)}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Token request failed');
+      setPerformanceMode(show.performance_mode || 'solo');
+      setConn({
+        token: data.token,
+        url: data.url,
+        assignedRole: data.assignedRole,
+        name: name || emailValue || 'guest',
+      });
       setStep('joined');
     } catch (e) {
-      setError(e.message);
+      setBlockedReason(e.message || 'Could not connect to this show.');
+      setStep('blocked');
     }
-  }
+  }, [show, session, name, registerParticipant, showNotice]);
 
-  // Shared by both gate paths -- the viewer's plain form and, after
-  // auth, the artist branch below -- since registering a join in
-  // `participants` (email + consent) is the same operation regardless
-  // of which identity mechanism produced the email.
-  async function registerParticipant(emailValue, consent) {
-    if (!show?.id) {
-      throw new Error("Couldn't reach the show yet -- try again in a moment.");
-    }
-    const res = await fetch('/api/participants', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ show_id: show.id, email: emailValue, consent }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Could not continue');
-    return data.participantId;
-  }
-
-  async function handleGateSubmit() {
-    setGateError('');
-    const trimmed = email.trim();
-    if (!trimmed) {
-      setGateError('Enter your email to continue.');
+  // One entry attempt per mount. The window flipping open is what
+  // triggers it for anyone who arrived early -- `now` ticks every
+  // second, so a viewer sitting on the holding screen (and an artist
+  // whose countdown ran out a minute before the window) is carried in
+  // without touching anything.
+  const enterAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (step !== 'resolving' && step !== 'waiting') return;
+    if (session === undefined || !identityReady || !show) return;
+    if (showState === 'ended') {
+      setStep('ended');
       return;
     }
-    setGateSubmitting(true);
-    try {
-      const id = await registerParticipant(trimmed, marketingConsent);
-      setParticipantId(id);
-      setStep('mode');
-    } catch (e) {
-      setGateError(e.message);
-    } finally {
-      setGateSubmitting(false);
-    }
-  }
-
-  // Accounts & Identity Day 1. Auth answers WHO; the performer code
-  // (still ahead, at step==='role') answers WHICH SLOT -- this only
-  // signs the artist in and gets them to the same code-entry screen the
-  // old role dropdown used to, it never claims a slot itself.
-  async function handleArtistAuth() {
-    setArtistAuthError('');
-    if (!artistEmailInput.trim() || !artistPassword) {
-      setArtistAuthError('Email and password are required.');
+    if (!windowOpen) {
+      // DELIBERATELY NOT CONNECTED. lib/scheduling.js's rule is that
+      // LiveKit is touched only inside the window; a viewer parked on a
+      // pre-show link used to hold an open room for however long they
+      // left the tab there.
+      setStep('waiting');
       return;
     }
-    setArtistAuthSubmitting(true);
+    if (enterAttemptedRef.current) return;
+    enterAttemptedRef.current = true;
+    setStep('entering');
+    enterShow();
+  }, [step, session, identityReady, show, showState, windowOpen, enterShow]);
+
+  // One deliberate human retry, for the case the automatic path gave up
+  // on. Resets the once-per-mount guard rather than reloading the page,
+  // so nothing already resolved has to be fetched twice.
+  const retryEntry = useCallback(() => {
+    enterAttemptedRef.current = false;
+    setBlockedReason('');
+    setStep('resolving');
+    fetchShow();
+  }, [fetchShow]);
+
+  // ── Round D · the resume ladder ──────────────────────────────
+  // Reached from the Reconnecting/Disconnected banner inside the room
+  // (components/ConnectionRecovery.jsx).
+  //
+  // THE POINT IS WHAT IT DOES NOT DO: it does not ask for a password, and
+  // it cannot. The Supabase session is already in this tab, and
+  // join-show rebinds the slot BY ACCOUNT — it is not told which slot,
+  // it looks up who is asking and gives back what was already theirs.
+  // So resuming is one API call with a credential the browser already
+  // holds. A performer who drops mid-song and is met with a login form
+  // has lost the show; that is the failure this exists to make
+  // impossible.
+  //
+  // Setting `step` back to 'entering' unmounts <LiveKitRoom> and remounts
+  // it with a fresh token — a clean reconnect rather than an attempt to
+  // repair a connection that has already been given up on.
+  const [resuming, setResuming] = useState(false);
+  const resumeShow = useCallback(async () => {
+    if (resuming) return;
+    setResuming(true);
+    logHealthEvent('resume_requested', { showId: show?.id || null });
     try {
-      const result = artistAuthTab === 'signup'
-        ? await signUp({
-            email: artistEmailInput.trim(),
-            password: artistPassword,
-            role: 'artist',
-            displayName: artistDisplayName.trim() || artistEmailInput.trim(),
-          })
-        : await signIn({ email: artistEmailInput.trim(), password: artistPassword });
-
-      if (result.error) {
-        setArtistAuthError(result.error.message || 'Authentication failed.');
-        return;
-      }
-      if (result.needsEmailConfirmation) {
-        setArtistAuthError('Check your email to confirm your account, then log in.');
-        setArtistAuthTab('login');
-        return;
-      }
-      if (result.profile && result.profile.role !== 'artist') {
-        setArtistAuthError('This account is not an artist account.');
-        return;
-      }
-
-      const session = result.data.session;
-      const verifiedEmail = session.user.email;
-      const displayName = result.profile?.display_name || verifiedEmail;
-      const id = await registerParticipant(verifiedEmail, false);
-
-      setArtistSession(session);
-      setParticipantId(id);
-      setEmail(verifiedEmail);
-      setName(displayName);
-      setRole('performer');
-      setStep('mode');
-    } catch (e) {
-      setArtistAuthError(e.message);
+      enterAttemptedRef.current = false;
+      setConn(null);
+      setStep('entering');
+      await enterShow();
     } finally {
-      setArtistAuthSubmitting(false);
+      setResuming(false);
     }
-  }
+  }, [resuming, enterShow, show]);
 
-  if (step === 'gate') {
-    if (!gateAudience) {
-      return (
-        <PageShell active="live">
-          <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <h2>Pilot show</h2>
-            <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Are you here to watch, or to perform?</p>
-            <button onClick={() => setGateAudience('viewer')} style={primaryBtnStyle}>I&apos;m a viewer</button>
-            <button onClick={() => setGateAudience('artist')} style={primaryBtnStyle}>I&apos;m an artist</button>
-          </div>
-        </PageShell>
-      );
-    }
+  const primaryBtnStyle = { padding: 12, background: '#2ec4b6', color: '#011627' };
 
-    if (gateAudience === 'artist') {
-      return (
-        <PageShell active="live">
-          <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <h2>Artist sign in</h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => setArtistAuthTab('login')}
-                style={{ ...primaryBtnStyle, opacity: artistAuthTab === 'login' ? 1 : 0.5 }}
-              >
-                Log in
-              </button>
-              <button
-                onClick={() => setArtistAuthTab('signup')}
-                style={{ ...primaryBtnStyle, opacity: artistAuthTab === 'signup' ? 1 : 0.5 }}
-              >
-                Sign up
-              </button>
-            </div>
-            {artistAuthTab === 'signup' && (
-              <input
-                placeholder="display name"
-                value={artistDisplayName}
-                onChange={(e) => setArtistDisplayName(e.target.value)}
-                style={fieldStyle}
-              />
-            )}
-            <input
-              type="email"
-              placeholder="email"
-              value={artistEmailInput}
-              onChange={(e) => setArtistEmailInput(e.target.value)}
-              style={fieldStyle}
-            />
-            <input
-              type="password"
-              placeholder="password"
-              value={artistPassword}
-              onChange={(e) => setArtistPassword(e.target.value)}
-              style={fieldStyle}
-            />
-            <button
-              onClick={handleArtistAuth}
-              disabled={artistAuthSubmitting}
-              style={{ ...primaryBtnStyle, opacity: artistAuthSubmitting ? 0.6 : 1 }}
-            >
-              {artistAuthSubmitting ? 'Please wait…' : artistAuthTab === 'signup' ? 'Create account' : 'Log in'}
-            </button>
-            {artistAuthError && <p style={{ color: '#e71d36' }}>{artistAuthError}</p>}
-            <button
-              onClick={() => setGateAudience(null)}
-              style={{ background: 'none', border: 'none', color: 'rgba(253, 255, 252, 0.5)', fontSize: 12, padding: 4 }}
-            >
-              ← Back
-            </button>
-          </div>
-        </PageShell>
-      );
-    }
-
-    // gateAudience === 'viewer' -- existing anonymous form, unchanged.
+  // ── The entry screens ────────────────────────────────────────
+  // Four states, none of which asks for anything. Compare what used to
+  // be here: a watch-or-perform choice, an email form, a full artist
+  // login/signup form, a solo-or-versus picker and a role dropdown --
+  // all of it after RequireAuth had already proven who this was, and all
+  // of it in front of an artist whose countdown had just hit zero.
+  // Leave wins over every other state. Rendering this unmounts
+  // <LiveKitRoom> entirely — the connection is already down (leaveCall
+  // disconnects before calling up here), and this makes sure nothing
+  // stays mounted that could put it back.
+  //
+  // The link is a real link, not decoration. The effect above routes on
+  // its own after a beat; if that navigation is slow, blocked, or the
+  // person simply gets there first, there is something to press.
+  if (leftShow) {
     return (
       <PageShell active="live">
-        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2>Pilot show</h2>
-          <input
-            type="email"
-            placeholder="your email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={fieldStyle}
-          />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'rgba(253, 255, 252, 0.7)' }}>
-            <input
-              type="checkbox"
-              checked={marketingConsent}
-              onChange={(e) => setMarketingConsent(e.target.checked)}
-            />
-            Send me updates about Loudentify shows
-          </label>
-          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 12 }}>
-            We&apos;ll use your email to send you updates about this show and Loudentify.
+        <div style={{ maxWidth: 420, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>You left the show</h2>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14, margin: 0 }}>
+            {profileRole === 'artist'
+              ? 'Your camera and microphone are released. Taking you back to your console…'
+              : 'Taking you back to Discover…'}
           </p>
-          <button
-            onClick={handleGateSubmit}
-            disabled={gateSubmitting}
-            style={{ ...primaryBtnStyle, opacity: gateSubmitting ? 0.6 : 1 }}
-          >
-            {gateSubmitting ? 'Continuing…' : 'Continue'}
-          </button>
-          {gateError && <p style={{ color: '#e71d36' }}>{gateError}</p>}
-          <button
-            onClick={() => setGateAudience(null)}
-            style={{ background: 'none', border: 'none', color: 'rgba(253, 255, 252, 0.5)', fontSize: 12, padding: 4 }}
-          >
-            ← Back
-          </button>
+          <Link href={leaveHref} style={{ ...primaryBtnStyle, textDecoration: 'none', textAlign: 'center' }}>
+            {profileRole === 'artist' ? 'GO TO MY CONSOLE' : 'BROWSE SHOWS'}
+          </Link>
         </div>
       </PageShell>
     );
   }
 
-  if (step === 'mode') {
+  if (step === 'resolving' || step === 'entering') {
     return (
       <PageShell active="live">
         <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2>Pilot show</h2>
-          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>Is this a solo performance or a versus matchup?</p>
-          <button onClick={() => { setPerformanceMode('solo'); setStep('role'); }} style={primaryBtnStyle}>Solo</button>
-          <button onClick={() => { setPerformanceMode('versus'); setStep('role'); }} style={primaryBtnStyle}>Versus</button>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13, letterSpacing: '0.08em' }}>
+            {step === 'entering' ? 'CONNECTING YOU TO THE SHOW…' : 'FINDING YOUR SHOW…'}
+          </p>
         </div>
       </PageShell>
     );
   }
 
-  if (step === 'role') {
+  if (step === 'blocked') {
     return (
       <PageShell active="live">
-        <div style={{ maxWidth: 400, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <h2>Join {performanceMode === 'solo' ? 'solo show' : 'versus show'}</h2>
-          {artistSession ? (
-            // Accounts & Identity Day 1 -- an authenticated artist skips
-            // the free name/role picker entirely (identity already comes
-            // from the verified session, role is already 'performer',
-            // set in handleArtistAuth) and goes straight to the one thing
-            // auth doesn't answer: which slot. isContestantRole/
-            // goLiveDisabledReason below are unchanged -- role==='performer'
-            // is the same sentinel they always checked, just reachable
-            // only through this branch now instead of a dropdown option.
-            <>
-              <p style={{ color: 'rgba(253, 255, 252, 0.7)', fontSize: 13 }}>Signed in as {name || email}</p>
-              <input
-                placeholder="performer code"
-                value={performerCode}
-                onChange={(e) => setPerformerCode(e.target.value)}
-                style={fieldStyle}
-              />
-              <button
-                onClick={handleClaimAndGoLive}
-                disabled={!!goLiveDisabledReason}
-                style={{
-                  ...primaryBtnStyle,
-                  opacity: goLiveDisabledReason ? 0.5 : 1,
-                  cursor: goLiveDisabledReason ? 'not-allowed' : 'pointer',
-                }}
-              >
-                Claim &amp; Go Live
+        <div style={{ maxWidth: 420, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>No show here</h2>
+          <p style={{ color: 'rgba(253, 255, 252, 0.7)', fontSize: 14, lineHeight: 1.6 }}>
+            {blockedReason || 'This link doesn’t point at a show that’s running.'}
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+            {show && (
+              <button type="button" onClick={retryEntry} style={{ ...primaryBtnStyle, flex: 1, border: 'none', cursor: 'pointer' }}>
+                TRY AGAIN
               </button>
-              {goLiveDisabledReason && (
-                <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 13 }}>{goLiveDisabledReason}</p>
-              )}
-            </>
-          ) : (
-            <>
-              <input
-                placeholder="your name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                style={fieldStyle}
-              />
-              <select value={role} onChange={(e) => setRole(e.target.value)} style={fieldStyle}>
-                <option value="viewer">Viewer</option>
-                <option value="camfeed-a">{performanceMode === 'solo' ? 'Extra camera' : 'Extra camera -- side A'}</option>
-                {performanceMode === 'versus' && <option value="camfeed-b">Extra camera -- side B</option>}
-              </select>
-              {role.startsWith('camfeed-') && (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {[
-                    { value: 'wide', label: 'Wide' },
-                    { value: 'close', label: 'Close' },
-                    { value: 'side', label: 'Side' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setCamRole(opt.value)}
-                      style={{
-                        flex: 1,
-                        padding: 10,
-                        borderRadius: 8,
-                        background: camRole === opt.value ? '#2ec4b6' : 'rgba(253, 255, 252, 0.06)',
-                        color: camRole === opt.value ? '#011627' : '#fdfffc',
-                        border: camRole === opt.value ? 'none' : '1px solid rgba(253, 255, 252, 0.2)',
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <button onClick={handleJoin} style={primaryBtnStyle}>Join</button>
-            </>
-          )}
-          {error && <p style={{ color: '#e71d36' }}>{error}</p>}
+            )}
+            <Link href="/discover" style={{ ...primaryBtnStyle, textDecoration: 'none', textAlign: 'center', flex: 1 }}>
+              BROWSE SHOWS
+            </Link>
+            <Link
+              href="/dashboard"
+              style={{
+                flex: 1,
+                padding: 12,
+                textAlign: 'center',
+                textDecoration: 'none',
+                color: '#2ec4b6',
+                border: '1px solid #2ec4b6',
+              }}
+            >
+              MY SHOWS
+            </Link>
+          </div>
         </div>
       </PageShell>
+    );
+  }
+
+  if (step === 'ended') {
+    return (
+      <PageShell active="live">
+        <div style={{ maxWidth: 420, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h2 style={{ margin: 0 }}>{show?.title || 'This show'} has ended</h2>
+          <p style={{ color: 'rgba(253, 255, 252, 0.55)', fontSize: 14 }}>
+            Recordings appear in the artist’s profile once they’re processed.
+          </p>
+          <Link href="/discover" style={{ ...primaryBtnStyle, textDecoration: 'none', textAlign: 'center' }}>
+            BROWSE SHOWS
+          </Link>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (step === 'waiting') {
+    // The pre-window screen, and the reason it exists is cost as much as
+    // product: nothing is connected here. The clock tick above carries
+    // this straight into the show the moment the window opens -- nobody
+    // taps anything, on either side of the stage.
+    return (
+      <HoldingScreen
+        show={show}
+        now={now}
+        note={`Doors open ${humanCountdown(msUntilWindow(show, now))}.`}
+      />
     );
   }
 
@@ -1147,8 +1322,14 @@ export default function LiveDemo() {
             role={conn.assignedRole}
             notice={notice}
             selfName={conn.name}
-            email={email}
-            artistAccessToken={artistSession?.access_token}
+            email={session?.user?.email || ''}
+            artistAccessToken={session?.access_token}
+            /* The resolved room, and the show it belongs to. Everything
+               inside that used to read the pilot-room constant now takes
+               these two: the recorder, the director's telemetry, the
+               state write, the QR codes. */
+            roomName={roomName}
+            showId={show?.id || null}
             maximized={maximized}
             onToggleMaximize={toggleMaximize}
             sidebarCollapsed={sidebarCollapsed}
@@ -1163,6 +1344,9 @@ export default function LiveDemo() {
             connToken={conn.token}
             connServerUrl={conn.url}
             onBroadcastEnded={handleBroadcastEnded}
+            onLeave={handleLeave}
+            onResume={resumeShow}
+            resuming={resuming}
           />
         </LiveKitRoom>
       </div>
@@ -1177,7 +1361,11 @@ export default function LiveDemo() {
 // output until live. Swapping between this and <ViewerStage> is itself
 // the hard cut described in 3c ("this is the show's first shot -- make
 // it land like one") -- no crossfade layer, a plain conditional render.
-function HoldingScreen({ show, now }) {
+// `note` (Go Live threading round) -- reused for the PRE-CONNECTION wait
+// as well as the in-room one, so a viewer who follows a show link hours
+// early sees the same screen with the same countdown, just without a
+// LiveKit connection behind it.
+function HoldingScreen({ show, now, note }) {
   const slated = show?.slated_at ? new Date(show.slated_at).getTime() : null;
   return (
     <div
@@ -1209,6 +1397,7 @@ function HoldingScreen({ show, now }) {
       ) : (
         <div style={{ fontSize: 14, opacity: 0.6 }}>Waiting for the show to be scheduled...</div>
       )}
+      {note && <div style={{ fontSize: 12, opacity: 0.45, letterSpacing: '0.06em' }}>{note}</div>}
     </div>
   );
 }
@@ -1248,9 +1437,15 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
   const room = useRoomContext();
-  const tracks = useTracks([Track.Source.Camera]);
+  // ScreenShare is in this list ONLY because that is how b-roll clips are
+  // published (lib/trackSources.js explains why not Camera). Nothing in
+  // this app screen-shares. Opting in explicitly, per surface, is the
+  // point: components/CamPage.jsx and components/RehearsalRoom.jsx
+  // deliberately still subscribe to Camera alone, because a phone looking
+  // at itself and a rehearsal room have no b-roll to see.
+  const tracks = useTracks(STAGE_TRACK_SOURCES);
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
   // instance feeding every selection on this device.
   const ineligibleTracks = useIneligibleTracks(room, tracks);
@@ -1280,6 +1475,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // on). Initialized from room.state directly since Connected/
   // Reconnected may already have fired before this component mounted.
   const [roomConnectionState, setRoomConnectionState] = useState(() => room.state);
+
+  // ── Don't let the screen sleep while this device is in a show ──
+  // Everyone in the room, not just the artist: a viewer's phone dimming
+  // mid-song is the same product failure YouTube solved years ago, and
+  // an artist's or performer's device dimming is worse than that — it
+  // takes their camera with it (lib/useWakeLock.js has the full note on
+  // how this and the frame watchdog divide the work). Released
+  // automatically when this component unmounts, which is what leaving,
+  // ending, or being disconnected all do.
+  useWakeLock(true, `live:${role}`);
 
   // Hoisted from their previous position further down this component
   // (audio-reconnect round) -- ensureAudioPublished below needs them,
@@ -1427,12 +1632,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // changes (e.g. this device just claimed a performer slot mid-session);
   // initHealthLog only updates context, never resets the queue.
   useEffect(() => {
+    // health_events.show_id is a text column and the recorder logs
+    // `room.name` into it (components/EgressPage.jsx) -- so the room name
+    // is what keeps a show's live timeline and its recording timeline
+    // joinable in one query. Per-show now instead of one bucket named
+    // 'pilot-room' for every show ever run.
     initHealthLog({
-      showId: ROOM_NAME,
+      showId: roomName,
       participantIdentity: room.localParticipant.identity,
       role,
     });
-  }, [room, role]);
+  }, [room, role, roomName]);
 
   // Room + track lifecycle -> health_events (Phase 2). Log-only: never
   // reacts to any of these by changing show behavior. Attached once per
@@ -1515,11 +1725,99 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const [camOn, setCamOn] = useState(true);
   const isCamFeed = typeof role === 'string' && role.startsWith('camfeed-');
   const [facingMode, setFacingMode] = useState(isCamFeed ? 'environment' : 'user');
-  const [left, setLeft] = useState(false);
+  // `left` USED TO LIVE HERE, and it is the whole reason Leave threw a
+  // client-side exception onto a white screen.
+  //
+  // The post-mortem, because it is a class of bug worth recognising on
+  // sight: this component had `if (left) return <…>` sitting at :2790,
+  // and it has hooks below that line (a useMemo at what is now :2840, a
+  // useRef and a useEffect immediately after). React counts hooks per
+  // render and requires the count to be stable. While `left` was false
+  // the early return never fired and every hook ran; the instant Leave
+  // flipped it true, the component returned three hooks short and React
+  // threw "Rendered fewer hooks than expected" — an error with no error
+  // boundary above it, which is why it painted white rather than
+  // degrading to something readable.
+  //
+  // Note the shape of it: the guard was CORRECT in isolation and the
+  // hooks were CORRECT in isolation. What was wrong was a conditional
+  // return positioned above hooks in a 2,300-line component where that
+  // relationship is invisible from either end. The sibling early return
+  // for `isCamFeed` at :2801 has the identical defect and has never
+  // crashed, purely because isCamFeed is constant for a component's
+  // whole life and so the branch is chosen once, at mount.
+  //
+  // The fix is not to move the return below the hooks. Leaving a show
+  // should tear the LiveKit connection down, and a component that stays
+  // mounted inside <LiveKitRoom> to render "you left" is still in the
+  // room. So the state moved OUT, to the parent that owns <LiveKitRoom>
+  // — one level up, where flipping it unmounts the room instead of
+  // rendering a message inside it. See LiveDemo's `leftShow`.
   const [comments, setComments] = useState([]);
+  const [reactions, setReactions] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
+
+  // ── Cameras, on stage ────────────────────────────────────────
+  // Same mechanism as Kit Check, same component, same code path. What
+  // used to be here was components/CameraQRPanel.jsx, which printed three
+  // QR codes containing bare `/cam?room=…&slot=…&role=…` URLs — no
+  // credential of any kind. That was fine as a pilot shortcut and stopped
+  // being fine the moment those QR codes could appear in a frame: anyone
+  // who could read one off a stream could join the broadcast as a camera.
+  //
+  // Now the QR encodes a single-use pairing code, exactly as Kit Check's
+  // does, and a paired phone that was already propped for the rehearsal
+  // is ALREADY HERE — it followed the room across (see
+  // app/api/camfeed/session). This panel is for the camera you decide to
+  // add once you are already on stage, which should be the rare case
+  // rather than the normal one.
+  const [showPairings, setShowPairings] = useState([]);
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairError, setPairError] = useState('');
+  const [pairDegraded, setPairDegraded] = useState(false);
+
+  const pairFetch = useCallback(async (payload) => {
+    const res = await fetch('/api/camfeed/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${artistAccessToken}` },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, body };
+  }, [artistAccessToken]);
+
+  const addShowCamera = useCallback(async (cameraRole) => {
+    if (!artistAccessToken || !roomName) { setPairError('Sign in as the show’s artist to add a camera.'); return; }
+    setPairError('');
+    setPairBusy(true);
+    try {
+      const { ok, body } = await pairFetch({
+        action: 'invite',
+        role: cameraRole,
+        slot: role,
+        context: 'show',
+        // The room is stamped on the pairing row at creation, so a phone
+        // that redeems this code joins the SHOW directly — it never has
+        // to be migrated afterwards.
+        room: roomName,
+        show_id: showId || null,
+      });
+      if (!ok) { setPairError(body.error || 'Could not create a pairing code.'); return; }
+      if (body.degraded) setPairDegraded(true);
+      setShowPairings((prev) => [...prev.filter((p) => p.id !== body.pairing.id), body.pairing]);
+    } catch {
+      setPairError('Could not reach the pairing service.');
+    } finally {
+      setPairBusy(false);
+    }
+  }, [artistAccessToken, roomName, showId, role, pairFetch]);
+
+  const removeShowCamera = useCallback(async (id) => {
+    setShowPairings((prev) => prev.filter((p) => p.id !== id));
+    try { await pairFetch({ action: 'revoke', id }); } catch { /* card already gone; the row expires on its own */ }
+  }, [pairFetch]);
 
   // Page lifecycle -> health_events (Phase 2). All roles -- a viewer's
   // dropout is as diagnostically useful as the performer's. audioContext
@@ -2286,6 +2584,25 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     setFacingMode(next);
   }, [facingMode, room]);
 
+  // The artist's own last frame, kept as a STILL after the show ends.
+  //
+  // This used to hold the live camera TRACK, so the self-view kept
+  // working while nothing transmitted -- and that is precisely what kept
+  // the camera light on after End Show. It is a data URL now: the frame
+  // is grabbed while the track is alive, then the device is released for
+  // real. See the ended effect below.
+  //
+  // Historical note worth keeping, because the shape of the mistake
+  // recurs: an earlier version declared this ~130 lines further down,
+  // while releaseLocalDevices below both read it and listed it in its
+  // dependency array -- and a dependency array is evaluated DURING
+  // RENDER, not when the callback eventually runs. Every render touched
+  // a `const` still in its temporal dead zone and threw
+  // "Cannot access 'tP' before initialization", which took the live page
+  // down on the first device test that got far enough to reach it.
+  // `npm run check:tdz` exists because of that afternoon.
+  const [endedSelfViewStill, setEndedSelfViewStill] = useState(null);
+
   // Round C -- LEAVE must release the DEVICES, not just the room.
   // room.disconnect() alone tears down the connection but can leave the
   // underlying MediaStreamTracks running, which is what keeps the camera
@@ -2317,19 +2634,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     } catch {
       // same
     }
-    try {
-      endedSelfViewTrack?.stop?.();
-    } catch {
-      // same
-    }
-    logHealthEvent('local_devices_released', {});
-  }, [room, endedSelfViewTrack]);
+    logHealthEvent('local_devices_released', { reason: 'leave' });
+  }, [room]);
 
   const leaveCall = useCallback(() => {
     releaseLocalDevices();
     room.disconnect();
-    setLeft(true);
-  }, [room, releaseLocalDevices]);
+    // Hands off to the parent, which unmounts <LiveKitRoom> and routes.
+    // This component does not render a "you left" screen any more —
+    // see the note on the deleted `left` state above.
+    onLeave?.();
+  }, [room, releaseLocalDevices, onLeave]);
 
   // SHOW_LIVE/SHOW_ENDED receipt (SHOW_LIFECYCLE_SPEC.md 3a/L3) -- belt-
   // and-braces sync for clients whose own cached `show` row hasn't
@@ -2350,6 +2665,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     if (payload.type === 'comment') {
       setComments((prev) => [...prev, payload.comment]);
+    }
+    if (payload.type === 'REACTION' && payload.reaction?.id) {
+      // Bounded, because a busy room sends a lot of these and the array
+      // is only ever read by an animation that discards each entry after
+      // a couple of seconds. Keeping the last 60 is more than can be on
+      // screen at once; keeping all of them would be a memory leak that
+      // grows with how much the audience is enjoying itself.
+      setReactions((prev) => [...prev, payload.reaction].slice(-60));
     }
     if (payload.type === 'SHOT_COMMAND') {
       // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
@@ -2427,9 +2750,6 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     showEndedRef.current = displayShowState === 'ended';
   }, [displayShowState]);
 
-  // Round C -- the artist's own camera track, retained after the show
-  // ends so their self-view keeps working while nothing transmits.
-  const [endedSelfViewTrack, setEndedSelfViewTrack] = useState(null);
   const audioStoppedForEndRef = useRef(false);
   useEffect(() => {
     // Fix (1d) -- runs for EVERY publishing role, not just the main
@@ -2465,13 +2785,43 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // locally, zero publishing outside Go Live -> End Show.
         const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
         if (camPub?.track) {
-          // Round C -- retain the track BEFORE unpublishing so the
-          // artist keeps a local self-view. stopOnUnpublish:false leaves
-          // the MediaStreamTrack running; only the transmission stops.
-          setEndedSelfViewTrack(camPub.track);
-          await room.localParticipant.unpublishTrack(camPub.track, false);
+          // ── QA RULING: THE LIGHT GOES OUT ───────────────────────
+          // This previously unpublished with `stopOnUnpublish: false`,
+          // deliberately, so the artist kept a live local self-view
+          // after the show (Round C). That decision is overturned: it
+          // meant the camera DEVICE stayed acquired, so the light stayed
+          // on — on the artist's laptop and on every other participating
+          // device — after End Show. Nobody was receiving it, which is
+          // exactly the distinction that made the original audio leak a
+          // privacy problem rather than a rendering one. The light is
+          // the only thing anyone actually trusts.
+          //
+          // The self-view is KEPT, as a still. A frame is grabbed to a
+          // canvas while the track is alive, and the device is then
+          // released properly. The artist still sees themselves; the
+          // camera is genuinely off. Both properties, no trade.
+          const still = await captureStillFrom(camPub.track);
+          if (still) setEndedSelfViewStill(still);
+          await room.localParticipant.unpublishTrack(camPub.track, true);
+          try { camPub.track.stop(); } catch { /* already stopped by the unpublish */ }
         }
+
+        // The MICROPHONE DEVICE, not just the published track. The
+        // processed track unpublished above is a MediaStreamDestination
+        // -- stopping it does not release the getUserMedia input feeding
+        // the Web Audio graph, so the mic indicator stayed on for the
+        // same reason the camera light did.
+        try {
+          handle?.rawStream?.getTracks?.().forEach((t) => t.stop());
+          handle?.processedTrack?.stop?.();
+          await handle?.audioContext?.close?.();
+          audioHandleRef.current = null;
+        } catch {
+          // release is best-effort; never throw out of an ending show
+        }
+
         onBroadcastEnded?.();
+        logHealthEvent('local_devices_released', { reason: 'show_ended', role, hadCamera: !!camPub });
         logHealthEvent('video_stopped_on_show_end', { hadPublication: !!camPub });
       } catch (err) {
         // Never let this throw into the ended transition -- the mute
@@ -2533,12 +2883,60 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // Same reasoning as Go Live: not awaited, resolves in the background,
     // warns on final failure -- silently failing here means viewers never
     // learn the show ended.
-    updateShowStateWithRetry('ended').then((ok) => {
+    updateShowStateWithRetry('ended', showId).then((ok) => {
       onShowWriteErrorChange?.(ok ? null : 'ended');
     });
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
-    triggerEgress('stop', ROOM_NAME); // Stage 3: stop the recording started at the live transition
-  }, [onShowUpdate, onShowWriteErrorChange, send]);
+    triggerEgress('stop', roomName); // Stage 3: stop the recording started at the live transition -- this show's room, so End Show stops THIS show's recorder
+  }, [onShowUpdate, onShowWriteErrorChange, send, roomName, showId]);
+
+  // ── Tap-to-react (PRD row 54) ────────────────────────────────
+  // The tap goes out over the data channel FIRST and animates locally in
+  // the same breath. Nothing waits for a server: a reaction that arrives
+  // after the moment it was reacting to is not a reaction.
+  //
+  // The database write and the (currently disabled) token charge both
+  // happen afterwards, fire-and-forget, and neither is allowed to affect
+  // what the person sees. A viewer must never have a tap swallowed by a
+  // wallet round trip, and must never get an error card over the
+  // performance because they ran out of tokens.
+  const sendReaction = useCallback((emoji) => {
+    const reaction = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      emoji,
+    };
+    // Local first, so the person who tapped sees it immediately even if
+    // the data channel is having a bad moment. Data messages are not
+    // echoed to their sender, so this is the ONLY way the sender sees
+    // their own reaction — the same asymmetry that once left the artist
+    // who ended a show as the one client that never saw SHOW_ENDED.
+    setReactions((prev) => [...prev, reaction].slice(-60));
+    try {
+      send(new TextEncoder().encode(JSON.stringify({ type: 'REACTION', reaction })), {});
+    } catch {
+      // A failed broadcast costs everyone else's view of this one tap.
+      // It must not cost the tap.
+    }
+
+    const startedAt = show?.slated_at ? new Date(show.slated_at).getTime() : null;
+    logReaction({
+      showId: showId || roomName,
+      emoji,
+      // Offset from showtime, which is the column the training data is
+      // actually about — wall-clock is unusable for comparing across
+      // shows, "42 seconds in" lines up with a shot change.
+      offsetMs: startedAt ? Date.now() - startedAt : null,
+      tokensSpent: REACTIONS_COST_TOKENS ? SPEND_ACTIONS.reaction.tokens : 0,
+    });
+
+    // Result deliberately ignored. See lib/reactions.js.
+    chargeReaction({
+      accessToken: artistAccessToken,
+      showId,
+      emoji,
+      idempotencyKey: reaction.id,
+    });
+  }, [send, show, showId, roomName, artistAccessToken]);
 
   const sendComment = useCallback((text, replyTarget) => {
     const comment = {
@@ -2574,12 +2972,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   //
   // eligibleForSlot is the AUTOMATIC set. The auto director must never
   // choose an impaired feed for itself.
+  // PARSE SITE 1 of 6. Includes b-roll deliberately: a cued clip has to
+  // be in the rendering pool or ShotVideo has no layer to cut to. What
+  // stops it being mistaken for a camera is roleOfTrack, everywhere a
+  // role is asked for.
   const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) =>
-      (t.participant.identity.startsWith(`contestant-${letter}-`) ||
-        t.participant.identity.startsWith(`camfeed-${letter}-`)) &&
-      !t.publication?.isMuted
-    ), [tracks]);
+    tracks.filter((t) => belongsToSlot(t, letter) && !t.publication?.isMuted),
+    [tracks]);
 
   const eligibleForSlot = useCallback((letter) =>
     filterEligible(tracksForSlot(letter), ineligibleTracks),
@@ -2595,14 +2994,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // shouldn't make a performer vanish from the spotlight/switcher.
   // Sorted for a stable, deterministic render order (SpotlightStage's
   // thumbnail row and the switcher both key off array order).
+  // PARSE SITE 2 of 6. A slot is "present" because a PERSON is there
+  // with a camera on -- isPerformerCameraTrack, not just a contestant
+  // identity, because a b-roll clip carries the artist's own identity
+  // and a clip playing must never make an empty stage look occupied.
   const presentSlots = useMemo(() => {
     const set = new Set();
     tracks.forEach((t) => {
-      const identity = t.participant.identity;
-      if (identity.startsWith('contestant-')) {
-        const slot = identity.split('-')[1];
-        if (slot) set.add(slot);
-      }
+      if (!isPerformerCameraTrack(t)) return;
+      const slot = t.participant.identity.split('-')[1];
+      if (slot) set.add(slot);
     });
     return Array.from(set).sort();
   }, [tracks]);
@@ -2614,13 +3015,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // own callbacks pass tracksRef.current explicitly instead (see below)
   // so they read live data without needing `tracks` itself as a
   // dependency anywhere.
+  // PARSE SITE 3 of 6, and the one the director console reads. 'broll'
+  // appears here exactly when a clip is on air, which is what enables the
+  // B-ROLL CLIP shot -- and roleOfTrack is what stops that same clip
+  // also being reported as 'main'.
   const availableRoles = (slot, trackList = tracks) => {
     const roles = new Set();
     trackList.forEach((t) => {
       if (t.publication?.isMuted) return;
-      const id = t.participant.identity;
-      if (id.startsWith(`contestant-${slot}-`)) roles.add('main');
-      if (id.startsWith(`camfeed-${slot}-`)) roles.add(id.split('-')[2]);
+      if (!belongsToSlot(t, slot)) return;
+      const r = roleOfTrack(t);
+      if (r) roles.add(r);
     });
     return [...roles];
   };
@@ -2638,27 +3043,34 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // broadcast; each device only needs to know what IT last picked.
     setActiveCamera((prev) => ({ ...prev, [letter]: identity }));
 
-    const role = identity.startsWith('contestant-')
-      ? 'main'
-      : identity.startsWith('camfeed-')
-        ? identity.split('-')[2] || null
-        : null;
+    // PARSE SITE 4 of 6 -- the feed strip's direct pick.
+    //
+    // VideoDeckPanel is a CAMERA picker and is fed a camera-only list
+    // (see BroadcastStage), so resolving the identity back to a track
+    // within that same camera pool is unambiguous. Doing it this way
+    // rather than parsing the identity string means the role comes from
+    // the same function every other site uses, and a b-roll track could
+    // not be resolved here even if one were somehow passed.
+    const picked = cameraTracksOnly(tracksForSlot(letter))
+      .find((t) => t.participant.identity === identity);
+    const role = roleOfTrack(picked) ?? null;
     const shotKey = (role && NEAREST_SHOT_FOR_ROLE[role]) || 'wide';
 
     const command = buildShotCommand({
-      showId: ROOM_NAME,
+      showId: roomName,
       slot: letter,
       shotKey,
       fromShotKey: activeShot[letter]?.shot ?? null,
       sourceRole: role,
       targetIdentity: identity, // already the exact participant picked -- no resolution needed
+      targetSourceKey: picked ? sourceKey(picked) : null,
       decisionSource: 'human',
       showPhase,
       availableRoles: availableRoles(letter),
     });
     setActiveShot((prev) => ({ ...prev, [letter]: command }));
     broadcastShotCommand(room, command);
-  }, [room, activeShot, showPhase]);
+  }, [room, activeShot, showPhase, roomName, tracksForSlot]);
 
   // Stage 4 (MULTI_PERFORMER_SPEC.md) -- which performer slot is
   // "on stage." Derived directly from `show`, never separate state:
@@ -2732,17 +3144,30 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // is a stable frozen frame with the CAMERA LOST treatment until they
     // cut away or it revives, not a silent re-pick. Searched against the
     // unfiltered pool for exactly that reason.
+    // PARSE SITE 5 of 6, and the one that actually decides what is on
+    // screen. matchesTarget compares identity AND what the track IS --
+    // identity alone would match the artist's camera for a command that
+    // meant their b-roll clip, because a clip is published by the
+    // artist's own participant. That is the failure this whole round
+    // exists to remove, and this is the line where it would have
+    // happened.
     const matched = cmd?.targetIdentity
-      ? candidates.find((t) => t.participant.identity === cmd.targetIdentity)
+      ? candidates.find((t) => matchesTarget(t, cmd))
       : undefined;
     // Every non-explicit path prefers LIVE feeds -- this is what stops
     // auto/fallback from ever landing on a dead camera by itself. The
-    // final `candidates[0]` is a last resort for when nothing is live at
-    // all, where a frozen frame beats an empty stage.
+    // final fallback is a last resort for when nothing is live at all,
+    // where a frozen frame beats an empty stage.
+    //
+    // Every fallback resolves against CAMERAS ONLY. A shot whose target
+    // has gone must never land on a playing clip by accident -- the
+    // return from b-roll is a deliberate broadcast cut, not a fallback.
+    const eligibleCameras = cameraTracksOnly(eligible);
     const chosen =
       matched ||
-      eligible.find((t) => t.participant.identity.startsWith(`contestant-${letter}-`)) ||
-      eligible[0] ||
+      eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
+      eligibleCameras[0] ||
+      cameraTracksOnly(candidates)[0] ||
       candidates[0];
     const activeImpaired = !!chosen && !eligible.includes(chosen);
 
@@ -2756,13 +3181,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // confirmed, not a candidates-timing issue.
     if (CUT_DEBUG_ENABLED && role === 'viewer') {
       const chosenVia = matched
-        ? 'targetIdentity match'
+        ? 'target match'
         : chosen
-          ? (chosen.participant.identity.startsWith(`contestant-${letter}-`)
-            ? 'FALLBACK: prefer contestant'
-            : 'FALLBACK: candidates[0]')
+          ? (isPerformerCameraTrack(chosen) ? 'FALLBACK: prefer contestant' : 'FALLBACK: first available')
           : 'none (no candidates)';
-      const key = `${cmd?.targetIdentity || 'none'}|${!!matched}|${chosen?.participant.identity || 'none'}`;
+      // Keyed on the SOURCE key, not the identity: during b-roll the
+      // artist's camera and their clip share an identity, so an
+      // identity-keyed signature would suppress the one log line that
+      // shows a cut between them -- which is exactly the line anyone
+      // debugging b-roll is looking for.
+      const key = `${cmd?.targetSourceKey || cmd?.targetIdentity || 'none'}|${!!matched}|${sourceKey(chosen) || 'none'}`;
       if (chosenDebugRef.current[letter] !== key) {
         chosenDebugRef.current[letter] = key;
         // candidates here include sub/track state (same shape as the
@@ -2770,10 +3198,13 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // actually subscribed is distinguishable from one that's fully
         // live -- third link in the chain, after [dataChannel] and
         // [tracks].
+        // sourceKey rather than identity, for the same reason as the
+        // signature above: two candidates sharing one identity (camera +
+        // clip) are indistinguishable in a log that prints identities.
         const candidatesDetailed = candidates
-          .map((t) => `${t.participant.identity}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`)
+          .map((t) => `${sourceKey(t)}(sub=${t.publication?.isSubscribed},track=${!!t.publication?.track})`)
           .join(', ') || 'none';
-        logCutDebug(`[renderSlot:${letter}] targetIdentity=${cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidatesDetailed}] chosen=${chosen?.participant.identity || 'none'} via=${chosenVia}`);
+        logCutDebug(`[renderSlot:${letter}] target=${cmd?.targetSourceKey || cmd?.targetIdentity || 'none'} matched=${!!matched} candidates=[${candidatesDetailed}] chosen=${sourceKey(chosen) || 'none'} via=${chosenVia}`);
       }
     }
 
@@ -2807,20 +3238,25 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     );
   };
 
+  // How much of the scheduled show is left, for the live banner.
+  // Recomputed off the same `now` tick everything else uses, so it
+  // costs nothing extra and cannot drift from the countdown.
+  const showTimeLeftLabel = (() => {
+    if (displayShowState !== 'live') return null;
+    const remaining = msRemainingInShow(show, now);
+    if (remaining === null) return null;
+    if (remaining <= 0) return 'OVER TIME';
+    const mins = Math.ceil(remaining / 60000);
+    if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m LEFT`;
+    return `${mins}m LEFT`;
+  })();
+
   // Tapping the video collapses an expanded (mobile) comments drawer --
   // a no-op on desktop, where the comments column has no expand/collapse
   // state to begin with.
   const collapseComments = useCallback(() => {
     if (commentsExpanded) setCommentsExpanded(false);
   }, [commentsExpanded]);
-
-  if (left) {
-    return (
-      <div style={{ maxWidth: 400, margin: '60px auto', textAlign: 'center' }}>
-        <p>You left the show.</p>
-      </div>
-    );
-  }
 
   // Camera-feed devices get a minimal screen: their own preview, a camera
   // toggle, and leave. They are not part of the audience-facing layout and
@@ -2960,16 +3396,32 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // is honoured there rather than silently re-picked.
     const isAutomatic = decisionSource !== 'human';
     const sourceTracks = isAutomatic ? autoTrackList() : tracksRef.current;
-    const roles = availableRoles(role, sourceTracks);
+    const allRoles = availableRoles(role, sourceTracks);
+    // B-ROLL IS NEVER AN AUTOMATIC CHOICE. Cutting to a clip is an
+    // editorial decision a person makes about their own material -- the
+    // auto director rotating into it, or a cue sheet resolving into it
+    // because it happened to be playing, would both be the machine
+    // making that call. A human tap still sees the full list, which is
+    // how the B-ROLL CLIP button works at all.
+    const roles = isAutomatic ? cameraRolesOnly(allRoles) : allRoles;
     const sourceRole = meta.sourceRole ?? resolveSourceRole(meta.framingHint || shotKey, roles);
-    const targetIdentity = resolveTargetIdentity(sourceTracks, role, sourceRole);
+    // Refuse rather than substitute. A strict-source shot (bRollClip)
+    // with nothing to resolve to returns null here, and firing it anyway
+    // would put whatever resolveTargetTrack falls back to on air under a
+    // command that says "clip".
+    if (!sourceRole) {
+      logHealthEvent('shot_unresolved', { shot: shotKey, decisionSource, availableRoles: roles });
+      return null;
+    }
+    const { targetIdentity, targetSourceKey } = resolveTarget(sourceTracks, role, sourceRole);
     const command = buildShotCommand({
-      showId: ROOM_NAME,
+      showId: roomName,
       slot: role,
       shotKey,
       fromShotKey: activeShotRef.current[role]?.shot ?? null,
       sourceRole,
       targetIdentity,
+      targetSourceKey,
       decisionSource,
       params: meta.params || {},
       availableRoles: roles,
@@ -2977,10 +3429,15 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     broadcastShotCommand(room, command);
     setActiveShot((prev) => ({ ...prev, [command.slot]: command }));
     return command;
-  }, [room, role]);
+  }, [room, role, roomName]);
 
   const fireAutoShot = useCallback((shotKey, decisionSource = 'auto', meta = {}) => {
     const command = buildAndFireCommand(shotKey, decisionSource, meta);
+    // null means the shot could not resolve a source and deliberately
+    // was not broadcast (see buildAndFireCommand). Nothing was emitted,
+    // so there is nothing to log under an event whose whole meaning is
+    // "the director loop produced a command".
+    if (!command) return null;
     // Phase 2 diagnostic instrumentation -- every command the director
     // loop itself emits (scheduled cuts + the L6-2 forced failover both
     // route through here). Human taps from DirectorShotPanel are a
@@ -3001,14 +3458,249 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // name specifically means "the auto loop is alive," which this isn't),
   // so this skips fireAutoShot's logging and just returns the built
   // command for cueDirector to log against.
-  const fireCueShot = useCallback((shotKey, decisionSource, meta = {}) => (
-    buildAndFireCommand(shotKey, decisionSource, meta)
-  ), [buildAndFireCommand]);
+  // ══════════════════════════════════════════════════════════════
+  // B-ROLL: an uploaded clip, live, as a cuttable director source
+  // ══════════════════════════════════════════════════════════════
+  //
+  // The artist taps a clip; the file plays into a hidden element, its
+  // frames are captured into a real LiveKit track named `broll`, and the
+  // B-ROLL CLIP shot cuts to it like any other source. When the clip
+  // ends, the shot returns to whatever was on air before it.
+  //
+  // Everything that makes that safe lives in lib/trackSources.js -- this
+  // block is only the sequencing.
+  const [brollClips, setBrollClips] = useState([]);
+  // Read by fireCueShot, which must not take `brollClips` as a dependency:
+  // it feeds the cueDirector useMemo, and recreating that on every library
+  // change would tear down and rebuild a running cue sheet mid-song.
+  const brollClipsRef = useRef([]);
+  const [activeBrollClipId, setActiveBrollClipId] = useState(null);
+  const [brollBusy, setBrollBusy] = useState(false);
+  const [brollError, setBrollError] = useState('');
+  const brollPlayerRef = useRef(null);
+  // Resolved after mount rather than during render. captureStream is a
+  // browser capability and the server has no opinion about it; deciding
+  // in an effect keeps the first client render identical to the server's
+  // regardless of how this component is ever mounted.
+  const [brollSupported, setBrollSupported] = useState(false);
+  useEffect(() => { setBrollSupported(isBrollPlaybackSupported()); }, []);
+  // The shot that was on air when the clip was cued. Restored, by shot
+  // KEY rather than by replaying the old command, so the return
+  // re-resolves against whatever cameras are live NOW -- a camera that
+  // dropped during the clip must not be cut back to.
+  const brollReturnShotRef = useRef(null);
+
+  // The artist's own library. RLS (broll_select_own) is what scopes this
+  // to them, so the anon client is enough and no route is needed.
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from('broll_clips')
+          .select('id, title, duration_ms, size_bytes')
+          .order('created_at', { ascending: false });
+        if (!cancelled && !error) {
+          setBrollClips(data || []);
+          brollClipsRef.current = data || [];
+        }
+      } catch {
+        // No clips is a legitimate state and the panel renders nothing
+        // for it. A failed read is indistinguishable from that, and
+        // shouting about it over a live show would be worse than the
+        // missing feature.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isMainPerformer]);
+
+  const stopBroll = useCallback(async (reason) => {
+    const player = brollPlayerRef.current;
+    brollPlayerRef.current = null;
+    setActiveBrollClipId(null);
+    if (player) {
+      logHealthEvent('broll_stopped', { reason });
+      await player.stop();
+    }
+  }, []);
+
+  // THE RETURN CUT. Fired when the clip ends, BEFORE the track is
+  // unpublished (the unpublish is driven by the effect below, on a
+  // grace timer).
+  //
+  // Restores the shot key that was on air when the clip was cued, and
+  // re-resolves it -- so if the artist's camera changed, dropped or was
+  // swapped during the clip, the return lands on what is live now rather
+  // than on a stale target.
+  const returnFromBroll = useCallback(() => {
+    const previous = brollReturnShotRef.current;
+    brollReturnShotRef.current = null;
+    // 'wide' is the default return, not the previous shot, when there
+    // wasn't one: cueing a clip as the very first shot of a show is
+    // legitimate, and the thing to come back to is the widest honest
+    // view of the stage.
+    const shotKey = previous && previous !== 'bRollClip' ? previous : 'wide';
+    logHealthEvent('broll_return_cut', { shot: shotKey, hadPrevious: !!previous });
+    const command = buildAndFireCommand(shotKey, 'human', {});
+    if (!command) {
+      // Nothing to cut back TO -- the artist's camera is off, or every
+      // camera dropped while the clip was playing. The clip still has to
+      // come off air, so take it down directly rather than waiting on an
+      // off-air effect that watches for a shot change that will never
+      // arrive. The stage falls to its own "be right back" interstitial,
+      // which is the correct picture for a stage with no live camera.
+      logHealthEvent('broll_return_unresolved', { attemptedShot: shotKey });
+      stopBroll('no_camera_to_return_to');
+    }
+  }, [buildAndFireCommand, stopBroll]);
+
+  const cueBroll = useCallback(async (clip) => {
+    setBrollError('');
+    // Tapping the playing clip again is "take it off", which is the
+    // obvious meaning and saves a second control.
+    if (activeBrollClipId === clip.id) {
+      returnFromBroll();
+      return;
+    }
+    if (brollBusy) return;
+    setBrollBusy(true);
+    try {
+      // One clip at a time. Swapping means the previous one comes down
+      // first -- two published b-roll tracks would both answer to the
+      // 'broll' role and the resolution between them would be arbitrary.
+      if (brollPlayerRef.current) await stopBroll('replaced');
+
+      const player = createBrollPlayer({
+        room,
+        onEnded: () => {
+          // Cut away FIRST. The track is still published and still
+          // holding its final frame at this moment, which is the right
+          // picture to be showing while the cut travels.
+          returnFromBroll();
+        },
+        onError: ({ error }) => {
+          setBrollError(error);
+          returnFromBroll();
+        },
+      });
+      brollPlayerRef.current = player;
+
+      // Captured BEFORE the cut, so the return knows where to go back to.
+      brollReturnShotRef.current = activeShotRef.current[role]?.shot ?? null;
+
+      const result = await player.start({ clip, accessToken: artistAccessToken });
+      if (result.error) {
+        brollPlayerRef.current = null;
+        brollReturnShotRef.current = null;
+        setBrollError(result.error);
+        return;
+      }
+
+      setActiveBrollClipId(clip.id);
+
+      // The command is built from the PUBLICATION we just received, not
+      // by searching `tracks` for it. useTracks has not necessarily seen
+      // LocalTrackPublished yet, and a resolve against a list that does
+      // not contain the clip would refuse (strictSource) and leave a
+      // clip on air that nothing had cut to.
+      const identity = room.localParticipant.identity;
+      const command = buildShotCommand({
+        showId: roomName,
+        slot: role,
+        shotKey: 'bRollClip',
+        fromShotKey: brollReturnShotRef.current,
+        sourceRole: BROLL_ROLE,
+        targetIdentity: identity,
+        targetSourceKey: sourceKey({ participant: room.localParticipant, publication: result.publication }),
+        decisionSource: 'human',
+        showPhase,
+        availableRoles: availableRoles(role),
+      });
+      setActiveShot((prev) => ({ ...prev, [role]: command }));
+      // Caught rather than left to reject: a publish landing inside a
+      // reconnect window throws, and an unhandled rejection during a
+      // live show is noise in exactly the console someone is reading to
+      // work out what went wrong. The local state above is already
+      // correct, and the next command re-syncs everyone else.
+      broadcastShotCommand(room, command).catch((err) =>
+        console.warn('[broll] cut broadcast failed (likely a transient reconnect)', err)
+      );
+    } finally {
+      setBrollBusy(false);
+    }
+    // availableRoles is a plain function recreated every render and
+    // deliberately not a dependency -- it reads `tracks` at call time,
+    // which is what we want, and listing it would recreate this callback
+    // on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrollClipId, brollBusy, room, role, roomName, showPhase, artistAccessToken, stopBroll, returnFromBroll]);
+
+  // ── The clip comes off air when the shot leaves it ──────────
+  // ONE rule covering every way that can happen: our own return cut, the
+  // director tapping another shot, the feed strip, a cue sheet, auto
+  // resuming. Watching the resolved shot rather than hooking each of
+  // those paths is what makes it impossible to add a sixth path that
+  // forgets to stop the clip.
+  //
+  // The delay is the important part. Unpublishing the instant the cut
+  // fires would race it: clients that had not yet applied the new
+  // command would be looking at a shot whose target had just vanished --
+  // a frozen frame under a CAMERA LOST pill, for a clip that ended
+  // exactly as intended. The clip holds its last frame for this long
+  // instead, and by the time it goes nobody is looking at it.
+  useEffect(() => {
+    if (!activeBrollClipId) return undefined;
+    if (activeShot[role]?.shot === 'bRollClip') return undefined;
+    const t = setTimeout(() => { stopBroll('off_air'); }, BROLL_OFFAIR_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [activeShot, role, activeBrollClipId, stopBroll]);
+
+  // Leaving, ending, or unmounting mid-clip must not leave a published
+  // track behind on a room this component no longer owns.
+  useEffect(() => () => { brollPlayerRef.current?.stop?.(); }, []);
+
+  // Cue-Sheet Director (Phase 1) -- cueDirector owns its own health
+  // events (cue_fired/cue_fallback), not 'director_shot_emitted' (that
+  // name specifically means "the auto loop is alive," which this isn't),
+  // so this skips fireAutoShot's logging and just returns the built
+  // command for cueDirector to log against.
+  //
+  // Defined AFTER the b-roll block on purpose: it calls cueBroll, and
+  // `npm run check:tdz` treats use-before-define as an error precisely
+  // because a const referenced before its initialiser is the
+  // temporal-dead-zone crash that took the live page down once already.
+  const fireCueShot = useCallback((shotKey, decisionSource, meta = {}) => {
+    // A b-roll cue that names a clip STARTS that clip. It does not build
+    // a command here: the cut can only be fired once the track is
+    // actually published, so cueBroll fires it itself on success.
+    //
+    // Worth knowing, and stated rather than discovered: there is real
+    // latency here. Fetching a signed URL, starting playback and
+    // publishing takes roughly half a second to a second, so a clip cued
+    // from a sheet appears slightly after its timestamp rather than on
+    // it. Authoring a beat early is the workaround; pre-warming the clip
+    // is the fix, and it is not built.
+    if (meta.sourceRole === BROLL_ROLE && meta.clipId) {
+      const clip = brollClipsRef.current.find((c) => c.id === meta.clipId);
+      if (!clip) {
+        logHealthEvent('cue_broll_clip_missing', { clipId: meta.clipId });
+        return null;
+      }
+      cueBroll(clip);
+      return null;
+    }
+    return buildAndFireCommand(shotKey, decisionSource, meta);
+  }, [buildAndFireCommand, cueBroll]);
 
   const getAutoAvailableShots = useCallback(() => {
     // Live feeds only -- auto must never offer itself a shot whose
-    // camera is impaired (Test 4 ruling).
-    const roles = availableRoles(role, autoTrackList());
+    // camera is impaired (Test 4 ruling) -- and CAMERAS only, so
+    // bRollClip can never appear in the auto director's menu. Without
+    // the second filter, 'broll' being live would make bRollClip a legal
+    // auto pick and the rotation would start cutting to the artist's
+    // clip on a timer.
+    const roles = cameraRolesOnly(availableRoles(role, autoTrackList()));
     return Object.keys(SHOT_TYPES).filter((k) => {
       const src = SHOT_TYPES[k].source;
       if (src === 'currentOrSelected') return roles.length > 0;
@@ -3027,7 +3719,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // identity -- otherwise auto's own same-feed comparison could decide
     // to "cut" to a camera that is already dead (Test 4 ruling).
     const live = autoTrackList();
-    const roles = availableRoles(role, live);
+    // Camera-only, matching getAutoAvailableShots -- the two have to
+    // agree about what auto is allowed to see or the "would this land on
+    // a different feed" comparison is made against a shot auto could
+    // never actually fire.
+    const roles = cameraRolesOnly(availableRoles(role, live));
     const sourceRole = resolveSourceRole(shotKey, roles);
     return resolveTargetIdentity(live, role, sourceRole);
   }, [role, autoTrackList]);
@@ -3090,6 +3786,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // Cue playback is automation too -- live feeds only, so a cue
       // naming a camera that has since died takes cueDirector's existing
       // cue_fallback path instead of cutting to a dead feed.
+      //
+      // 'broll' IS included here, unlike in the auto director's own role
+      // list, and the distinction is who decided. A cue sheet is a human
+      // editorial decision made in advance -- authoring a `broll` cue at
+      // 1:42 is a person saying "put the clip up here", which is exactly
+      // the decision the auto director may not make on its own. The cue
+      // carries meta.sourceRole, which buildAndFireCommand honours over
+      // its own resolution for precisely this reason.
+      //
+      // WORTH KNOWING, and stated because it is a real limit rather than
+      // an oversight: a cue sheet can CUT TO a clip that is already
+      // playing. It cannot START one. Starting playback is a deliberate
+      // act at the console, so a `broll` cue firing with nothing cued
+      // falls through cueDirector's normal fallback path.
       getAvailableRoles: () => availableRoles(role, autoTrackList()),
       getPlayerState: getBackingTrackState,
       // Same suspend()/resume() pair onExclusiveMode already drives for
@@ -3228,7 +3938,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       !autoStartedRef.current
     ) {
       autoStartedRef.current = true;
-      const reason = isFirstRun ? classifyDirectorStartReason(ROOM_NAME, role) : 'transition';
+      const reason = isFirstRun ? classifyDirectorStartReason(roomName, role) : 'transition';
       // Fix (b1) -- the director does not start until the publisher path
       // has been proven, or repaired. roomConnectionState === Connected
       // demonstrably does NOT cover engine/publisher-transport
@@ -3248,7 +3958,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       cueDirector?.stop();
       logHealthEvent('director_loop_stopped', { reason: 'show_ended' });
     }
-  }, [isMainPerformer, displayShowState, role, roomConnectionState]);
+  }, [isMainPerformer, displayShowState, role, roomConnectionState, roomName]);
 
   // The SHOW_LIVE send side, deferred here from L2/L3 (3a: "the director
   // device also broadcasts... at the moment soundcheck->live flips").
@@ -3288,14 +3998,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // one probe for the whole start sequence, not two.
       runStartPreflight().then(() => {
         send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_LIVE' })), {});
-        triggerEgress('start', ROOM_NAME, performanceMode); // Stage 4: directed portrait recording, same once-only guard as the broadcast above
+        triggerEgress('start', roomName, performanceMode); // Stage 4: directed portrait recording into THIS show's room, same once-only guard as the broadcast above
       });
     }
     // roomConnectionState added (b6.2) so this re-evaluates the moment
     // the connection lands -- without it the new gate would latch this
     // effect off for a device that goes live before connecting, and
     // SHOW_LIVE/egress would never fire at all.
-  }, [isMainPerformer, showState, send, performanceMode, roomConnectionState]);
+  }, [isMainPerformer, showState, send, performanceMode, roomConnectionState, roomName]);
 
   // Forced failover (SHOW_LIFECYCLE_SPEC.md L6-2): if the track behind
   // the slot's currently-shown targetIdentity mutes or drops mid-live,
@@ -3361,12 +4071,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const blurFillSlot = performanceMode === 'versus' ? activePerformerSlot : 'a';
   const blurFillCandidates = tracksForSlot(blurFillSlot);
   const blurFillCmd = activeShot[blurFillSlot];
+  // PARSE SITE 6 of 6 -- the ambient blur-fill behind the portrait
+  // stage. It mirrors whatever is on air, so it needs the identical
+  // matcher: with identity-only matching it would sit on the artist's
+  // camera while the stage showed a clip, and the desktop background
+  // would visibly disagree with the performance in front of it.
   const blurFillMatched = blurFillCmd?.targetIdentity
-    ? blurFillCandidates.find((t) => t.participant.identity === blurFillCmd.targetIdentity)
+    ? blurFillCandidates.find((t) => matchesTarget(t, blurFillCmd))
     : undefined;
   const blurFillTrackRef =
     blurFillMatched ||
-    blurFillCandidates.find((t) => t.participant.identity.startsWith(`contestant-${blurFillSlot}-`)) ||
+    blurFillCandidates.find((t) => isPerformerCameraTrack(t)) ||
+    cameraTracksOnly(blurFillCandidates)[0] ||
     blurFillCandidates[0];
 
   const stageProps = {
@@ -3392,6 +4108,15 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // affordance on both roles.
     commentsCollapsed,
     onToggleCommentsCollapsed: toggleCommentsCollapsed,
+    // B-roll. Threaded through the same stageProps bundle as everything
+    // else the director console needs, so BroadcastStage stays a layout
+    // component with no knowledge of clips.
+    brollClips,
+    onCueBroll: cueBroll,
+    activeBrollClipId,
+    brollBusy,
+    brollError,
+    brollSupported,
   };
 
   return (
@@ -3409,8 +4134,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           show has ended. Performers/camfeed devices are unaffected --
           always rendered, exactly as before. */}
       {(role !== 'viewer' || displayShowState === 'live') && <RoomAudioRenderer />}
-      {displayShowState === 'ended' && endedSelfViewTrack && (
-        <EndedSelfView track={endedSelfViewTrack} />
+      {displayShowState === 'ended' && endedSelfViewStill && (
+        <EndedSelfView still={endedSelfViewStill} />
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
@@ -3435,6 +4160,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       {isMainPerformer && displayShowState === 'live' && (
         <div className="lifecycle-banner live">
           <span>● LIVE</span>
+          {/* Product Ruling 1 -- how long is left of the show the artist
+              scheduled. Not a countdown to a hard cut-off: the window
+              carries 15 minutes' grace past this, so running a little
+              over is fine and the label says so once it goes negative
+              rather than reading "-3m" at somebody mid-encore. */}
+          {showTimeLeftLabel && <span className="show-remaining">{showTimeLeftLabel}</span>}
           <button type="button" className="end-show-btn" onClick={endShow}>END SHOW</button>
           {/* Fix (c) (SHOW-1 diagnosis round) -- persistent, visible warning
               for the "publishes are silently failing" state. Ships
@@ -3487,7 +4218,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           showEnded={displayShowState === 'ended'}
           showPhase={showPhase}
           room={room}
-          showId={ROOM_NAME}
+          showId={roomName}
           availableRoles={directorAvailableRoles}
           tracks={tracks}
           onExclusiveMode={(on) => {
@@ -3526,6 +4257,49 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           top-right ~54px strip before). Setup-time only, collapsed by
           default; toggleQrPanel (above) is part of the deck/comments/QR
           mutual-exclusivity group, not a bare boolean flip anymore. */}
+      {/* Round D · the resume ladder's visible rung. Reconnecting is
+          informational only for the first few seconds — LiveKit is
+          already retrying, and a manual reconnect on top of an automatic
+          one turns a two-second blip into a twenty-second one. The offer
+          appears when the automatic path has been going long enough to
+          suggest it will not finish, and immediately on a hard
+          disconnect.
+
+          Suppressed once the show has ended: there is nothing to get
+          back on to, and a RESUME button over the ended card would be a
+          promise the room cannot keep. */}
+      {displayShowState !== 'ended' && (
+        <ConnectionRecovery
+          state={
+            roomConnectionState === ConnectionState.Reconnecting
+              ? 'reconnecting'
+              : roomConnectionState === ConnectionState.Disconnected
+                ? 'disconnected'
+                : null
+          }
+          onResume={onResume}
+          busy={resuming}
+          isPerformer={isMainPerformer}
+        />
+      )}
+
+      {/* Tap-to-react (PRD row 54). Mounted for every role that can see
+          the stage, artist included — an artist should be able to react
+          to their own guest in a versus show, and more to the point
+          should SEE the room reacting, which is the whole feature.
+
+          Only while the show is genuinely live: reactions during
+          soundcheck would animate over a rehearsal for an audience that
+          is not there, and after the ended card they would be a party in
+          an empty room. */}
+      {displayShowState === 'live' && (
+        <ReactionLayer
+          reactions={reactions}
+          onReact={sendReaction}
+          cost={REACTIONS_COST_TOKENS ? SPEND_ACTIONS.reaction.tokens : 0}
+        />
+      )}
+
       {isMainPerformer && (
         <div className={`camera-qr-panel ${qrPanelOpen ? 'open' : ''}`}>
           <button
@@ -3537,7 +4311,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           </button>
           {qrPanelOpen && (
             <div className="camera-qr-panel-body">
-              <CameraQRPanel roomName={ROOM_NAME} slot={role} />
+              <PairingPanel
+                pairings={showPairings}
+                connectedRoles={directorAvailableRoles.filter((r) => r !== 'main')}
+                onAdd={addShowCamera}
+                onRevoke={removeShowCamera}
+                busy={pairBusy}
+                error={pairError}
+                tone="over-video"
+                degraded={pairDegraded}
+                degradedNote="Adding cameras mid-show needs the pending database migration. Pair from Kit Check before the show instead."
+              />
             </div>
           )}
         </div>
