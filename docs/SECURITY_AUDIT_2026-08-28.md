@@ -4,8 +4,9 @@ Full sweep of the authenticated and API surface built across the overnight
 rounds. **31 API routes, every one read.** Findings by severity, with what
 was verified against the deployed preview rather than inferred from source.
 
-**One CRITICAL, fixed and verified. Everything else queued for your
-approval** — per your instruction not to rewrite auth mid-QA.
+**One CRITICAL, fixed and verified. The four HIGH/MEDIUM findings were
+then approved and closed in a follow-up round — see "Status: all closed"
+at the foot of this document.**
 
 Deployment probed: `https://loud-awkxbem3j-korey-alashe.vercel.app`
 Fix commit: `d82837e`
@@ -282,3 +283,62 @@ you a camera never appeared, a clip did not cut, a countdown counted to
 the wrong moment, or that the CRITICAL above was ever actually exploited
 against a real show — there is no audit log that would show it. That
 still needs `docs/OVERNIGHT2_DEVICE_TEST.md` and a real phone.
+
+
+---
+
+# Status: all closed (2026-08-28, follow-up round)
+
+Findings 2, 3, 4, 6 and 7 were approved for a dedicated round and are
+fixed. Every `pending` entry in `scripts/route-auth-check.mjs` has been
+**deleted**, not reworded.
+
+| # | Route | Fix | Proven by |
+|---|---|---|---|
+| 2 | `/api/egress/stop` | verified artist + show ownership (`lib/verifyShowOwner.js`) | `probe:auth` 401 · `probe:authz` 404 · **Sitting 6.2 on a real show** |
+| 3 | `/api/egress/start` | same | same |
+| 4 | `/api/cue-sheets` GET+POST | `artist_email` derived from the session; parameter accepted, validated, no longer trusted | `probe:authz` — 403 cross-account, 200 own-account controls |
+| 6 | `/api/participants` | `verifySession` + email from the session + show must exist | `probe:authz` 404 |
+| 7 | `/api/health-events` | stays open, deliberately; rate-limited + bounded payloads | reasoning in the route header and the allowlist |
+
+## Three things worth carrying forward
+
+**The captured-token trap.** The dangerous half of the egress fix was not
+the route, it was the client. A Supabase access token lives about an
+hour; a show can be scheduled for three. A token captured at room mount
+would have been expired at End Show, and the failure shape is the worst
+available — recording starts, show runs, stop silently 401s, and nobody
+finds out until a recorder has run to its own timeout uploading. The
+bearer is now read fresh at call time. **A short test show does not test
+this**; Sitting 6.2 says so explicitly.
+
+**Identity before configuration.** Both egress routes checked env vars
+*before* authenticating, so an anonymous caller received `500 Server
+missing egress environment variables` — the server's configuration state,
+handed to a stranger. It also made the gate untestable, which is how it
+surfaced: `probe:auth` expected 401 and got the 500, and could not tell a
+closed route from an open one.
+
+**A new probe, closing a blind spot I had written down.**
+`scripts/api-authz-probe.mjs` signs in through the app's own login form
+and asks the question the signed-out probe cannot: *will you serve a
+logged-in user something that belongs to someone else?* That gap is
+exactly what let finding 4 live — the route authenticated perfectly and
+passed `check:routes`; only its authorization was wrong. Every
+"other person" in it is an RFC 2606 `.invalid` address that cannot
+belong to anyone, and every refusal assertion is paired with a control
+proving own-account access still works.
+
+## What is still open
+
+**The grandfather clause.** `shows.artist_id` is nullable, and
+`verifyShowOwner` mirrors `docs/ownership_migration.sql`'s own RLS rule
+(`artist_id is null or artist_id = auth.uid()`) rather than inventing a
+stricter one that would stop an artist ending an older show's recording.
+On such a row, any verified artist passes. Bounded — not anonymous, which
+was the finding — but real, and it closes on backfill. The route logs
+loudly whenever the clause is actually used.
+
+**`EGRESS_TEMPLATE_BASE_URL` is not set on Preview**, so
+`/api/egress/start` returns 500 there. Pre-existing, found while
+verifying this round, and not mine to set — see Sitting 6's first box.

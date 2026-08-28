@@ -963,3 +963,123 @@ before — that is the proof it was a lens change and not a camera drop.
 > reselect.
 
 Rotate back and confirm it is symmetrical.
+
+---
+
+# Sitting 6 — MANDATORY: recording still works after the auth change
+
+Deployed: `https://loud-ezro1gi11-korey-alashe.vercel.app`
+
+**This one is not optional and not skippable.** `/api/egress/start` and
+`/api/egress/stop` now require the authenticated artist who owns the show. If
+I got that wrong, the symptom is silent: recordings simply stop happening, or
+worse, stop *stopping*, and nobody finds out until afterwards.
+
+## ⚠️ FIRST — a missing environment variable, and it is not mine to set
+
+`EGRESS_TEMPLATE_BASE_URL` **is not set on Preview.** I checked with
+`vercel env ls preview`: every other egress variable is there, that one is not.
+
+**Consequence:** `/api/egress/start` returns `500 Server missing egress
+environment variables` on every preview deployment, and has done since the
+variable was introduced. **This predates the security round** — I did not
+break it, but I did find it, and Sitting 6 cannot pass until it is set.
+
+I have deliberately not set it myself. It is a change to your Vercel project,
+and the correct value is a judgment call: per the route's own header it must
+be a **stable, publicly reachable origin**, because LiveKit's egress service
+runs outside this deployment and navigates a headless browser to it — it can
+never reach a protection-gated preview URL.
+
+```bash
+# Use your production domain, not a preview URL.
+vercel env add EGRESS_TEMPLATE_BASE_URL preview
+# then redeploy:  vercel --yes
+```
+
+> **What this does and does not buy you on a preview.** Setting it lets the
+> route get past its own guard, so start/stop return properly and 6.1 and 6.2
+> below can pass. The recorded FILE will still be poor on a protected preview,
+> because LiveKit's browser cannot reach the template to render it — that is
+> the pre-existing limitation already noted in this document, not something
+> this round changed. Sitting 6 is a test of the **auth gate**, not of video
+> quality.
+
+## 6.1 An unauthenticated call is now refused
+
+From your laptop, no browser needed:
+
+```bash
+curl -s -X POST -H 'content-type: application/json' \
+  -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS" \
+  -d '{"room":"any-room-name"}' \
+  -w '\nHTTP %{http_code}\n' \
+  "$SMOKE_URL/api/egress/stop"
+```
+
+**Expected: `HTTP 401`,** `{"error":"Missing Authorization header"}`.
+
+Before this round the same call returned `200 {"ok":true,"stopped":false}` —
+it reached LiveKit. Against a room with a live recording, it would have
+stopped it.
+
+Both routes, both verbs, are covered automatically by `npm run probe:auth`
+(38/38 green on this deployment) and `npm run probe:authz` (7/7, signed in).
+The curl is here so you can see it refuse with your own eyes.
+
+## 6.2 Start and stop STILL WORK on a real show — the one that matters
+
+1. Schedule a show, open Kit Check, **GO LIVE**.
+2. **Within a few seconds of going live**, open the browser console on the
+   artist device and look for:
+   `[egress] start …` — you want **no** warning line.
+3. Let it run a minute or two.
+4. Press **End Show**.
+5. Console again: **no** `[egress] stop refused` line.
+
+**In the health timeline** — this is the durable evidence, and it is new this
+round:
+
+| Event | When | Means |
+|---|---|---|
+| `egress_command_ok` with `action: "start"` | at Go Live | the recorder started |
+| `egress_command_ok` with `action: "stop"` | at End Show | **the recorder stopped** |
+
+**If you see `egress_command_failed` instead, read its `stage` field** — it
+says exactly which wall was hit:
+
+| `stage` | What it means |
+|---|---|
+| `refused (401)` | the bearer was missing or expired — an auth-plumbing bug, tell me |
+| `refused (403)` | *"This is not your show"* — ownership check wrong, tell me |
+| `refused (404)` | no `shows` row matched this `room_name` |
+| `refused (500)` | `EGRESS_TEMPLATE_BASE_URL` — see the box above |
+| `no session token available` | the client could not read a session at all |
+
+**The specific failure I was most worried about, and how to actually catch
+it:** a Supabase access token lives about an hour; a show can be scheduled for
+three. If the token were captured when the room mounted, `stop` would 401 at
+End Show on any show longer than an hour — and everything would look fine
+until then. The token is now read fresh at call time, so this should not
+happen. **To prove it rather than trust it: run a show longer than an hour and
+confirm `egress_command_ok / stop` still appears at the end.** A short show
+does not test this at all.
+
+## 6.3 Cue sheets, participants — already proven, no device needed
+
+`npm run probe:authz` covers these signed in, including controls that prove
+the fix refuses *other people's* data without refusing your own:
+
+```
+✔ GET  /api/cue-sheets with someone else's artist_email — 403
+✔ POST /api/cue-sheets writing to someone else's email — 403
+✔ CONTROL — my OWN email still works — 200
+✔ CONTROL — no artist_email at all still works — 200
+✔ POST /api/egress/start|stop for a room I don't own — 404
+✔ POST /api/participants against a nonexistent show — 404, not a 500
+```
+
+Worth one manual check anyway, because it is the path a real artist takes:
+**open a cue sheet in the editor, rename it, save it, and load it again.** The
+route now derives your email from your session instead of the request body; if
+anything in that plumbing is wrong, this is where it shows.

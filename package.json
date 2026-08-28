@@ -14,7 +14,8 @@
     "smoke:bootstrap": "node scripts/smoke-bootstrap.mjs",
     "check:build": "node -e \"const{execSync}=require('child_process');const o=execSync('next build',{encoding:'utf8',stdio:['ignore','pipe','pipe']});const bad=o.split('\\\\n').filter(l=>/Attempted import error|export .* was not found/.test(l));if(bad.length){console.error('\\\\nBUILD WARNINGS TREATED AS ERRORS:');bad.forEach(l=>console.error('  '+l.trim()));process.exit(1);}console.log('build clean: no missing-import warnings');\"",
     "check:routes": "node scripts/route-auth-check.mjs",
-    "probe:auth": "node scripts/api-auth-probe.mjs"
+    "probe:auth": "node scripts/api-auth-probe.mjs",
+    "probe:authz": "node scripts/api-authz-probe.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.5.0",
