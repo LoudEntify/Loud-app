@@ -52,6 +52,29 @@ function describeEgress(info) {
 
 export async function POST(request) {
   try {
+    // ── IDENTITY BEFORE CONFIGURATION ─────────────────────────
+    // The env-var guard used to run first, which meant an anonymous
+    // caller got `500 "Server missing egress environment variables"` —
+    // the server's own configuration state, handed to a stranger, from
+    // a route that should have refused them at the door. It also made
+    // the auth gate untestable: scripts/api-auth-probe.mjs expects a
+    // 401 and was getting the 500 instead, so the check could not tell
+    // a closed route from an open one.
+    //
+    // Answer WHO ARE YOU before WHAT IS WRONG WITH ME.
+    const body = await request.json();
+    const { room, performanceMode } = body;
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
+
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
+
     const {
       LIVEKIT_API_KEY: apiKey,
       LIVEKIT_API_SECRET: apiSecret,
@@ -68,19 +91,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Server missing egress environment variables' }, { status: 500 });
     }
 
-    const { room, performanceMode } = await request.json();
-    if (!room) {
-      return NextResponse.json({ error: 'room is required' }, { status: 400 });
-    }
 
-    // Same order, same reasoning, as the stop route: identity, then
-    // ownership, then act. Nothing reaches LiveKit before both pass.
-    const auth = await verifyArtistAuth(request);
-    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
-    const admin = getSupabaseAdmin();
-    const owner = await verifyShowOwner(admin, room, auth.user);
-    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
     // Defaults to 'solo' for anything other than exactly 'versus' --
     // EgressPage.jsx's own layout handling has the identical fallback
     // (components/EgressPage.jsx), so an unexpected/missing value here

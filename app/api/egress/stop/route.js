@@ -32,6 +32,24 @@ function describeEgress(info) {
 
 export async function POST(request) {
   try {
+    // ORDER MATTERS: identity, then ownership, then configuration, then
+    // act. Nothing touches LiveKit until the first two have passed — a
+    // caller who fails the check must not learn from a timing difference
+    // whether a room has an active recording — and the env-var guard
+    // comes after them so a stranger is never told the server's own
+    // configuration state. Answer WHO ARE YOU before WHAT IS WRONG WITH ME.
+    const { room } = await request.json();
+    if (!room) {
+      return NextResponse.json({ error: 'room is required' }, { status: 400 });
+    }
+
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
+
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     const livekitUrl = process.env.LIVEKIT_URL;
@@ -39,22 +57,6 @@ export async function POST(request) {
     if (!apiKey || !apiSecret || !livekitUrl) {
       return NextResponse.json({ error: 'Server missing LiveKit environment variables' }, { status: 500 });
     }
-
-    const { room } = await request.json();
-    if (!room) {
-      return NextResponse.json({ error: 'room is required' }, { status: 400 });
-    }
-
-    // ORDER MATTERS: identity first, then ownership, then act. Nothing
-    // touches LiveKit until both have passed — a caller who fails the
-    // check must not be able to learn from a timing difference whether a
-    // room has an active recording.
-    const auth = await verifyArtistAuth(request);
-    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
-    const admin = getSupabaseAdmin();
-    const owner = await verifyShowOwner(admin, room, auth.user);
-    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
 
     const egressClient = new EgressClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
 
