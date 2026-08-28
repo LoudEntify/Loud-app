@@ -13,7 +13,7 @@ and not five.
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
 | **Preview** | `https://loud-mlpz8y3ql-korey-alashe.vercel.app` |
-| **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
+| **Deployed from** | `bd03289` — the last commit that changes code. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
 | **Production deployed** | **No.** Preview only, every time. |
