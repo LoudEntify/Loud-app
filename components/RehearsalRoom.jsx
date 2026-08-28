@@ -6,6 +6,7 @@ import { Track } from 'livekit-client';
 import { STAGE_TRACK_SOURCES, isBrollTrack, roleOfTrack } from '../lib/trackSources';
 import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { getSupabase } from '../lib/supabaseClient';
+import { useWakeLock } from '../lib/useWakeLock';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -224,6 +225,14 @@ function RehearsalBroll({ accessToken }) {
 }
 
 export default function RehearsalRoom({ session, onEnd, onConnectedRoles, accessToken }) {
+  // Kit Check is where an artist frames three phones and then steps back
+  // to look at the composition -- minutes of not touching this screen,
+  // immediately before going live. A laptop dimming here is mild; the
+  // same lock on the artist's own device is what keeps their own camera
+  // alive through a long soundcheck. Released when the rehearsal ends,
+  // because this component unmounts with it.
+  useWakeLock(true, 'kit-check');
+
   const [secondsLeft, setSecondsLeft] = useState(session.sessionSeconds ?? 20 * 60);
 
   // Hard stop. The token's own TTL is the real backstop -- this is the

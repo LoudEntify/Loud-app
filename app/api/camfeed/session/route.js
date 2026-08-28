@@ -81,6 +81,48 @@ export async function POST(request) {
 
     const room = roomForPairing(pairing);
     const isShow = (pairing.context || 'rehearsal') === 'show';
+
+    // ── HAS THE SHOW THIS CAMERA BELONGS TO ALREADY FINISHED? ────
+    //
+    // Only reachable now that a phone can reopen and resume from a
+    // stored credential (lib/camfeedDevice.js). Before that, a device
+    // that missed SHOW_ENDED simply never came back.
+    //
+    // The gap it closes: End Show broadcasts SHOW_ENDED on the data
+    // channel and every live device releases (components/ReleaseOnShowEnd
+    // .jsx). A phone whose tab was closed at that moment hears nothing —
+    // and would otherwise reopen, resume happily, rejoin a finished
+    // show's room and switch its camera light back on in someone's
+    // pocket. A light that comes on by itself after a show is over is
+    // the worst possible bug in this whole area.
+    //
+    // Checked server-side rather than remembered on the device on
+    // purpose: the device's memory is exactly what is unreliable in this
+    // scenario. `shows.state` is the same fact every other client reads.
+    //
+    // SHOW CONTEXT ONLY, so a rehearsal poll costs nothing extra. A
+    // failed lookup falls through and mints the token — an unreachable
+    // shows table must not take a live camera off air mid-performance,
+    // and SHOW_ENDED over the data channel is still the primary path.
+    if (isShow) {
+      const { data: show } = await admin
+        .from('shows')
+        .select('state')
+        .eq('room_name', room)
+        .maybeSingle();
+      if (show?.state === 'ended') {
+        return NextResponse.json({
+          supported: true,
+          revoked: false,
+          ended: true,
+          room,
+          context: 'show',
+          role: pairing.role || null,
+          generation: pairing.generation ?? 1,
+          pollMs: SESSION_POLL_MS,
+        });
+      }
+    }
     // Reuse the stored identity. A camera whose identity changes reads to
     // every other client in the room as this camera dropping and a
     // different one arriving — the director console would lose its shot

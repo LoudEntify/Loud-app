@@ -24,6 +24,7 @@ import ConnectionRecovery from './ConnectionRecovery';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
+import { useWakeLock } from '../lib/useWakeLock';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
@@ -1419,6 +1420,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // on). Initialized from room.state directly since Connected/
   // Reconnected may already have fired before this component mounted.
   const [roomConnectionState, setRoomConnectionState] = useState(() => room.state);
+
+  // ── Don't let the screen sleep while this device is in a show ──
+  // Everyone in the room, not just the artist: a viewer's phone dimming
+  // mid-song is the same product failure YouTube solved years ago, and
+  // an artist's or performer's device dimming is worse than that — it
+  // takes their camera with it (lib/useWakeLock.js has the full note on
+  // how this and the frame watchdog divide the work). Released
+  // automatically when this component unmounts, which is what leaving,
+  // ending, or being disconnected all do.
+  useWakeLock(true, `live:${role}`);
 
   // Hoisted from their previous position further down this component
   // (audio-reconnect round) -- ensureAudioPublished below needs them,
