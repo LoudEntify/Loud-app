@@ -158,19 +158,23 @@ export default function CamPage() {
     return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
   }, []);
 
-  async function handleGoLive() {
-    setConnectError('');
-    try {
-      const identity = `camfeed-${slot}-${role}-${Date.now()}-qr`;
-      const res = await fetch(
-        `/api/token?room=${encodeURIComponent(room)}&identity=${encodeURIComponent(identity)}&camfeed=${slot}`
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Token request failed');
-      setConn({ token: data.token, url: data.url });
-    } catch (e) {
-      setConnectError(e.message);
-    }
+  // ── RETIRED: this page can no longer publish ─────────────────
+  //
+  // Security round, 2026-08-28. This was the only caller of
+  // `/api/token?camfeed=`, which handed out CAMERA-publish rights into
+  // any room to anyone who asked — no code, no account, no check. That
+  // branch is closed (app/api/token/route.js), so asking again would
+  // now return a subscribe-only token and this page would sit there
+  // failing to publish for reasons nobody could see.
+  //
+  // Saying so is better than a mystery. Pairing is the replacement and
+  // it is strictly better: a six-character code, a per-device secret,
+  // and a phone that follows the artist from Kit Check into the show
+  // without being picked up again.
+  function handleGoLive() {
+    setConnectError(
+      'This camera link is retired. Open Kit Check on your main device, tap ADD A CAMERA, and scan the code it shows you.'
+    );
   }
 
   const pageStyle = {

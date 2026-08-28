@@ -133,6 +133,46 @@ const ROUTES = [
   { path: '/shows',           marker: 'Recorded',         auth: false, note: 'recorded shows (public shell)' },
 ];
 
+/**
+ * Load one path in one context and report whether its marker appeared.
+ *
+ * Shared by both passes so they cannot drift: "rendered" has to mean the
+ * identical thing when we require it (signed in) and when we forbid it
+ * (signed out), or the comparison between them is worthless.
+ */
+async function probe(context, path, marker, { timeout = 20000 } = {}) {
+  const errors = [];
+  const p = await context.newPage();
+  p.on('pageerror', (e) => errors.push(`pageerror: ${e.message || e}`));
+  p.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (!ignorable(text)) errors.push(`console.error: ${text}`);
+  });
+
+  let status = null;
+  let rendered = false;
+  let bodyLen = 0;
+  try {
+    const resp = await p.goto(`${URL_BASE}${path}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    status = resp?.status() ?? null;
+    // Client-rendered React: the marker cannot be in the initial HTML, so
+    // this waits for it rather than reading the response body. The wait
+    // failing IS the failure -- that is the check.
+    await p.waitForFunction(
+      (m) => document.body && document.body.innerText.includes(m),
+      marker,
+      { timeout }
+    );
+    rendered = true;
+  } catch {
+    rendered = false;
+  }
+  try { bodyLen = (await p.innerText('body')).length; } catch { /* page may be broken */ }
+  await p.close();
+  return { path, status, rendered, errors, bodyLen };
+}
+
 async function main() {
   const browser = await chromium.launch();
   const context = await browser.newContext({
@@ -212,37 +252,43 @@ async function main() {
   // ── Each route ─────────────────────────────────────────────
   for (const route of ROUTES) {
     const path = route.path === '__OWN_PROFILE__' ? ownProfilePath : route.path;
-    const errors = [];
-    const p = await context.newPage();
-    p.on('pageerror', (e) => errors.push(`pageerror: ${e.message || e}`));
-    p.on('console', (msg) => {
-      if (msg.type() !== 'error') return;
-      const text = msg.text();
-      if (!ignorable(text)) errors.push(`console.error: ${text}`);
+    results.push({ ...(await probe(context, path, route.marker, { timeout: 20000 })), note: route.note, marker: route.marker, auth: route.auth });
+  }
+
+  // ── THE SIGNED-OUT GATE PASS ───────────────────────────────
+  //
+  // Everything above proves the gated pages RENDER for the account that
+  // owns them. This proves the other half, which is a different claim and
+  // was never being checked: that they DO NOT render for a stranger.
+  //
+  // It matters because the two failures look nothing alike from the
+  // outside. A page that crashes for its owner is loud. A page that
+  // quietly renders someone's wallet, settings or artist console to a
+  // signed-out visitor returns a perfectly healthy 200 and looks, from
+  // every check written before this one, completely fine.
+  //
+  // A fresh context, not a logout: no cookies, no localStorage, nothing
+  // carried over. This is a first-time visitor pasting a URL.
+  //
+  // The assertion is inverted on purpose. Here, a marker that DOES appear
+  // is the failure.
+  const strangerFindings = [];
+  {
+    const stranger = await browser.newContext({
+      extraHTTPHeaders: BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {},
+      viewport: { width: 1280, height: 900 },
     });
-
-    let status = null;
-    let rendered = false;
-    let bodyLen = 0;
-    try {
-      const resp = await p.goto(`${URL_BASE}${path}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      status = resp?.status() ?? null;
-      // Client-rendered React: the marker cannot be in the initial HTML,
-      // so this waits for it rather than reading the response body. The
-      // wait failing IS the failure -- that is the check.
-      await p.waitForFunction(
-        (m) => document.body && document.body.innerText.includes(m),
-        route.marker,
-        { timeout: 20000 }
-      );
-      rendered = true;
-    } catch {
-      rendered = false;
+    for (const route of ROUTES.filter((r) => r.auth)) {
+      const path = route.path === '__OWN_PROFILE__' ? ownProfilePath : route.path;
+      if (!path) continue;
+      // A SHORT timeout, and that is not a corner cut: the signed-in pass
+      // already established these markers appear within 20s when they are
+      // going to. Waiting the full 20s for each one to NOT appear would
+      // add minutes to every run for no extra information.
+      const r = await probe(stranger, path, route.marker, { timeout: 6000 });
+      strangerFindings.push({ path, marker: route.marker, leaked: r.rendered, status: r.status, bodyLen: r.bodyLen });
     }
-    try { bodyLen = (await p.innerText('body')).length; } catch { /* page may be broken */ }
-
-    results.push({ path, note: route.note, marker: route.marker, auth: route.auth, status, rendered, errors, bodyLen });
-    await p.close();
+    await stranger.close();
   }
 
   await browser.close();
@@ -271,7 +317,32 @@ async function main() {
   } else {
     console.log(`${failed} of ${results.length} FAILED`);
   }
-  process.exit(failed === 0 && signedIn ? 0 : 1);
+
+  // ── Signed-out gate report ─────────────────────────────────
+  let leaks = 0;
+  if (strangerFindings.length) {
+    console.log('\nSIGNED-OUT GATE — the same gated routes, as a stranger:');
+    console.log('─'.repeat(78));
+    console.log('ROUTE                              STATUS  RENDERED TO STRANGER');
+    for (const f of strangerFindings) {
+      if (f.leaked) leaks += 1;
+      console.log(
+        `${(f.leaked ? '✖ ' : '✔ ') + f.path.padEnd(32)} ${String(f.status ?? '—').padEnd(6)}  ${f.leaked ? 'YES — LEAKED' : 'no'}`
+      );
+      if (f.leaked) console.log(`    ↳ "${f.marker}" was visible with no session (body ${f.bodyLen} chars)`);
+    }
+    console.log('─'.repeat(78));
+    console.log(
+      leaks === 0
+        ? `${strangerFindings.length} gated routes all refused a signed-out visitor.`
+        : `${leaks} GATED ROUTE(S) RENDERED TO A SIGNED-OUT VISITOR.`
+    );
+    if (leaks === 0) {
+      console.log('Every one still returned a 200 — which is exactly why the status code proves nothing.');
+    }
+  }
+
+  process.exit(failed === 0 && signedIn && leaks === 0 ? 0 : 1);
 }
 
 main().catch((err) => {
