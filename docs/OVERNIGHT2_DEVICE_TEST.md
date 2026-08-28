@@ -12,7 +12,7 @@ and not five.
 | | |
 |---|---|
 | **Branch** | `feature/overnight-round-2` (off `feature/overnight-product-round`) |
-| **Preview** | `https://loud-9od01j297-korey-alashe.vercel.app` |
+| **Preview** | `https://loud-mlpz8y3ql-korey-alashe.vercel.app` |
 | **Deployed from** | `76ac18d` — the last commit that changes code. Everything after it is documentation. |
 | **Bypass** | Already granted on this project. `vercel curl <url>` uses it automatically for GETs; for the one `POST` below you need the secret itself — Vercel dashboard → Project → Settings → Deployment Protection → **Protection Bypass for Automation**. Deliberately not written into this file. |
 | **Merged to main** | **No.** Nothing merges until you have tested, refined and affirmed. |
@@ -70,6 +70,18 @@ shipped, not just committed" line for each phase.
 | **QA** | `/cam` and `/cam/pair` chunks | Both contain `SHOW_ENDED` and the ended screen — the two pages that previously had no end-of-show handling at all. |
 | **QA** | `lib/showWindow.js` exercised in node | 14/14 — duration default and clamp, `ends_at` override, window open/shut either side of the grace, expired classification, remaining-time. |
 | all | `/`, `/shows`, `/notifications` | HTTP 200 each. |
+
+### ✅ Authenticated routes, loaded signed-in and confirmed rendered
+
+`npm run smoke`, against this deployment, signed in as the artist test
+account — **10 of 10 rendered clean, 7 of them gated**:
+
+`/settings` · `/wallet` · `/welcome` · `/kit-check` · `/live` ·
+`/live?show={unknown}` · `/artist/{own id}` — plus the public `/discover`,
+`/notifications`, `/shows`.
+
+Zero page errors, zero console errors, and each one had to contain a string
+only its real rendered surface produces.
 
 ### ⚠️ What "bypass-loaded, 200 OK" does and does not prove
 
@@ -633,7 +645,7 @@ Wait ~60 seconds for the file to upload, then on your artist profile open the
 recordings library and trigger a verification (or run it directly):
 
 ```bash
-curl -X POST 'https://loud-9od01j297-korey-alashe.vercel.app/api/egress/verify' \
+curl -X POST 'https://loud-mlpz8y3ql-korey-alashe.vercel.app/api/egress/verify' \
   -H "x-vercel-protection-bypass: <your bypass secret>" \
   -H 'Authorization: Bearer <your artist access token>' \
   -H 'Content-Type: application/json' \

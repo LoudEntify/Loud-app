@@ -59,13 +59,11 @@ The marker is the important half. `/settings` has to contain
 login screen contains neither, so **a redirect to login cannot pass as a
 render** — which is precisely how the old check was fooled.
 
-## One-time setup — ONE CLICK REMAINS
+## Setup — done
 
 The check signs in **through the app's own login form**. No preview-only auth
 bypass: a deployed auth side door is a real hazard for a saving of about ten
 lines, and signing in normally also proves the login path still works.
-
-**The account already exists.** I created it through the normal signup form:
 
 | | |
 |---|---|
@@ -73,77 +71,87 @@ lines, and signing in normally also proves the login path still works.
 | Password | in `./smoke.env` (gitignored, on your machine) |
 | Role | artist, handle `loud_smoke_test` |
 
-*(The first attempt returned `500 "Error sending confirmation email"`. That
-turned out to be Supabase's built-in email RATE LIMIT, not broken SMTP —
-retrying the next day succeeded. Worth knowing on its own: during a heavy
-testing session, real signups will start failing the same way.)*
+Created through the normal signup form, then **confirmed by setting
+`email_confirmed_at` in SQL** — this Supabase version has no Confirm button in
+the dashboard.
 
-**What is left is one click, and only you can do it** — the address is not a
-real inbox, so the confirmation email cannot be opened:
+Two things that surfaced getting here, both worth keeping:
 
-> **Supabase → Authentication → Users → `loud-smoke@loudentify.test` → ⋯ →
-> Confirm email**
+- The first signup attempt returned `500 "Error sending confirmation email"`.
+  That was Supabase's built-in email **rate limit**, not broken SMTP —
+  retrying the next day succeeded. **During a heavy testing session, real
+  signups will start failing the same way.** Custom SMTP is the fix if that
+  ever matters.
+- That 500 rendered on screen as the literal string `{}`. Fixed — errors now
+  go through a message extractor rather than assuming `.message` exists.
 
-Then:
-
-```bash
-set -a; . ./smoke.env; set +a
-npm run smoke
-```
-
-Sign-in currently fails with **"Email not confirmed"** — the check reports
-that exact message, which is the error-extractor fix working.
-
-### If you would rather not confirm by hand
-
-Either of these removes the need entirely:
-
-**Turn off Confirm-email for the preview project** — Supabase →
-Authentication → Providers → Email → *Confirm email: off*. Worth weighing on
-its own merits: with it on and no custom SMTP, signups fail whenever the
-built-in quota is hit.
-
-**Or seed the account with the admin API** — the original Option A below.
-I could not run it: the service-role key is marked Sensitive in Vercel and
-cannot be read back.
-
-### The admin-API seeding script, if you prefer it
+### If you ever need to recreate it
 
 `npm run smoke:bootstrap` creates the account directly with
-`email_confirm: true`, skipping the email entirely. It needs the
-service-role key, which is why I could not run it:
+`email_confirm: true`, skipping the email entirely. It needs the service-role
+key (Supabase → Project Settings → API), which is the only reason I could not
+run it myself — it is marked Sensitive in Vercel and cannot be read back.
 
 ```bash
 export NEXT_PUBLIC_SUPABASE_URL='https://YOUR-PROJECT.supabase.co'
-export SUPABASE_SERVICE_ROLE_KEY='eyJ...'      # not stored anywhere
-export SMOKE_EMAIL='loud-smoke@loudentify.test'
-export SMOKE_PASSWORD='...'                    # match ./smoke.env
+export SUPABASE_SERVICE_ROLE_KEY='eyJ...'
+set -a; . ./smoke.env; set +a
 
-npm run smoke:bootstrap            # create (or adopt the existing user)
+npm run smoke:bootstrap             # create (or adopt an existing user)
 npm run smoke:bootstrap -- --delete # remove it again, profile and all
 ```
 
-**What it writes:** one row in `auth.users`, plus its `profiles` row. No
-schema change — the migration boundary is untouched. It is flagged loudly in
-the script itself because it crosses your database boundary; it is a test
-fixture, and no check ever reads the database to decide whether a page worked.
+It writes one row in `auth.users` plus its `profiles` row. No schema change.
 
 ## Running it
 
 ```bash
-export SMOKE_URL='https://loud-xxxx-korey-alashe.vercel.app'
-export VERCEL_AUTOMATION_BYPASS='...'   # Vercel → Settings → Deployment Protection
-export SMOKE_EMAIL='loud-smoke@loudentify.test'
-export SMOKE_PASSWORD='...'
-
+# point smoke.env at the deployment you want, then:
+set -a; . ./smoke.env; set +a
 npm run smoke
 ```
 
-Green looks like:
+Green looks like this — and this is a real run, not an example:
 
 ```
-ALL 9 ROUTES RENDERED CLEAN (6 of them GATED), SIGNED IN AS loud-smoke@loudentify.test
+signed in as loud-smoke@loudentify.test — console at /artist/1a3c9fe8-…
+
+ROUTE                              AUTH  STATUS  RENDERED  ERRORS
+✔ /settings                        yes   200     yes       0
+✔ /wallet                          yes   200     yes       0
+✔ /welcome                         yes   200     yes       0
+✔ /kit-check                       yes   200     yes       0
+✔ /live                            yes   200     yes       0
+✔ /live?show=0000…0000             yes   200     yes       0
+✔ /artist/{own id}                 yes   200     yes       0
+✔ /discover                         —    200     yes       0
+✔ /notifications                    —    200     yes       0
+✔ /shows                            —    200     yes       0
+ALL 10 ROUTES RENDERED CLEAN (7 of them GATED)
 ```
+
+### What the `/live` rows do and do not cover
+
+Both mount `LiveDemo` and render its **resolution** screens — bare `/live`
+lands on *"No show here — this link is missing a show"*, and an unknown id on
+*"That link doesn't point at a show we can find."* That is a real render of
+the live page's component tree, so a crash in it is caught.
+
+It is **not** a live show. An actual room needs LiveKit and an open broadcast
+window; that is the device script's job, and running it on every smoke
+invocation would bill LiveKit minutes.
+
+**Deliberately not seeded with a real show.** A permanent smoke-test show
+would sit in Discover's COMING UP where real people can see it, and
+creating/deleting one per run would make the check write to the database every
+time it runs. Neither is worth what it would add over the two states above.
+
+> The first run of this check reported `/live` as a FAILURE — marker
+> `LOUDENTIFY` not found, body 257 chars. That was **the harness, not the
+> app**: `LOUDENTIFY` only appears in the `HoldingScreen`, a state neither of
+> these routes reaches. Bare `/live` renders correctly and always did. Kept
+> here because a check that fails loudly on its own bad assumption is behaving
+> exactly as intended.
 
 Exit code is 0 only if **every** route rendered **and** the sign-in
 succeeded. A failed sign-in does not abort the run — it continues signed out
@@ -168,9 +176,31 @@ cannot tell you a camera didn't appear, a clip didn't cut, or a countdown
 counted to the wrong moment — that is still `docs/OVERNIGHT2_DEVICE_TEST.md`
 and a real phone.
 
-## The standing rule this creates
+## The standing rule — now actually satisfiable
 
 From here on, a definition-of-done names **which authenticated routes were
 loaded signed-in and confirmed rendered** — not that something returned 200.
-If the smoke check could not run, that is stated, along with which surfaces
-are therefore unverified.
+
+That rule was written before it could be met. It can be met now: the account
+exists, the check runs in about forty seconds, and a green run names every
+route it covered. Paste its table.
+
+If it could not run, say so and name which surfaces are therefore unverified —
+as the previous round did, when six were.
+
+**The contrast, from one run against the same healthy deployment**, because it
+is the clearest statement of why this exists:
+
+| | `/settings` | `/wallet` | `/welcome` | `/kit-check` | `/live` | `/artist/{id}` |
+|---|---|---|---|---|---|---|
+| **Signed out** | 200, blank | 200, blank | 200, blank | 200, blank | 200, blank | 200, blank |
+| **Signed in** | rendered | rendered | rendered | rendered | rendered | rendered |
+
+Six routes. The old check saw the top row and called it green.
+
+### What it still cannot tell you
+
+It catches **dead pages**. It cannot tell you a camera never appeared, a clip
+did not cut, a countdown counted to the wrong moment, or a paired phone stayed
+in the rehearsal room. Every one of those has happened, and every one needs
+`docs/OVERNIGHT2_DEVICE_TEST.md` and a real phone.

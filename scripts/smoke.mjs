@@ -101,12 +101,27 @@ const ROUTES = [
   { path: '/wallet',          marker: 'TOKEN BALANCE',    auth: true,  note: 'wallet + purchase tiers' },
   { path: '/welcome',         marker: 'DO THIS LATER',    auth: true,  note: 'onboarding walkthrough' },
   { path: '/kit-check',       marker: 'Kit Check',        auth: true,  note: 'studio + camera pairing + GO LIVE NOW' },
-  // /live with no ?show= lands on the "this link is missing a show"
-  // screen for a signed-in artist with nothing scheduled -- which is
-  // still a RENDER of LiveDemo, and therefore still catches a crash in
-  // it. A live show itself needs a real room and is the device script's
-  // job, not this one's.
-  { path: '/live',            marker: 'LOUDENTIFY',       auth: true,  note: 'live page shell (LiveDemo mounts)' },
+  // ── /live, WITHOUT a real show, and deliberately so ────────
+  //
+  // These two mount LiveDemo and render its resolution screens. That is
+  // the whole of what this check can honestly cover for the live page:
+  // an actual show needs a LiveKit room and an open broadcast window,
+  // which is the device script's job (and would bill LiveKit minutes on
+  // every smoke run).
+  //
+  // The markers were wrong the first time this ran -- 'LOUDENTIFY' only
+  // appears in the HoldingScreen, a state neither of these reaches --
+  // and the check correctly reported a failure. It was the harness at
+  // fault, not the app: bare /live renders "No show here" with a way
+  // back, exactly as it should.
+  //
+  // Not seeded with a real show on purpose: a permanent smoke-test show
+  // would sit in Discover's COMING UP where real people can see it, and
+  // creating/deleting one per run makes the check write to the database
+  // on every invocation. Neither is worth what it would add over these.
+  { path: '/live',            marker: 'No show here',     auth: true,  note: 'live page, no show param (LiveDemo mounts)' },
+  { path: '/live?show=00000000-0000-0000-0000-000000000000',
+                              marker: 'No show here',     auth: true,  note: 'live page, unknown show id' },
   // THE ONE THAT KEEPS BREAKING. Resolved from the signed-in session, so
   // it is the artist's own console in OWNER mode -- the surface all
   // three crashes were on, and the one a signed-out load cannot reach:
