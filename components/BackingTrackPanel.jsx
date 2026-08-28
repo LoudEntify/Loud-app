@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { loadBackingTrack } from '../lib/audioProcessing';
 import { shotFamilyColor } from '../lib/shotTypes';
 import { computeTrackHash } from '../lib/trackHash';
+import { getAudioHost, setBackingPlayer, getBackingPlayer, subscribeAudioHost } from '../lib/audioHost';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -72,21 +73,63 @@ export default function BackingTrackPanel({
   onSelectCue,
   onDropCue,
 }) {
+  // ── ⚠️ THIS PANEL NO LONGER OWNS THE PLAYER ───────────────────
+  // It used to hold it in `playerRef` and stop() it on unmount, so any
+  // layout change that remounted this panel stopped the track and reset
+  // the playhead to zero. The player now lives in lib/audioHost.js,
+  // outside every component lifecycle; everything below is a VIEW of it.
+  //
+  // The state here is display-only and is REHYDRATED from the host on
+  // mount (see the effect below), which is what makes a remount
+  // invisible: same track, same playhead, still playing.
   const [fileName, setFileName] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
   const [loading, setLoading] = useState(false);
   const [peaks, setPeaks] = useState(null);
-  const playerRef = useRef(null);
   const rafRef = useRef(null);
   const playheadRef = useRef(null); // DOM ref -- width updated directly, not via React state, so 200 bars don't re-render every frame
   const elapsedLabelRef = useRef(null);
 
+  // ── REHYDRATE FROM THE HOST ───────────────────────────────────
+  // The whole point of Task 2, in one effect. On every mount — first
+  // load, a resize that remounted this subtree, arriving on /live after
+  // the countdown — ask the host what is loaded and show that, instead
+  // of rendering an empty "Choose audio file" over a track that is
+  // audibly still playing.
+  //
+  // Peaks are recomputed from the host's own AudioBuffer rather than
+  // cached in the host: the buffer is already in memory, the computation
+  // is a single pass, and caching a derived array is one more thing that
+  // can go stale against the track it describes.
+  useEffect(() => {
+    function sync() {
+      const host = getAudioHost();
+      const player = host.player;
+      if (!player) {
+        setFileName(null);
+        setDuration(0);
+        setPeaks(null);
+        setPlaying(false);
+        return;
+      }
+      setFileName(host.trackName || 'Backing track');
+      setDuration(player.duration);
+      setPlaying(!!player.isPlaying?.());
+      setPeaks((prev) => (prev ? prev : computePeaks(player.audioBuffer)));
+    }
+    sync();
+    // Also follow the host: another surface loading a track (or End Show
+    // releasing it) must be reflected here without a remount.
+    return subscribeAudioHost(sync);
+  }, []);
+
   useEffect(() => {
     function tick() {
-      if (playerRef.current && duration > 0) {
-        const elapsed = playerRef.current.getElapsed();
+      const player = getBackingPlayer();
+      if (player && duration > 0) {
+        const elapsed = player.getElapsed();
         const pct = Math.min(100, (elapsed / duration) * 100);
         if (playheadRef.current) playheadRef.current.style.width = `${pct}%`;
         if (elapsedLabelRef.current) elapsedLabelRef.current.textContent = `${formatTime(elapsed)} / ${formatTime(duration)}`;
@@ -106,30 +149,37 @@ export default function BackingTrackPanel({
   // again from the start for a new show without a page reload -- no need
   // to re-decode or re-choose the file unless it's actually different.
   useEffect(() => {
-    if (showEnded && playerRef.current) {
-      playerRef.current.stop();
+    if (showEnded && getBackingPlayer()) {
+      getBackingPlayer().stop();
       setPlaying(false);
     }
   }, [showEnded]);
 
-  // Catch-all for every OTHER way the performer session tears down --
-  // leaving via BroadcastStage's floating leave button, a room disconnect,
-  // or anything else that unmounts this panel -- none of which set
-  // showEnded, so the effect above never fires for them. Unmounting this
-  // component doesn't stop the Web Audio source node on its own (it keeps
-  // playing through the still-alive AudioContext), so this has to call
-  // stop() explicitly.
-  useEffect(() => {
-    return () => {
-      playerRef.current?.stop();
-    };
-  }, []);
+  // ── ⚠️ THE UNMOUNT STOP IS GONE, AND ITS REMOVAL IS THE FIX ───
+  //
+  // This used to be:
+  //
+  //     useEffect(() => () => { playerRef.current?.stop(); }, []);
+  //
+  // The reasoning at the time was sound in isolation — unmounting a
+  // component does not stop a Web Audio source node, so the panel
+  // cleaned up after itself. But "this panel unmounted" and "the artist
+  // wants the music to stop" are not the same event, and treating them
+  // as one is exactly why minimising a panel or resizing the window
+  // killed the backing track mid-performance.
+  //
+  // Stopping is now tied to events that actually mean stop: the End Show
+  // effect above, and releaseAudioHost() when a session genuinely ends
+  // (lib/audioHost.js). Unmounting means nothing to the audio any more,
+  // which is the entire point.
 
   async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file || !audioContext || !outputBus) return;
     setLoading(true);
-    playerRef.current?.disconnect();
+    // Replacing a loaded track: the host stops and disconnects the old
+    // one inside setBackingPlayer, so two sources can never overlap.
+    
     // Computed alongside the decode, not instead of it -- Blob.arrayBuffer()
     // re-reads the file's bytes each call (not a stream, safe to call
     // twice on the same File), and loadBackingTrack doesn't expose the
@@ -141,7 +191,7 @@ export default function BackingTrackPanel({
       computeTrackHash(file),
     ]);
     player.setVolume(volume);
-    playerRef.current = player;
+    setBackingPlayer(player, trackHash, file.name);
     setDuration(player.duration);
     setPeaks(computePeaks(player.audioBuffer));
     setFileName(file.name);
@@ -153,29 +203,27 @@ export default function BackingTrackPanel({
   }
 
   function togglePlay() {
-    if (!playerRef.current) return;
-    if (playing) {
-      playerRef.current.pause();
-    } else {
-      playerRef.current.play();
-    }
+    const player = getBackingPlayer();
+    if (!player) return;
+    if (playing) player.pause(); else player.play();
     setPlaying(!playing);
   }
 
   function stop() {
-    playerRef.current?.stop();
+    getBackingPlayer()?.stop();
     setPlaying(false);
     if (playheadRef.current) playheadRef.current.style.width = '0%';
   }
 
   function changeVolume(v) {
     setVolume(v);
-    playerRef.current?.setVolume(v);
+    getBackingPlayer()?.setVolume(v);
   }
 
   function seekTo(fraction) {
-    if (!playerRef.current || !duration) return;
-    playerRef.current.seek(fraction * duration);
+    const player = getBackingPlayer();
+    if (!player || !duration) return;
+    player.seek(fraction * duration);
   }
 
   // Cue-Sheet Director (CD-3) -- "drop a cue at the playhead," available
@@ -183,8 +231,9 @@ export default function BackingTrackPanel({
   // click target on the waveform, this just reads wherever the playhead
   // already is).
   function handleDropCue() {
-    if (!playerRef.current) return;
-    onDropCue?.(playerRef.current.getElapsed() * 1000);
+    const player = getBackingPlayer();
+    if (!player) return;
+    onDropCue?.(player.getElapsed() * 1000);
   }
 
   return (

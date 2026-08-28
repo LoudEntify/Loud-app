@@ -84,6 +84,9 @@ export default function TokenWallet() {
   const [buyBusy, setBuyBusy] = useState('');
   const [buyError, setBuyError] = useState('');
   const [providerInfo, setProviderInfo] = useState(null);
+  // Null (not yet known) is deliberately NOT "off": a slow or failed
+  // status probe must not silently take the shop down.
+  const paymentsOff = providerInfo ? !providerInfo.live : false;
 
   const [cashout, setCashout] = useState(null); // server view of the cash-out section
   const [cashoutAmount, setCashoutAmount] = useState('');
@@ -113,6 +116,29 @@ export default function TokenWallet() {
     } catch {
       setCashout(null);
     }
+  }, []);
+
+  // TASK 4 — ask the SERVER whether a purchase can complete here, before
+  // offering one. Previously `providerInfo` was only populated as a side
+  // effect of a checkout attempt, so the only way to discover that
+  // payments were not connected was to try and fail.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getSession();
+        const token = s?.access_token;
+        if (!token) return;
+        const res = await fetch('/api/wallet/provider', { headers: { Authorization: `Bearer ${token}` } });
+        const body = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok) setProviderInfo(body);
+      } catch {
+        // Leave providerInfo null. The button stays enabled and a failed
+        // checkout still reports honestly — refusing to sell because a
+        // status probe hiccuped would be the worse error.
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -241,11 +267,13 @@ export default function TokenWallet() {
                     key={pack.key}
                     type="button"
                     onClick={() => buy(pack.key)}
-                    disabled={!!buyBusy}
+                    disabled={!!buyBusy || paymentsOff}
+                    title={paymentsOff ? providerInfo?.message || 'Payments are not connected yet.' : undefined}
                     style={{
                       textAlign: 'left', padding: '15px 16px', border: '1px solid rgba(1,22,39,0.12)',
                       clipPath: CHAMFER, background: 'transparent', borderRadius: 0,
-                      cursor: buyBusy ? 'default' : 'pointer', opacity: buyBusy && buyBusy !== pack.key ? 0.5 : 1,
+                      cursor: (buyBusy || paymentsOff) ? 'default' : 'pointer',
+                      opacity: paymentsOff ? 0.4 : (buyBusy && buyBusy !== pack.key ? 0.5 : 1),
                     }}
                   >
                     <div style={{ fontSize: 9.5, letterSpacing: '0.1em', color: 'rgba(1,22,39,0.45)', fontWeight: 700 }}>
@@ -265,9 +293,21 @@ export default function TokenWallet() {
               </div>
 
               <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.45)', marginTop: 10, lineHeight: 1.5 }}>
-                Payment is taken on the provider&apos;s own secure page. Your card details never reach Loudentify.
-                {providerInfo && !providerInfo.live && (
-                  <> <strong style={{ color: '#8a5200' }}>This deployment has no payment provider connected — purchases here are simulated.</strong></>
+                {paymentsOff ? (
+                  // Short, and it says what is true about the DEPLOYMENT
+                  // rather than blaming the person or their card. The
+                  // sentence comes from the server (app/api/wallet/provider)
+                  // so the copy and the logic that decides it cannot drift.
+                  <strong style={{ color: '#8a5200' }}>
+                    {providerInfo?.message || 'Payments are not connected yet, so tokens cannot be bought here.'}
+                  </strong>
+                ) : (
+                  <>
+                    Payment is taken on the provider&apos;s own secure page. Your card details never reach Loudentify.
+                    {providerInfo?.simulated && (
+                      <> <strong style={{ color: '#8a5200' }}>{providerInfo.message}</strong></>
+                    )}
+                  </>
                 )}
               </div>
             </div>

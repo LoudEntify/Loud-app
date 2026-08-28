@@ -25,6 +25,9 @@ import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
 import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
 import { useWakeLock } from '../lib/useWakeLock';
+import { usePublisherStats } from '../lib/publisherStats';
+import { useShowSession } from '../lib/useShowSession';
+import { setSessionTarget } from './AudioHostProvider';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor } from '../lib/rotationProcessor';
 import { SHOT_TYPES, NEAREST_SHOT_FOR_ROLE, resolveSourceRole } from '../lib/shotTypes';
@@ -1324,6 +1327,7 @@ export default function LiveDemo() {
             selfName={conn.name}
             email={session?.user?.email || ''}
             artistAccessToken={session?.access_token}
+            artistId={session?.user?.id || null}
             /* The resolved room, and the show it belongs to. Everything
                inside that used to read the pilot-room constant now takes
                these two: the recorder, the director's telemetry, the
@@ -1437,7 +1441,7 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
+function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, artistId, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
   const room = useRoomContext();
   // ScreenShare is in this list ONLY because that is how b-roll clips are
   // published (lib/trackSources.js explains why not Camera). Nothing in
@@ -1485,6 +1489,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // automatically when this component unmounts, which is what leaving,
   // ending, or being disconnected all do.
   useWakeLock(true, `live:${role}`);
+
+  // TASK 5 — freeze instrumentation. READ-ONLY: this samples send-side
+  // stats and writes health_events rows. It changes no encoder setting,
+  // no simulcast configuration and no resolution.
+  //
+  // Only for participants who actually publish — a viewer has no sender
+  // and would sample nothing every two seconds forever.
+  // `role` (a prop), NOT isMainPerformer — that is declared several
+  // hundred lines below this point and reading it here would be exactly
+  // the temporal-dead-zone crash class check:tdz exists to catch.
+  usePublisherStats(room, { enabled: role !== 'viewer', label: `live:${role}` });
 
   // Hoisted from their previous position further down this component
   // (audio-reconnect round) -- ensureAudioPublished below needs them,
@@ -3756,6 +3771,40 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // track+artist.
   const [cueSheet, setCueSheet] = useState(null);
   const cueModeAvailable = !!cueSheet?.cues?.length;
+
+  // ── TASK 1 — the durable copy of this deck's state ────────────
+  //
+  // `cueSheet` above is React state, and React state is precisely what
+  // the countdown route change and every panel remount destroyed. It is
+  // now a cache: the binding also lives in show_session_state, and the
+  // row is what survives.
+  //
+  // Ephemeral shot commands are NOT here and must never be — they stay
+  // on the LiveKit data channel (lib/shotCommands.js). This row is for
+  // what must SURVIVE; the data channel is for what must be FAST.
+  const { state: sessionState, ready: sessionReady, patch: patchSession, missing: sessionMissing } =
+    useShowSession(showId, artistId);
+
+  // Tell the app-root audio host which row to write the playhead into.
+  // Cleared on unmount so a device that has left a show stops reporting
+  // a position for it.
+  useEffect(() => {
+    setSessionTarget(showId, artistId);
+    return () => setSessionTarget(null, null);
+  }, [showId, artistId]);
+
+  // Persist the binding whenever it changes. Guarded on `sessionReady`
+  // so the initial null from React state cannot overwrite a real
+  // server-side binding before it has finished loading — that race would
+  // have made the row lose exactly the value it exists to keep.
+  const lastPersistedSheetRef = useRef(undefined);
+  useEffect(() => {
+    if (!sessionReady || sessionMissing || !showId || !artistId) return;
+    const id = cueSheet?.id || null;
+    if (lastPersistedSheetRef.current === id) return;
+    lastPersistedSheetRef.current = id;
+    patchSession({ cue_sheet_id: id });
+  }, [cueSheet, sessionReady, sessionMissing, showId, artistId, patchSession]);
 
   // CD-4: Manual/Auto/Cue -- three mutually exclusive top-level modes.
   // Default 'auto' preserves the pre-CD-4 behavior ("auto runs by

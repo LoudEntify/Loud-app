@@ -8,6 +8,7 @@ import AudioDeckPanel from './AudioDeckPanel';
 import EmptyState from './EmptyState';
 import PairingPanel from './PairingPanel';
 import RehearsalRoom from './RehearsalRoom';
+import { adoptAudioGraph, releaseAudioHost, audioHostActive, getAudioHost } from '../lib/audioHost';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
@@ -227,7 +228,19 @@ export default function KitCheck() {
   const startAudio = useCallback(async () => {
     setAudioError('');
     try {
+      // Reuse a graph the host is already holding rather than opening a
+      // second microphone. Walking back into Kit Check from a show must
+      // not stack two audio chains on one device.
+      if (audioHostActive()) {
+        const existing = getAudioHost();
+        audioHandleRef.current = existing;
+        setAudioNodes(existing.nodes);
+        setAudioContext(existing.audioContext);
+        return;
+      }
       const handle = await createPilotAudioTrack();
+      // TASK 2 — the host owns this now, not this component.
+      adoptAudioGraph(handle);
       audioHandleRef.current = handle;
       setAudioNodes(handle.nodes);
       setAudioContext(handle.audioContext);
@@ -236,27 +249,41 @@ export default function KitCheck() {
     }
   }, []);
 
+  // ── ⚠️ THIS USED TO CLOSE THE AudioContext, AND THAT WAS THE BUG ──
+  //
+  // The old version ran `handle.audioContext?.close?.()` from this
+  // component's UNMOUNT cleanup. Navigating to the show unmounts Kit
+  // Check, so going live closed the audio context — and a closed
+  // AudioContext is terminal, it cannot be reopened. The backing track
+  // stopped at exactly the moment it mattered most, and no amount of
+  // remembering the selection server-side would have changed that.
+  //
+  // Releasing is now a DELIBERATE act (releaseAudioHost) and belongs to
+  // whoever ends the session, not to whoever happens to unmount.
   const stopAudio = useCallback(() => {
-    const handle = audioHandleRef.current;
-    if (!handle) return;
-    try {
-      handle.rawStream?.getTracks?.().forEach((t) => t.stop());
-      handle.processedTrack?.stop?.();
-      handle.audioContext?.close?.();
-    } catch {
-      // release is best-effort; never throw out of teardown
-    }
+    releaseAudioHost('kit-check-stop');
     audioHandleRef.current = null;
     setAudioNodes(null);
     setAudioContext(null);
   }, []);
 
-  // Everything this page acquired, this page releases. No LiveKit
-  // lifecycle is involved, so nothing else can be holding these.
+  // Camera only. The audio graph is deliberately NOT released here: this
+  // cleanup runs on the route change into the live show, which is
+  // precisely when the artist needs their audio to keep running.
   useEffect(() => () => {
     stopCamera();
-    stopAudio();
-  }, [stopCamera, stopAudio]);
+  }, [stopCamera]);
+
+  // Adopt whatever the host already holds when this page mounts, so
+  // returning to Kit Check mid-session shows the live graph rather than
+  // an empty deck offering to open a microphone that is already open.
+  useEffect(() => {
+    if (!audioHostActive()) return;
+    const existing = getAudioHost();
+    audioHandleRef.current = existing;
+    setAudioNodes(existing.nodes);
+    setAudioContext(existing.audioContext);
+  }, []);
 
   // ── Who am I, and when is my window? ───────────────────────
   useEffect(() => {
