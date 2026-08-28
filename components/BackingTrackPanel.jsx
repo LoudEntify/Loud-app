@@ -5,6 +5,7 @@ import { loadBackingTrack } from '../lib/audioProcessing';
 import { shotFamilyColor } from '../lib/shotTypes';
 import { computeTrackHash } from '../lib/trackHash';
 import { getAudioHost, setBackingPlayer, getBackingPlayer, subscribeAudioHost } from '../lib/audioHost';
+import { needsRepick, currentPositionMs } from '../lib/showSessionState';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -72,6 +73,10 @@ export default function BackingTrackPanel({
   activeCueId = null,
   onSelectCue,
   onDropCue,
+  // TASK 1's row, read at last. Optional — omitted, this panel behaves
+  // exactly as it did before, which is what keeps it usable from Kit
+  // Check where there is no show to key a row by.
+  sessionState = null,
 }) {
   // ── ⚠️ THIS PANEL NO LONGER OWNS THE PLAYER ───────────────────
   // It used to hold it in `playerRef` and stop() it on unmount, so any
@@ -83,6 +88,10 @@ export default function BackingTrackPanel({
   // mount (see the effect below), which is what makes a remount
   // invisible: same track, same playhead, still playing.
   const [fileName, setFileName] = useState(null);
+  // The host's current track identity, mirrored into state purely so
+  // needsRepick() below re-evaluates when it changes — reading
+  // getAudioHost().trackHash during render would not re-render on its own.
+  const [loadedHash, setLoadedHash] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
@@ -109,12 +118,14 @@ export default function BackingTrackPanel({
       const player = host.player;
       if (!player) {
         setFileName(null);
+        setLoadedHash(null);
         setDuration(0);
         setPeaks(null);
         setPlaying(false);
         return;
       }
       setFileName(host.trackName || 'Backing track');
+      setLoadedHash(host.trackHash || null);
       setDuration(player.duration);
       setPlaying(!!player.isPlaying?.());
       setPeaks((prev) => (prev ? prev : computePeaks(player.audioBuffer)));
@@ -173,9 +184,37 @@ export default function BackingTrackPanel({
   // (lib/audioHost.js). Unmounting means nothing to the audio any more,
   // which is the entire point.
 
+  // ── WHAT THE SERVER REMEMBERS THAT THIS DEVICE CANNOT ─────────
+  // The read side of Task 1, and the answer to "the row had a track name
+  // and the panel showed nothing."
+  //
+  // needsRepick() is true exactly when the row names a track that the
+  // audio host is not holding — after a hard reload, or on a second
+  // device.
+  //
+  // It is computed here but only SHOWN when the deck is empty (the
+  // !fileName branch below). That is deliberate: needsRepick is also
+  // true when the artist has since loaded a different track, and in that
+  // case they made a choice and do not need the previous one advertised
+  // back at them mid-show. Empty deck plus a remembered track is the one
+  // state where the offer is help rather than noise.
+  //
+  // The honest limit, restated because the UI has to express it: the
+  // browser will not reopen a local file without a fresh user gesture, so
+  // no amount of server state can resume this automatically. What it can
+  // do is turn "start over and hope you remember" into "re-select this
+  // exact file and land back where you were."
+  const resume = needsRepick(sessionState, loadedHash)
+    ? { name: sessionState.track_name || 'your backing track', positionMs: currentPositionMs(sessionState) }
+    : null;
+
   async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file || !audioContext || !outputBus) return;
+    // Captured BEFORE the awaits below: decoding is slow enough that a
+    // Realtime echo can land mid-decode and move the row out from under
+    // us, and the artist agreed to resume from what they were shown.
+    const resumeTo = resume;
     setLoading(true);
     // Replacing a loaded track: the host stops and disconnects the old
     // one inside setBackingPlayer, so two sources can never overlap.
@@ -191,6 +230,24 @@ export default function BackingTrackPanel({
       computeTrackHash(file),
     ]);
     player.setVolume(volume);
+
+    // ── LAND BACK WHERE THEY WERE ─────────────────────────────────
+    // Only when the file they just chose is provably the same one the
+    // row was tracking — same SHA-256, not the same filename. Seeking a
+    // different track to 2:14 because it happens to be called the same
+    // thing would be a confident lie about where they are, and a
+    // renamed-or-re-exported file is exactly the case a filename check
+    // would get wrong.
+    //
+    // Left PAUSED at that offset rather than auto-playing: the artist
+    // re-picked a file, which is not the same as asking for the music to
+    // start, and starting a backing track unbidden mid-show is the kind
+    // of surprise this whole round exists to remove. seek() sets the
+    // resume offset without starting the source node.
+    if (resumeTo && trackHash === sessionState?.track_hash && resumeTo.positionMs > 0) {
+      player.seek(resumeTo.positionMs / 1000);
+    }
+
     setBackingPlayer(player, trackHash, file.name);
     setDuration(player.duration);
     setPeaks(computePeaks(player.audioBuffer));
@@ -243,12 +300,31 @@ export default function BackingTrackPanel({
       </span>
 
       {!fileName ? (
-        <label style={{ display: 'inline-block' }}>
-          <span className="control-btn" style={{ display: 'inline-block' }}>
-            {loading ? 'Loading...' : 'Choose audio file'}
-          </span>
-          <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
-        </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* The resume offer. Names the exact file and the exact time,
+              because "you had something loaded" is not actionable and
+              this is read at speed, mid-show, by someone who has just
+              watched their deck go blank. */}
+          {resume && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 13, color: '#fdfffc' }}>{resume.name}</span>
+              <span style={{ fontSize: 11, color: '#2ec4b6' }}>
+                {resume.positionMs > 0
+                  ? `Re-select this file to resume at ${formatTime(resume.positionMs / 1000)}`
+                  : 'Re-select this file to load it again'}
+              </span>
+              <span style={{ fontSize: 11, color: '#888780' }}>
+                Your device cannot reopen it on its own — the file never left this browser.
+              </span>
+            </div>
+          )}
+          <label style={{ display: 'inline-block' }}>
+            <span className="control-btn" style={{ display: 'inline-block' }}>
+              {loading ? 'Loading...' : resume ? 'Re-select audio file' : 'Choose audio file'}
+            </span>
+            <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
+          </label>
+        </div>
       ) : (
         <>
           <span style={{ fontSize: 13, color: '#fdfffc' }}>{fileName}</span>

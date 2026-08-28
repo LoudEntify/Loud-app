@@ -47,6 +47,9 @@ export default function AudioDeckPanel({
   // same path as artistEmail.
   artistAccessToken,
   onCueSheetChange,
+  // TASK 1's row, passed straight through to BackingTrackPanel, which is
+  // the only thing under here that reads it. Not consumed at this level.
+  sessionState = null,
 }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
@@ -450,6 +453,7 @@ export default function AudioDeckPanel({
         <BackingTrackPanel
           audioContext={audioContext}
           outputBus={nodes.outputBus}
+          sessionState={sessionState}
           showEnded={showEnded}
           onPlayerChange={handleBackingPlayerChange}
           cues={cues}

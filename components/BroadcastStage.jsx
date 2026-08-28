@@ -98,6 +98,11 @@ export default function BroadcastStage({
   artistEmail,
   artistAccessToken,
   onCueSheetChange,
+  // TASK 1's row -- threaded to BOTH AudioDeckPanel instances below (the
+  // SwipePages/mobile one and the desktop column). They are the same
+  // panel rendered in two layouts; a prop added to one and not the other
+  // is a feature that works only in portrait.
+  sessionState = null,
   deckCollapsed,
   onToggleDeckCollapsed,
   commentsCollapsed,
@@ -402,6 +407,7 @@ export default function BroadcastStage({
                         artistEmail={artistEmail}
                         artistAccessToken={artistAccessToken}
                         onCueSheetChange={onCueSheetChange}
+                        sessionState={sessionState}
                       />
                     ),
                   },
@@ -477,6 +483,7 @@ export default function BroadcastStage({
               artistEmail={artistEmail}
               artistAccessToken={artistAccessToken}
               onCueSheetChange={onCueSheetChange}
+              sessionState={sessionState}
             />
           </div>
           <div className="desktop-side-column desktop-side-column--right">

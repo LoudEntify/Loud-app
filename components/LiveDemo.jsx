@@ -3848,18 +3848,95 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     return () => setSessionTarget(null, null);
   }, [showId, artistId]);
 
-  // Persist the binding whenever it changes. Guarded on `sessionReady`
-  // so the initial null from React state cannot overwrite a real
-  // server-side binding before it has finished loading — that race would
-  // have made the row lose exactly the value it exists to keep.
+  // ── HYDRATE BEFORE PERSISTING. THE ORDER IS THE WHOLE FIX. ────
+  //
+  // The previous guard was `sessionReady`, which means "the row finished
+  // loading" — NOT "local state agrees with the row." Nothing hydrated
+  // `cueSheet`, so it was null on every fresh mount, and the moment
+  // sessionReady flipped true the persist effect below computed
+  // id = null, sailed through a dedupe seeded with `undefined`
+  // (undefined !== null), and wrote cue_sheet_id: null. The effect
+  // written to protect the binding was erasing it on arrival at /live,
+  // on both handover triggers.
+  //
+  // So: read the row's binding back into `cueSheet` FIRST, seed the
+  // dedupe ref with what the row already holds, and only then allow any
+  // write. After that the first write can only come from a real change.
+  //
+  // Keyed on (show, artist) rather than a boolean so it re-arms by
+  // itself when either changes. A boolean plus a reset effect has an
+  // ordering hazard — the reset's setState does not apply until the next
+  // render, so the hydration effect in the same commit still sees the
+  // old `true` and skips.
   const lastPersistedSheetRef = useRef(undefined);
+  const sessionKey = showId && artistId ? `${showId}:${artistId}` : null;
+  const [hydratedKey, setHydratedKey] = useState(null);
+
   useEffect(() => {
-    if (!sessionReady || sessionMissing || !showId || !artistId) return;
+    if (!sessionKey || !sessionReady || sessionMissing) return undefined;
+    if (hydratedKey === sessionKey) return undefined;
+
+    const boundId = sessionState?.cue_sheet_id ?? null;
+
+    // Nothing bound server-side: seed null so a local null is a no-op
+    // rather than a write, and open the gate immediately.
+    if (!boundId) {
+      lastPersistedSheetRef.current = null;
+      setHydratedKey(sessionKey);
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // ?all=1 is the artist's whole library, scoped server-side to the
+        // verified session (app/api/cue-sheets/route.js) — there is no
+        // by-id route, and adding one to fetch a single row this page
+        // already has the id for is not worth a second endpoint.
+        const res = await fetch('/api/cue-sheets?all=1', {
+          headers: { Authorization: `Bearer ${artistAccessToken}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+        // String-compared: cue_sheets.id is a bigint, which arrives as a
+        // JSON number here and could arrive as a string from anywhere
+        // else. An identity check that silently fails would look exactly
+        // like a deleted sheet.
+        const sheet = (data.sheets || []).find((s) => String(s.id) === String(boundId)) || null;
+        if (sheet) {
+          setCueSheet(sheet);
+          lastPersistedSheetRef.current = sheet.id;
+        } else {
+          // The row points at a sheet that no longer exists. Seeding null
+          // means the dangling id is left alone rather than actively
+          // cleared — a stale pointer is cheap, and a write here would
+          // destroy the only evidence of what went missing.
+          lastPersistedSheetRef.current = null;
+          logHealthEvent('session_state_sheet_missing', { cueSheetId: boundId });
+        }
+        setHydratedKey(sessionKey);
+      } catch (err) {
+        // Deliberately does NOT open the gate. A failed hydration means
+        // we do not know what the row holds, and the only safe thing to
+        // do while ignorant is write nothing at all. The cost is that
+        // cue-sheet changes do not persist for this session; the
+        // alternative is erasing a binding because a fetch timed out.
+        logHealthEvent('session_state_hydrate_failed', { detail: String(err?.message || err) });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionKey, sessionReady, sessionMissing, sessionState?.cue_sheet_id, hydratedKey, artistAccessToken]);
+
+  // Persist the binding whenever it genuinely changes. The gate is
+  // hydration, not readiness — see above.
+  useEffect(() => {
+    if (!sessionKey || hydratedKey !== sessionKey || sessionMissing) return;
     const id = cueSheet?.id || null;
     if (lastPersistedSheetRef.current === id) return;
     lastPersistedSheetRef.current = id;
     patchSession({ cue_sheet_id: id });
-  }, [cueSheet, sessionReady, sessionMissing, showId, artistId, patchSession]);
+  }, [cueSheet, sessionKey, hydratedKey, sessionMissing, patchSession]);
 
   // CD-4: Manual/Auto/Cue -- three mutually exclusive top-level modes.
   // Default 'auto' preserves the pre-CD-4 behavior ("auto runs by
@@ -4340,6 +4417,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           artistEmail={email}
           artistAccessToken={artistAccessToken}
           onCueSheetChange={setCueSheet}
+          sessionState={sessionState}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
           feedsCollapsed={feedsCollapsed}
