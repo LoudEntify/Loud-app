@@ -848,3 +848,118 @@ the live path is where a silent failure looks like a working one.
 - GO LIVE still arms 30 minutes before the start, not at the start. That is a
   deliberate reading of Ruling 1 — see DECISIONS.md — because arming only from
   the slated time would delete soundcheck.
+
+---
+
+# Sitting 5 — the camfeed device round
+
+Deployed: `https://loud-jhu8bxx5m-korey-alashe.vercel.app`
+
+**You need a real phone for all four.** Nothing here can be checked from a
+headless browser: three of them are about what an operating system does to a
+page it has stopped paying attention to.
+
+Pair a phone in Kit Check as usual before starting.
+
+## 5.1 Reopen a closed camfeed tab mid-show — resumes with NO code
+
+The one that cost you a sitting.
+
+1. Go live with a paired phone contributing.
+2. On the phone, **close the tab entirely.** Not background it — close it.
+3. Reopen it: from history, from the QR again, or by typing `/cam/pair`.
+   All three are the same test; the QR one matters most because that URL
+   still carries the original `?code=`, which was used up at redeem.
+
+**Expected:** a brief *"Reconnecting this camera…"*, then the viewfinder,
+back in the show. **No code entry at any point.**
+
+**On the director console, the thing to actually watch:** the camera comes
+back as *the same camera*. Its role tile repopulates. You should **not** see a
+new angle appear alongside a dead one, and the shot should be cuttable to
+immediately.
+
+> If the phone asks for a code, the credential did not persist. Check whether
+> the phone is in private browsing — the pairing screen says so explicitly
+> when it cannot remember.
+
+**Also check the other two reopen moments:**
+
+| When | Expected |
+|---|---|
+| Reopen **after** the Kit Check → show migration | Lands in the **show** room, not the rehearsal one — it resumes to wherever the pairing points *now*, not where it was when the tab closed |
+| Reopen **after End Show** | *"The show has ended"*. **The camera light must NOT come on.** This is the one to be fussy about: a light that comes back by itself in someone's pocket is the worst bug in this area |
+
+## 5.2 A phone stays awake through a 10-minute publish
+
+1. Pair a phone, get it publishing, and **put it down. Do not touch it.**
+2. Wait 10 minutes.
+
+**Expected:** the screen is still on and the feed is still live at the console.
+
+**If the screen dims or sleeps:** look at the bottom of the viewfinder. It
+will be telling you which of two things happened —
+
+- *"This phone may dim on its own"* — the browser supports wake lock but
+  refused, usually an OS low-power mode. Real, and worth reporting with the
+  phone model.
+- *"This phone can't be kept awake by the browser"* — Wake Lock is not
+  implemented. iOS Safari before 16.4. Not a bug; the message is the honest
+  answer and tells the operator to set auto-lock to Never.
+
+**Then the deliberate case, which is different on purpose:** press the power
+button to lock the handset. The screen goes off — a wake lock cannot and
+should not prevent that. Within ~3 seconds the console should drop that
+camera with `frames_stalled`. **That is the watchdog working, not a
+regression.** Prevention covers the accidental case; detection covers this one.
+
+## 5.3 Viewfinder states
+
+On the phone, with a show running:
+
+| Check | Expected |
+|---|---|
+| Own picture | Fills the screen. This is the framing view |
+| Role | `WIDE` / `CLOSE` / `SIDE` badge, top right of the picture |
+| Connection | **In words** — "Connected — in the show" / "Reconnecting — hold still". A dot carries the same meaning alongside, never instead |
+| Which room | "Show room" or "Rehearsal room", with the room name under it |
+| **ON AIR** | Turns solid red **the moment the director cuts to this camera**, and back to a grey "NOT ON AIR" when they cut away |
+| Stage inset | Bottom right, labelled `LIVE SOURCE`. Shows whichever camera is currently cut to. When *this* phone is the cut, it says so in words rather than mirroring the picture behind it |
+
+**In rehearsal there is deliberately no inset** — rehearsal tokens cannot
+subscribe, so there is nothing to show and a black rectangle would read as a
+fault.
+
+**The inset is the live SOURCE, not the composed frame.** It does not apply
+the shot's push-ins or crops. It answers "what is going out, and is it me".
+
+## 5.4 Rotate mid-show — no CAMERA LOST, no reselect
+
+The important one, and the easiest to get a false pass on. Do it **while the
+director is cut to that camera.**
+
+1. Cut to the paired phone's angle.
+2. On the phone, tap **ROTATE → FRONT**.
+
+**Expected on the phone:** the picture flips to the selfie camera in under a
+second. `ON AIR` stays red throughout.
+
+**Expected on the console — this is the actual test:**
+- The camera does **not** disappear and reappear.
+- No `CAMERA LOST` treatment over the shot.
+- The director does **not** reselect. The shot stays where you put it.
+
+**In the health timeline** (this is what makes it a real check rather than a
+vibe): you should see **one** `camfeed_rotated` row, and you should **not**
+see `track_liveness_impaired` with reason `absent`, nor
+`track_liveness_forgotten`, nor a new `identity:trackSid` key entering the
+pool. The `trackSid` logged on the rotate row is the *same* sid the camera had
+before — that is the proof it was a lens change and not a camera drop.
+
+> A brief `frames_stalled` followed immediately by `track_liveness_recovered`
+> is acceptable and bounded — it means the handset took over 3 seconds to
+> reacquire the lens. Report it with the phone model, but it is not the
+> failure this test is looking for. The failure is `absent`, a new key, or a
+> reselect.
+
+Rotate back and confirm it is symmetrical.

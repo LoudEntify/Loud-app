@@ -131,6 +131,14 @@ const ROUTES = [
   { path: '/discover',        marker: 'LIVE NOW',         auth: false, note: 'discovery feed (public)' },
   { path: '/notifications',   marker: 'Notifications',    auth: false, note: 'notification centre (public shell)' },
   { path: '/shows',           marker: 'Recorded',         auth: false, note: 'recorded shows (public shell)' },
+  // The paired phone's own page. Deliberately NOT auth:true — it takes
+  // no account by design, because it pairs a DEVICE, not a person. It is
+  // here because it is the surface that mounts the viewfinder, and
+  // because a headless browser with no camera is a genuinely useful test
+  // of it: this must reach the pairing form rather than throwing on
+  // absent media, which is exactly what a phone that denies the camera
+  // permission does.
+  { path: '/cam/pair',        marker: 'Pair this camera', auth: false, note: 'camfeed pairing + viewfinder entry' },
 ];
 
 /**
