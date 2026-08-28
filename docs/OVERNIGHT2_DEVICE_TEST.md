@@ -851,7 +851,11 @@ the live path is where a silent failure looks like a working one.
 
 ---
 
-# Sitting 5 — the camfeed device round
+# SITTING 7 · The camfeed device round
+
+> Renumbered from "Sitting 5" — this document already had a SITTING 5 (share
+> cards) and a SITTING 6 (account control), and two of each is a good way to
+> run the wrong one.
 
 Deployed: `https://loud-jhu8bxx5m-korey-alashe.vercel.app`
 
@@ -861,7 +865,7 @@ page it has stopped paying attention to.
 
 Pair a phone in Kit Check as usual before starting.
 
-## 5.1 Reopen a closed camfeed tab mid-show — resumes with NO code
+## 7.1 Reopen a closed camfeed tab mid-show — resumes with NO code
 
 The one that cost you a sitting.
 
@@ -890,7 +894,7 @@ immediately.
 | Reopen **after** the Kit Check → show migration | Lands in the **show** room, not the rehearsal one — it resumes to wherever the pairing points *now*, not where it was when the tab closed |
 | Reopen **after End Show** | *"The show has ended"*. **The camera light must NOT come on.** This is the one to be fussy about: a light that comes back by itself in someone's pocket is the worst bug in this area |
 
-## 5.2 A phone stays awake through a 10-minute publish
+## 7.2 A phone stays awake through a 10-minute publish
 
 1. Pair a phone, get it publishing, and **put it down. Do not touch it.**
 2. Wait 10 minutes.
@@ -913,7 +917,7 @@ should not prevent that. Within ~3 seconds the console should drop that
 camera with `frames_stalled`. **That is the watchdog working, not a
 regression.** Prevention covers the accidental case; detection covers this one.
 
-## 5.3 Viewfinder states
+## 7.3 Viewfinder states
 
 On the phone, with a show running:
 
@@ -933,7 +937,7 @@ fault.
 **The inset is the live SOURCE, not the composed frame.** It does not apply
 the shot's push-ins or crops. It answers "what is going out, and is it me".
 
-## 5.4 Rotate mid-show — no CAMERA LOST, no reselect
+## 7.4 Rotate mid-show — no CAMERA LOST, no reselect
 
 The important one, and the easiest to get a false pass on. Do it **while the
 director is cut to that camera.**
@@ -966,7 +970,9 @@ Rotate back and confirm it is symmetrical.
 
 ---
 
-# Sitting 6 — MANDATORY: recording still works after the auth change
+# SITTING 8 · MANDATORY — recording still works after the auth change
+
+> Renumbered from "Sitting 6" for the same reason.
 
 Deployed: `https://loud-ezro1gi11-korey-alashe.vercel.app`
 
@@ -975,7 +981,11 @@ Deployed: `https://loud-ezro1gi11-korey-alashe.vercel.app`
 I got that wrong, the symptom is silent: recordings simply stop happening, or
 worse, stop *stopping*, and nobody finds out until afterwards.
 
-## ⚠️ FIRST — a missing environment variable, and it is not mine to set
+## ⚠️ FIRST — read this if you are testing on PREVIEW
+
+**On PRODUCTION this is already fine** — `vercel env ls` shows
+`EGRESS_TEMPLATE_BASE_URL` scoped to **Production only**. If you are running
+this sitting against production, skip this box entirely.
 
 `EGRESS_TEMPLATE_BASE_URL` **is not set on Preview.** I checked with
 `vercel env ls preview`: every other egress variable is there, that one is not.
@@ -983,7 +993,7 @@ worse, stop *stopping*, and nobody finds out until afterwards.
 **Consequence:** `/api/egress/start` returns `500 Server missing egress
 environment variables` on every preview deployment, and has done since the
 variable was introduced. **This predates the security round** — I did not
-break it, but I did find it, and Sitting 6 cannot pass until it is set.
+break it, but I did find it, and Sitting 8 cannot pass until it is set.
 
 I have deliberately not set it myself. It is a change to your Vercel project,
 and the correct value is a judgment call: per the route's own header it must
@@ -1002,10 +1012,10 @@ vercel env add EGRESS_TEMPLATE_BASE_URL preview
 > below can pass. The recorded FILE will still be poor on a protected preview,
 > because LiveKit's browser cannot reach the template to render it — that is
 > the pre-existing limitation already noted in this document, not something
-> this round changed. Sitting 6 is a test of the **auth gate**, not of video
+> this round changed. Sitting 8 is a test of the **auth gate**, not of video
 > quality.
 
-## 6.1 An unauthenticated call is now refused
+## 8.1 An unauthenticated call is now refused
 
 From your laptop, no browser needed:
 
@@ -1027,7 +1037,7 @@ Both routes, both verbs, are covered automatically by `npm run probe:auth`
 (38/38 green on this deployment) and `npm run probe:authz` (7/7, signed in).
 The curl is here so you can see it refuse with your own eyes.
 
-## 6.2 Start and stop STILL WORK on a real show — the one that matters
+## 8.2 Start and stop STILL WORK on a real show — the one that matters
 
 1. Schedule a show, open Kit Check, **GO LIVE**.
 2. **Within a few seconds of going live**, open the browser console on the
@@ -1065,7 +1075,7 @@ happen. **To prove it rather than trust it: run a show longer than an hour and
 confirm `egress_command_ok / stop` still appears at the end.** A short show
 does not test this at all.
 
-## 6.3 Cue sheets, participants — already proven, no device needed
+## 8.3 Cue sheets, participants — already proven, no device needed
 
 `npm run probe:authz` covers these signed in, including controls that prove
 the fix refuses *other people's* data without refusing your own:
