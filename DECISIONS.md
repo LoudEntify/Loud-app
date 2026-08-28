@@ -1583,3 +1583,70 @@ told the user to verify `/api/broll/upload` returns 404. It returns 405 —
 `68cb676` re-added the file that `740dc0c` deleted, while fixing an
 unrelated crash. Both places corrected in place rather than quietly
 edited.
+
+---
+
+## 2026-08-28 — Camfeed device round (findings 2, 3, 1)
+
+**Reversed a decision I had written down and argued for.** CamPair.jsx
+said the device secret was "deliberately not persisted: a phone that
+reloads has been picked up by a person, and a person can scan the code
+again." The premise is false. A tab closes for reasons that have nothing
+to do with intent, and every one of them happens to a phone propped on a
+stand while its owner is on stage. Corrected in place with a ⚠️ block
+rather than quietly rewritten, because the wrong reasoning is more
+instructive than the right conclusion.
+
+Worth noting what the fix actually was: **almost nothing server-side.**
+`/api/camfeed/session` already authenticated by device secret and
+already returned the stored `device_identity` every time, specifically
+so a camera could come and go without the director seeing a new one.
+I had built the entire reconnection mechanism and then prevented the
+phone from using it by refusing to let it remember who it was.
+
+**Stored the secret in localStorage, and said so plainly.** This is a
+real change in exposure — the secret now survives the tab. The argument
+for it is in lib/camfeedDevice.js and rests on the capability being
+camera-publish only, instantly revocable remotely, and already available
+to anyone holding the unlocked handset. The failure it prevents happened
+in a real sitting; the failure it risks needs the phone in your hand.
+
+**Added a server-side ended-show check rather than a local marker.**
+Reopen-after-End-Show is the one case where the device's own memory is
+exactly what is unreliable, so the device is the wrong place to store
+the answer. `shows.state` is the same fact every other client reads.
+Scoped to show-context polls so rehearsal costs nothing, and a failed
+lookup falls through and mints — an unreachable shows table must never
+take a live camera off air.
+
+**Wake lock does not retire the frame watchdog, and the header says so
+at length.** They cover different failures: prevention handles the OS
+dimming a phone nobody touched, detection handles a deliberate power
+-button lock that no web API can or should override. The temptation
+after building the first is to relax the second. Prevention claimed to
+be complete is worse than none, because it retires the detection.
+
+**Viewfinder: preview primary, stage inset, no toggle.** Framing is
+continuous and is the only job this device can do that nothing else in
+the building can. The stage is reference, checked in glances. A toggle
+puts the primary job one tap away and will be left on the wrong view at
+the wrong moment.
+
+**Called the inset LIVE SOURCE rather than a programme monitor**, because
+that is what it is. It renders the track the director cut to without
+ShotRenderer's transforms. Running the full renderer on a device already
+encoding and uploading video, for a picture watched in one-second
+glances, is the definition of gold-plating.
+
+**Rotate is restartTrack, and the reason is the requirement.** An
+unpublish/republish would give the old liveness key an `absent` verdict,
+hold it impaired for 30 seconds, and put a NEW `identity:trackSid` key
+into the eligible pool — which is precisely "a camera dropping and a new
+one appearing", mid-show, for a camera that never moved. restartTrack
+replaces the MediaStreamTrack inside the existing LocalVideoTrack, so
+identity, publication and sid are all untouched and there is no server
+call at all. The frame watchdog is not tripped (sub-second versus a 3s
+threshold), and the bound if it ever were is `frames_stalled` →
+recovered → 750ms probation on a key that never disappeared — degraded,
+not a CAMERA LOST cascade. Both sids are logged on the rotate row so a
+timeline can prove it was a lens change.
