@@ -1,6 +1,15 @@
 import { EgressClient, WebhookConfig } from 'livekit-server-sdk';
 import { EncodedFileOutput, EncodedFileType, EncodingOptions, EgressStatus, S3Upload } from '@livekit/protocol';
 import { NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
+import { verifyShowOwner } from '../../../../lib/verifyShowOwner';
+
+// AUTH MODEL: the verified artist who owns the show running in this room.
+// Security round finding 3 (docs/SECURITY_AUDIT_2026-08-28.md) — this
+// route previously started a billed LiveKit egress, writing into the S3
+// bucket, for anyone who knew a room name. See the note in
+// app/api/egress/stop/route.js for why a room name is not a secret.
 
 // Stage 4: directed portrait egress -- replaces Stage 3's stock grid
 // template with LiveKit's customBaseUrl mechanism, pointed at this app's
@@ -63,6 +72,15 @@ export async function POST(request) {
     if (!room) {
       return NextResponse.json({ error: 'room is required' }, { status: 400 });
     }
+
+    // Same order, same reasoning, as the stop route: identity, then
+    // ownership, then act. Nothing reaches LiveKit before both pass.
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
     // Defaults to 'solo' for anything other than exactly 'versus' --
     // EgressPage.jsx's own layout handling has the identical fallback
     // (components/EgressPage.jsx), so an unexpected/missing value here

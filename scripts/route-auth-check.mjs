@@ -82,35 +82,14 @@ const ALLOWLIST = {
       'scripts/api-auth-probe.mjs fails on it.',
   },
   'health-events/route.js': {
-    status: 'pending',
+    status: 'settled',
     reason:
-      'MEDIUM, open. Diagnostic telemetry into a table with RLS on and zero policies (service-role only), ' +
-      'never read back into a user-facing surface, and lib/healthLog.js drops failures silently — so the ' +
-      'blast radius is a junk table, not a user. But it is unauthenticated and unrated, therefore floodable. ' +
-      'Queued fix: rate-limit by IP and require a show_id that resolves to a real show.',
-  },
-  'participants/route.js': {
-    status: 'pending',
-    reason:
-      'MEDIUM, open. Unauthenticated write of an email address (PII) against any show_id, no rate limit. ' +
-      'Confirmed reaching the insert with no auth on the deployed preview (500 only because the probe used a ' +
-      'nonexistent show). Queued fix: require a session, or rate-limit and verify the show exists and is joinable.',
-  },
-  'egress/start/route.js': {
-    status: 'pending',
-    reason:
-      'HIGH, open. Anyone who knows a room_name can start a billed recording on it. room_name is not secret — ' +
-      'LiveDemo resolves shows with select(\'*\') through the anon client, so every viewer of a public show ' +
-      'link has it. Queued fix: verifyArtistAuth + confirm the caller owns the show with that room_name. ' +
-      'Not applied yet because both call sites are in the live broadcast path (components/LiveDemo.jsx) and ' +
-      'cannot be verified without a real show.',
-  },
-  'egress/stop/route.js': {
-    status: 'pending',
-    reason:
-      'HIGH, open. Same exposure as egress/start and worse consequences: stopping a live show\'s recording ' +
-      'destroys a performance that cannot be re-recorded. Confirmed executing the LiveKit call with no auth ' +
-      'on the deployed preview. Same queued fix, same reason for not applying it mid-QA.',
+      'Deliberately open, and rate-limited instead (RATE_LIMIT in that route, lib/rateLimit.js). ' +
+      'Two specific reasons, both in the route header: the devices that need it most have no account — ' +
+      'a paired camfeed phone authenticates as a DEVICE and has no Supabase session — and the obvious ' +
+      'alternative guard is worse than none, because health_events.show_id holds the ROOM NAME, and ' +
+      'rehearsal rooms have no shows row at all, so "require show_id to resolve" would silently discard ' +
+      'every Kit Check diagnostic. RLS on with zero policies; nothing surfaces this table to any user.',
   },
 };
 

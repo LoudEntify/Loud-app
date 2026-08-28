@@ -1,6 +1,22 @@
 import { EgressClient } from 'livekit-server-sdk';
 import { EgressStatus } from '@livekit/protocol';
 import { NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
+import { verifyShowOwner } from '../../../../lib/verifyShowOwner';
+
+// AUTH MODEL: the verified artist who owns the show running in this room.
+//
+// Security round finding 2 (docs/SECURITY_AUDIT_2026-08-28.md). This
+// route had no authentication of any kind, and `room_name` is not a
+// secret: components/LiveDemo.jsx resolves a show with select('*')
+// through the anon client, so every viewer of a public show link already
+// has the one input this needed.
+//
+// Of the two egress routes this is the one with teeth. Starting a
+// recording nobody wanted costs money. Stopping one costs the
+// PERFORMANCE — a stopped recording is not re-recordable, and the artist
+// finds out afterwards.
 
 function toHttpUrl(wsUrl) {
   return wsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
@@ -28,6 +44,17 @@ export async function POST(request) {
     if (!room) {
       return NextResponse.json({ error: 'room is required' }, { status: 400 });
     }
+
+    // ORDER MATTERS: identity first, then ownership, then act. Nothing
+    // touches LiveKit until both have passed — a caller who fails the
+    // check must not be able to learn from a timing difference whether a
+    // room has an active recording.
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
 
     const egressClient = new EgressClient(toHttpUrl(livekitUrl), apiKey, apiSecret);
 

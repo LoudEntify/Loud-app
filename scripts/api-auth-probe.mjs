@@ -138,6 +138,13 @@ const OWNER_ONLY = [
   { method: 'POST', path: '/api/broll/upload-url', body: {} },
   { method: 'POST', path: '/api/egress/verify',    body: { showId: FAKE_UUID } },
   { method: 'POST', path: '/api/recordings/sync',  body: {} },
+  // Closed in the HIGH round. egress/stop is the one with teeth: a
+  // stopped recording is a performance that cannot be re-recorded, and
+  // this used to execute the LiveKit call for anyone who knew a room
+  // name — which every viewer of a public show link does.
+  { method: 'POST', path: '/api/egress/start',     body: { room: 'probe-room-xyz' } },
+  { method: 'POST', path: '/api/egress/stop',      body: { room: 'probe-room-xyz' } },
+  { method: 'POST', path: '/api/participants',     body: { show_id: FAKE_UUID, email: 'probe@example.com' } },
 ];
 
 function shortLabel({ method, path }) {

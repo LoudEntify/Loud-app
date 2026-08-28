@@ -53,7 +53,7 @@ import {
   VideoTrack,
 } from '@livekit/components-react';
 import { ConnectionState, RoomEvent, Track } from 'livekit-client';
-import { logHealthEvent } from '../lib/healthLog';
+import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -101,6 +101,28 @@ export default function CamViewfinder({ conn, wake }) {
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState('');
   const [liveCut, setLiveCut] = useState(null);
+
+  // ── ⚠️ WITHOUT THIS, EVERY EVENT BELOW IS DROPPED ─────────────
+  // Found while working out what guard app/api/health-events could
+  // safely take: logHealthEvent's first line is `if (!ctx.showId) return`
+  // — it discards silently until initHealthLog has been called, and this
+  // page had never called it.
+  //
+  // So the camfeed telemetry added last round (`camfeed_rotated`,
+  // `camfeed_on_air`, the wake-lock rows) was being written into a queue
+  // that never flushed. The Sitting 5 rotate test asks you to confirm
+  // exactly one `camfeed_rotated` row in the timeline; it would have
+  // found nothing, and the honest reading of that would have been
+  // "rotate is broken" when rotate was fine.
+  //
+  // Keyed on the room name, matching what LiveDemo and EgressPage pass
+  // (`showId: roomName`), so a camfeed's rows sit in the same bucket as
+  // the show's and one query returns the whole picture.
+  useEffect(() => {
+    const identity = localParticipant?.identity;
+    if (!conn?.room || !identity) return;
+    initHealthLog({ showId: conn.room, participantIdentity: identity, role: `camfeed-${conn.role || 'wide'}` });
+  }, [conn?.room, conn?.role, localParticipant?.identity]);
 
   // ── AM I ON AIR? ──────────────────────────────────────────────
   // The director broadcasts SHOT_COMMAND over the LiveKit data channel

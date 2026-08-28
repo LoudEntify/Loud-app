@@ -253,30 +253,75 @@ async function updateShowStateWithRetry(nextState, showId) {
 // flywheel logging in lib/shotCommands.js (a broken recorder must never
 // take the show down). performanceMode (Stage 4) is only meaningful for
 // 'start' -- the route ignores it for 'stop', harmless to always pass.
-function triggerEgress(action, room, performanceMode) {
-  fetch(`/api/egress/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ room, performanceMode }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data?.error) {
-        console.warn(`[egress] ${action} failed:`, data.error, data.detail);
-        return;
+// ── THE TOKEN IS FETCHED HERE, NOT PASSED IN ──────────────────
+// Both egress routes now require the show's artist (security round
+// findings 2 and 3), so these calls carry a bearer. It is read from the
+// live session at the moment of the call rather than taken from the
+// `artistAccessToken` prop, and that is the single most important line
+// in this function.
+//
+// A Supabase access token lives about an hour. A show can be scheduled
+// for three (DURATION_OPTIONS_MINUTES goes to 180, capped there). A
+// token captured when the room mounted is therefore quite likely to be
+// EXPIRED by the time End Show is pressed — and the failure would be
+// the worst-shaped one available: the recording starts fine, the show
+// runs, and the stop silently 401s. Nobody finds out until a recorder
+// has run to its own timeout, uploading, long after the audience left.
+//
+// supabase-js refreshes the session in the background, so asking for it
+// now always gets a current one. It also removes the whole class of bug
+// where a stale token is captured in a useCallback dependency array.
+async function triggerEgress(action, room, performanceMode) {
+  const failed = (stage, detail) => {
+    console.warn(`[egress] ${action} ${stage}:`, detail);
+    // On the record, not just in a console nobody had open. A recording
+    // that never started and a recording that never stopped are both
+    // invisible at the time and both matter afterwards.
+    logHealthEvent('egress_command_failed', { action, room, stage, detail: String(detail) });
+  };
+
+  let accessToken = null;
+  try {
+    accessToken = (await getSession())?.access_token || null;
+  } catch (e) {
+    failed('could not read the session', e?.message || e);
+  }
+  if (!accessToken) {
+    // Deliberately still attempted. The route will refuse it and say so,
+    // which puts a real 401 in the network log — strictly more
+    // diagnosable than a request that was never sent.
+    failed('no session token available', 'signed out, or the session could not be read');
+  }
+
+  try {
+    const res = await fetch(`/api/egress/${action}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ room, performanceMode }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || data?.error) {
+      failed(`refused (${res.status})`, data?.error || data?.detail || res.statusText);
+      return;
+    }
+    // status/error here is per-egress EgressInfo (see the route) --
+    // logged even on an HTTP-200 response so an upload-side failure
+    // (bad bucket/credential) isn't invisible just because the request
+    // itself succeeded.
+    const egresses = data?.egresses || (data?.egressId ? [data] : []);
+    egresses.forEach((e) => {
+      if (e.status === 'EGRESS_FAILED' || e.status === 'EGRESS_ABORTED' || e.error) {
+        failed('reported failure', `${e.status} ${e.error || ''}`.trim());
       }
-      // status/error here is per-egress EgressInfo (see the route) --
-      // logged even on an HTTP-200 response so an upload-side failure
-      // (bad bucket/credential) isn't invisible just because the request
-      // itself succeeded.
-      const egresses = data?.egresses || (data?.egressId ? [data] : []);
-      egresses.forEach((e) => {
-        if (e.status === 'EGRESS_FAILED' || e.status === 'EGRESS_ABORTED' || e.error) {
-          console.warn(`[egress] ${action} reported failure:`, e.status, e.error);
-        }
-      });
-    })
-    .catch((e) => console.warn(`[egress] ${action} request failed:`, e));
+    });
+    logHealthEvent('egress_command_ok', { action, room, count: egresses.length });
+  } catch (e) {
+    failed('request failed', e?.message || e);
+  }
 }
 
 // PAN_VECTORS/ShotTransformFrame/ShotFadeLayer/ShotVideo moved to
@@ -875,9 +920,19 @@ export default function LiveDemo() {
   const registerParticipant = useCallback(async (emailValue) => {
     if (!show?.id || !emailValue) return null;
     try {
+      // The route derives the email from the session now (security round
+      // finding 6) and no longer reads it from the body. Still sent, so
+      // a client and a server that disagree about who is joining show up
+      // as a mismatch rather than being silently reconciled — and the
+      // bearer is read fresh here for the same reason triggerEgress
+      // does: this can fire well into a long show.
+      const accessToken = (await getSession())?.access_token || null;
       const res = await fetch('/api/participants', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body: JSON.stringify({ show_id: show.id, email: emailValue, consent: false }),
       });
       const data = await res.json();

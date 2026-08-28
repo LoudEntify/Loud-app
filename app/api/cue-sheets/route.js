@@ -63,7 +63,34 @@ export async function GET(request) {
   }
 
   const trackHash = searchParams.get('track_hash') || '';
-  const artistEmail = normalizeEmail(searchParams.get('artist_email'));
+  // ── artist_email COMES FROM THE SESSION, NOT THE REQUEST ──────
+  //
+  // Security round finding 4 (docs/SECURITY_AUDIT_2026-08-28.md). This
+  // read the `artist_email` query parameter and queried by it, having
+  // verified only that the caller was *an* artist — so any artist
+  // account could read any other artist's cue sheets for a track, given
+  // their email address.
+  //
+  // The parameter is still ACCEPTED and still validated, because every
+  // existing caller sends it and rejecting it outright would 400 the
+  // editor mid-deploy. It is simply no longer trusted: it is compared
+  // against the session's own email, and a mismatch is refused rather
+  // than quietly answered with the caller's own data — silently
+  // substituting would make a client bug look like a working feature.
+  //
+  // PATCH and DELETE in this same file already did this correctly, via
+  // ownsSheet() below. They were written later, for Product Ruling 2,
+  // and the two methods above were never brought into line. That is the
+  // whole defect: a file can be half-secured and read as secured.
+  const sessionEmail = normalizeEmail(auth.user.email);
+  const requestedEmail = normalizeEmail(searchParams.get('artist_email'));
+  if (requestedEmail && requestedEmail !== sessionEmail) {
+    return NextResponse.json(
+      { error: 'You can only read your own cue sheets.' },
+      { status: 403 }
+    );
+  }
+  const artistEmail = sessionEmail;
   // Named cue sheets: `name` selects one sheet from the artist's library
   // for this track. Omitting it lists every sheet they have for the
   // track, which is what the picker needs. `list=1` forces list mode.
@@ -73,8 +100,12 @@ export async function GET(request) {
   if (!TRACK_HASH_RE.test(trackHash)) {
     return NextResponse.json({ error: 'Invalid track_hash' }, { status: 400 });
   }
+  // Now validating the SESSION's email, not a parameter — so a failure
+  // here is an account without a usable email address, not a bad
+  // request. Said accurately: "Invalid artist_email" would send someone
+  // looking at their client code for a bug that is not there.
   if (!EMAIL_RE.test(artistEmail)) {
-    return NextResponse.json({ error: 'Invalid artist_email' }, { status: 400 });
+    return NextResponse.json({ error: 'This account has no email address to file cue sheets under.' }, { status: 403 });
   }
 
   try {
@@ -123,7 +154,20 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const trackHash = body.track_hash || '';
-    const artistEmail = normalizeEmail(body.artist_email);
+    // Same rule as GET, and this is the half with teeth. The upsert
+    // below conflicts on (track_hash, artist_email, name) — so a
+    // request naming somebody else's email did not read their sheet,
+    // it OVERWROTE it. Including, by default, the one called 'Default'
+    // that their show is about to load.
+    const sessionEmail = normalizeEmail(auth.user.email);
+    const requestedEmail = normalizeEmail(body.artist_email);
+    if (requestedEmail && requestedEmail !== sessionEmail) {
+      return NextResponse.json(
+        { error: 'You can only save cue sheets to your own account.' },
+        { status: 403 }
+      );
+    }
+    const artistEmail = sessionEmail;
     const trackLabel = typeof body.track_label === 'string' ? body.track_label.slice(0, 500) : null;
     const fallbackBehaviour = body.fallback_behaviour;
 
@@ -131,7 +175,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid track_hash' }, { status: 400 });
     }
     if (!EMAIL_RE.test(artistEmail)) {
-      return NextResponse.json({ error: 'Invalid artist_email' }, { status: 400 });
+      return NextResponse.json({ error: 'This account has no email address to file cue sheets under.' }, { status: 403 });
     }
     if (!isValidFallbackBehaviour(fallbackBehaviour)) {
       return NextResponse.json({ error: 'Invalid fallback_behaviour' }, { status: 400 });
