@@ -11,6 +11,7 @@ import {
   tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
 } from '../lib/audioProcessing';
 import { logHealthEvent } from '../lib/healthLog';
+import { getAudioHost, subscribeAudioHost } from '../lib/audioHost';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
@@ -47,8 +48,12 @@ export default function AudioDeckPanel({
   // same path as artistEmail.
   artistAccessToken,
   onCueSheetChange,
-  // TASK 1's row, passed straight through to BackingTrackPanel, which is
-  // the only thing under here that reads it. Not consumed at this level.
+  // TASK 1's row. Passed down to BackingTrackPanel for the resume offer,
+  // and read here for one thing only: when the row already names a bound
+  // sheet for the track being adopted, that binding wins over this
+  // panel's "most recently updated sheet for this track" default. Without
+  // that, adopting a track on arrival would quietly rebind the row to a
+  // different sheet than the artist chose.
   sessionState = null,
 }) {
   const [manualMix, setManualMix] = useState(false);
@@ -88,6 +93,8 @@ export default function AudioDeckPanel({
   const [cueSheetSaveError, setCueSheetSaveError] = useState(null);
   const loadedTrackHashRef = useRef(null); // most-recently-requested track hash, guards against a stale GET resolving late
   const lastTrackLabelRef = useRef(null); // original filename, used as track_label on Save
+  const lookedUpHashRef = useRef(null); // hash whose sheet lookup actually COMPLETED -- distinct from loadedTrackHashRef, which is set the moment a track is adopted and says nothing about whether its sheets arrived
+  const appliedSheetIdRef = useRef(null); // which sheet the editor is currently showing, so the reconcile effect below can tell "already correct" from "needs switching" without re-applying on every render
 
   // Soundcheck-only feature -- the instant the show leaves soundcheck
   // (goes live), force monitoring off regardless of what the artist left
@@ -107,6 +114,89 @@ export default function AudioDeckPanel({
   }, [showPhase, monitorOn, nodes]);
 
   useEffect(() => () => { if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current); }, []);
+
+  // ── THE DECK ADOPTS WHAT THE HOST IS ALREADY PLAYING ──────────
+  //
+  // This panel used to learn about a backing track from exactly one
+  // event: BackingTrackPanel calling onPlayerChange when the artist
+  // picked a FILE. Everything downstream hung off that one callback, so
+  // arriving at /live from Kit Check with a track already loaded and
+  // audible left this component believing no track existed:
+  //
+  //   * trackHash null -> CueEditorPanel returns null outright
+  //     (components/CueEditorPanel.jsx), so the editor is simply absent
+  //     over audible audio.
+  //   * cues [] -> no markers on BackingTrackPanel's waveform either.
+  //   * onBackingPlayerChange never fires -> LiveDemo's
+  //     backingTrackPlayerRef stays null and getBackingTrackState()
+  //     reports {elapsedMs: 0, isPlaying: false}, so the cue director
+  //     could not have fired a cue even with a sheet bound.
+  //
+  // The track survives the handover now (lib/audioHost.js); the deck's
+  // knowledge of it did not. Same class of defect as the original one,
+  // one layer up: state derived from a mount-time event rather than from
+  // the thing that actually outlives mounts.
+  //
+  // So the host is the source of truth here too. Subscribing rather than
+  // reading once also covers End Show and leave, which null the player —
+  // the editor should disappear then, and via this path it does.
+  //
+  // Hooks live ABOVE the `if (!nodes)` early return below, deliberately.
+  // A hook after a conditional return is the "Rendered fewer hooks than
+  // expected" crash this codebase has already shipped once (see the same
+  // note in CueEditorPanel).
+  const adoptFromHostRef = useRef(null);
+  // Re-pointed every render so the subscription below always calls the
+  // CURRENT closure. A `[]`-dep effect capturing adoptTrack once would
+  // freeze artistAccessToken at its mount-time value, and a cue-sheet
+  // lookup with a stale token fails silently.
+  useEffect(() => {
+    adoptFromHostRef.current = () => {
+      const host = getAudioHost();
+      adoptTrack(host.player || null, host.trackHash || null, host.trackName || null);
+    };
+  });
+  useEffect(() => {
+    const run = () => adoptFromHostRef.current?.();
+    run();
+    return subscribeAudioHost(run);
+  }, []);
+
+  // The cue-sheet lookup needs a verified session, and this panel can
+  // mount before LiveDemo has one. Without this, a track adopted during
+  // that window would keep its hash but never load its sheet, and
+  // nothing would retry — the editor would stay empty for the rest of
+  // the show for a reason invisible on screen.
+  useEffect(() => {
+    if (!artistEmail || !artistAccessToken) return;
+    const hash = loadedTrackHashRef.current;
+    if (hash && lookedUpHashRef.current !== hash) loadCueSheet(hash);
+  }, [artistEmail, artistAccessToken]);
+
+  // ── RECONCILE WHEN THE ROW ARRIVES LATE ───────────────────────
+  // The binding preference inside loadCueSheet only helps if the row is
+  // already loaded when the lookup resolves, and on arrival at /live it
+  // usually is not: useShowSession's query starts in RoomInner, and
+  // React runs a child's effects BEFORE its parent's, so this panel has
+  // adopted the track and fired its lookup before that query is even
+  // issued. The two race, and without this the panel would settle on
+  // `data.sheet` (most recently updated) and report it upward — writing
+  // over the artist's actual binding.
+  //
+  // Not a fight with manual selection: choosing a named sheet persists
+  // it, and useShowSession applies that optimistically, so cue_sheet_id
+  // already matches the new choice by the time this runs.
+  useEffect(() => {
+    const boundId = sessionState?.cue_sheet_id ?? null;
+    if (!boundId || !cueSheets.length) return;
+    if (String(boundId) === String(appliedSheetIdRef.current)) return;
+    // Unsaved edits outrank a late-arriving row. Switching sheets under
+    // someone mid-edit to honour a binding they are in the middle of
+    // changing would discard real work.
+    if (cueSheetDirty) return;
+    const bound = cueSheets.find((s) => String(s.id) === String(boundId));
+    if (bound) applySheet(bound);
+  }, [sessionState?.cue_sheet_id, cueSheets, cueSheetDirty]);
 
   if (!nodes) {
     return <p style={{ fontSize: 12, color: '#888780' }}>Connecting audio...</p>;
@@ -151,17 +241,34 @@ export default function AudioDeckPanel({
     };
   }
 
-  function handleBackingPlayerChange(player, newTrackHash, trackLabel) {
+  // Both routes into this panel's track state land here: the artist
+  // picking a file (via BackingTrackPanel's onPlayerChange) and the host
+  // subscription above. They overlap by design — BackingTrackPanel calls
+  // setBackingPlayer() BEFORE onPlayerChange(), so a file pick fires the
+  // host emit first and the prop callback immediately after. The identity
+  // guard below is what makes that harmless instead of two resets and two
+  // cue-sheet fetches per load.
+  function adoptTrack(player, newTrackHash, trackLabel) {
     backingPlayerRef.current = player;
     player?.setSyncDelayMs(syncDelayMs);
     // Cue-Sheet Director (Phase 1) -- the player instance is otherwise
     // private to this component; this is the one seam that surfaces it
-    // to LiveDemo, where cueDirector's poll loop can read it.
+    // to LiveDemo, where cueDirector's poll loop can read it. Re-sent on
+    // every sync, not just on change: a re-decode of the same file is a
+    // NEW player object under an unchanged hash, and LiveDemo holding
+    // the old one would read a playhead that never moves.
     onBackingPlayerChange?.(player);
+
+    // Same track as we already hold -> nothing about the cue sheet's
+    // identity has changed, so leave the editor alone. Resetting here
+    // would wipe unsaved cue edits every time the host emitted.
+    if (loadedTrackHashRef.current === newTrackHash) return;
 
     // A new track means a new cue sheet identity -- reset local editing
     // state before loading whatever's saved for it (if anything).
     loadedTrackHashRef.current = newTrackHash;
+    lookedUpHashRef.current = null;
+    appliedSheetIdRef.current = null;
     lastTrackLabelRef.current = trackLabel;
     setTrackHash(newTrackHash);
     setCues([]);
@@ -171,19 +278,48 @@ export default function AudioDeckPanel({
     setSheetName('Default');
     setCueSheetDirty(false);
     setCueSheetSaveError(null);
-    onCueSheetChange?.(null);
+
+    // ── NO EAGER onCueSheetChange(null) HERE ──────────────────────
+    // It used to fire on this line, before the lookup below had
+    // resolved. With TASK 1's persistence in place that transient null
+    // is a WRITE: re-picking a track cleared cue_sheet_id in the row and
+    // then restored it a network round trip later, and any failure in
+    // between left it cleared. Fix C made re-picking a routine action
+    // rather than a rare one, which turned a narrow window into a
+    // regular one.
+    //
+    // loadCueSheet is now the single reporter of the outcome, and it
+    // reports null ONLY when it has positively established there is no
+    // sheet — never on a failure, where the honest answer is "unknown"
+    // and the safe action is to leave the existing binding alone.
     if (newTrackHash) loadCueSheet(newTrackHash);
+    else onCueSheetChange?.(null); // no track at all: genuinely nothing bound
   }
 
-  async function loadNamedSheet(name) {
-    const sheet = (cueSheets || []).find((x) => x.name === name);
-    if (!sheet) return;
-    setSheetName(sheet.name);
+  // Kept as the named prop callback so BackingTrackPanel's seam reads the
+  // same as it always did.
+  function handleBackingPlayerChange(player, newTrackHash, trackLabel) {
+    adoptTrack(player, newTrackHash, trackLabel);
+  }
+
+  // The one place a saved sheet becomes the editor's current state.
+  // Every route in — the lookup, the named-sheet picker, the late-row
+  // reconcile — goes through here so they cannot drift apart on what
+  // "showing a sheet" means, and so appliedSheetIdRef is always right.
+  function applySheet(sheet) {
+    appliedSheetIdRef.current = sheet?.id ?? null;
+    setSheetName(sheet.name || 'Default');
     setCues((sheet.cues || []).map((c) => ({ ...c, id: crypto.randomUUID() })));
     setFallbackBehaviour(sheet.fallback_behaviour);
     setActiveCueId(null);
     setCueSheetDirty(false);
     onCueSheetChange?.(sheet);
+  }
+
+  async function loadNamedSheet(name) {
+    const sheet = (cueSheets || []).find((x) => x.name === name);
+    if (!sheet) return;
+    applySheet(sheet);
   }
 
   async function loadCueSheet(hash) {
@@ -202,14 +338,43 @@ export default function AudioDeckPanel({
       // `sheet` since the scheduling round; nothing had ever read it, so
       // every save silently overwrote one sheet called "Default".
       setCueSheets(data.sheets || []);
-      const sheet = data.sheet;
+
+      // ── THE ROW'S BINDING BEATS THIS PANEL'S DEFAULT ──────────
+      // `data.sheet` is the most recently UPDATED sheet for this track,
+      // which is a sensible default for a track being opened cold and
+      // the wrong answer when show_session_state already records which
+      // sheet the artist bound. Adopting a track on arrival would
+      // otherwise rebind the row to whichever sheet was edited last —
+      // undoing fix D by way of the sync that fix #2 adds.
+      //
+      // Only honoured when the bound sheet is actually in this track's
+      // library: a cue_sheet_id belonging to a DIFFERENT track is a
+      // stale binding, and following it would put another track's cues
+      // on this waveform.
+      const boundId = sessionState?.cue_sheet_id ?? null;
+      const bound = boundId
+        ? (data.sheets || []).find((s) => String(s.id) === String(boundId))
+        : null;
+      const sheet = bound || data.sheet;
+
+      // Whatever happens from here, this lookup has completed for `hash`
+      // — recorded so the credentials-arrived retry above does not fire
+      // a second, identical request.
+      lookedUpHashRef.current = hash;
+
       if (sheet) {
-        setSheetName(sheet.name || 'Default');
-        setCues(sheet.cues.map((c) => ({ ...c, id: crypto.randomUUID() })));
-        setFallbackBehaviour(sheet.fallback_behaviour);
-        onCueSheetChange?.(sheet);
+        applySheet(sheet);
+      } else {
+        // Positively established: this track has no saved sheet. This is
+        // the ONLY path that reports null, and it is a real answer
+        // rather than a placeholder — see the note in adoptTrack.
+        appliedSheetIdRef.current = null;
+        onCueSheetChange?.(null);
       }
     } catch (err) {
+      // No onCueSheetChange call, deliberately. A failed lookup means we
+      // do not know what is bound, and reporting null would let a
+      // timeout erase a binding through LiveDemo's persist effect.
       console.warn('[cueEditor] failed to load cue sheet', err);
     }
   }
@@ -268,6 +433,7 @@ export default function AudioDeckPanel({
         return;
       }
       setCueSheetDirty(false);
+      appliedSheetIdRef.current = data.sheet?.id ?? null;
       onCueSheetChange?.(data.sheet);
       // Keep the picker in step with what was just saved -- a "Save as"
       // that did not appear in the list until a reload would look like
