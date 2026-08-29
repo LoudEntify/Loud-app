@@ -44,7 +44,7 @@
 // would read as a fault. It says what is true instead.
 // ─────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useConnectionState,
   useLocalParticipant,
@@ -54,6 +54,8 @@ import {
 } from '@livekit/components-react';
 import { ConnectionState, RoomEvent, Track } from 'livekit-client';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { readFacingMode, saveFacingMode } from '../lib/camfeedDevice';
+import { usePublisherStats } from '../lib/publisherStats';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -97,7 +99,14 @@ export default function CamViewfinder({ conn, wake }) {
   const { localParticipant } = useLocalParticipant();
   const inShow = (conn?.context || 'rehearsal') === 'show';
 
-  const [facingMode, setFacingMode] = useState('environment');
+  // TASK 3 — restored from the device, not reset to a default.
+  //
+  // This used to initialise to 'environment' unconditionally, so a
+  // reconnect (or a reopened tab, now that pairing survives one) silently
+  // flipped an operator's phone back to the rear lens while the UI
+  // claimed it was on the front. The button and the lens disagreed, which
+  // is worse than either being wrong on its own.
+  const [facingMode, setFacingMode] = useState(() => readFacingMode() || 'environment');
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState('');
   const [liveCut, setLiveCut] = useState(null);
@@ -123,6 +132,12 @@ export default function CamViewfinder({ conn, wake }) {
     if (!conn?.room || !identity) return;
     initHealthLog({ showId: conn.room, participantIdentity: identity, role: `camfeed-${conn.role || 'wide'}` });
   }, [conn?.room, conn?.role, localParticipant?.identity]);
+
+  // TASK 5 — a paired phone is a publisher too, and is the likeliest
+  // device to be CPU-bound or on a weak uplink. Read-only, same as the
+  // artist's own client. Without this the freeze capture would be
+  // missing exactly the cameras most likely to be freezing.
+  usePublisherStats(room, { enabled: true, label: `camfeed:${conn?.role || 'wide'}` });
 
   // ── AM I ON AIR? ──────────────────────────────────────────────
   // The director broadcasts SHOT_COMMAND over the LiveKit data channel
@@ -168,6 +183,34 @@ export default function CamViewfinder({ conn, wake }) {
     room.on(RoomEvent.DataReceived, onData);
     return () => { room.off(RoomEvent.DataReceived, onData); };
   }, [room, localParticipant, conn?.role]);
+
+  // ── RE-APPLY THE STORED FACING AFTER A (RE)CONNECT ────────────
+  // <LiveKitRoom video={{ facingMode: 'environment' }}> publishes the
+  // REAR lens every time it connects — that prop is a fixed default and
+  // knows nothing about what this operator chose. So on connect, if the
+  // remembered choice differs from what was just published, restart the
+  // track onto the right lens.
+  //
+  // Uses the same restartTrack path as the button below, for the same
+  // reason: identity and trackSid stay put, so a reconnect that corrects
+  // the lens does not also read to the director as a camera swap.
+  const appliedFacingRef = useRef(null);
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected) {
+      appliedFacingRef.current = null; // re-apply after the next connect
+      return;
+    }
+    if (appliedFacingRef.current === facingMode) return;
+    if (facingMode === 'environment') { appliedFacingRef.current = 'environment'; return; }
+    const pub = Array.from(localParticipant?.videoTrackPublications?.values?.() || [])
+      .find((p) => p.source === Track.Source.Camera);
+    const track = pub?.track;
+    if (!track?.restartTrack) return;
+    appliedFacingRef.current = facingMode;
+    track.restartTrack({ facingMode, ...HIGH_RES_VIDEO_CAPTURE })
+      .then(() => logHealthEvent('camfeed_facing_restored', { facingMode, trackSid: pub?.trackSid || null }))
+      .catch((err) => logHealthEvent('camfeed_facing_restore_failed', { detail: String(err?.message || err) }));
+  }, [connectionState, facingMode, localParticipant]);
 
   // ── ROTATE ────────────────────────────────────────────────────
   // restartTrack, NOT unpublish-and-republish. That choice is the whole
@@ -219,6 +262,12 @@ export default function CamViewfinder({ conn, wake }) {
     try {
       await track.restartTrack({ facingMode: next, ...HIGH_RES_VIDEO_CAPTURE });
       setFacingMode(next);
+      appliedFacingRef.current = next;
+      // Remembered on the DEVICE so a reconnect restores it. Never sent
+      // to the pairing row: facing is a device property, the slot role is
+      // an intent, and mixing them would make the shot grammar
+      // device-dependent.
+      saveFacingMode(next);
       logHealthEvent('camfeed_rotated', {
         identity: localParticipant?.identity || null,
         facingMode: next,

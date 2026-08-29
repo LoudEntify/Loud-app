@@ -8,6 +8,9 @@ import AudioDeckPanel from './AudioDeckPanel';
 import EmptyState from './EmptyState';
 import PairingPanel from './PairingPanel';
 import RehearsalRoom from './RehearsalRoom';
+// No releaseAudioHost import, deliberately — see the note above stopCamera's
+// cleanup. Kit Check adopts and reads the host; it never tears it down.
+import { adoptAudioGraph, audioHostActive, getAudioHost } from '../lib/audioHost';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
@@ -227,7 +230,19 @@ export default function KitCheck() {
   const startAudio = useCallback(async () => {
     setAudioError('');
     try {
+      // Reuse a graph the host is already holding rather than opening a
+      // second microphone. Walking back into Kit Check from a show must
+      // not stack two audio chains on one device.
+      if (audioHostActive()) {
+        const existing = getAudioHost();
+        audioHandleRef.current = existing;
+        setAudioNodes(existing.nodes);
+        setAudioContext(existing.audioContext);
+        return;
+      }
       const handle = await createPilotAudioTrack();
+      // TASK 2 — the host owns this now, not this component.
+      adoptAudioGraph(handle);
       audioHandleRef.current = handle;
       setAudioNodes(handle.nodes);
       setAudioContext(handle.audioContext);
@@ -236,27 +251,51 @@ export default function KitCheck() {
     }
   }, []);
 
-  const stopAudio = useCallback(() => {
-    const handle = audioHandleRef.current;
-    if (!handle) return;
-    try {
-      handle.rawStream?.getTracks?.().forEach((t) => t.stop());
-      handle.processedTrack?.stop?.();
-      handle.audioContext?.close?.();
-    } catch {
-      // release is best-effort; never throw out of teardown
-    }
-    audioHandleRef.current = null;
-    setAudioNodes(null);
-    setAudioContext(null);
-  }, []);
+  // ── ⚠️ KIT CHECK NO LONGER RELEASES THE AUDIO HOST. AT ALL. ───
+  //
+  // There used to be a `stopAudio()` here that called
+  // releaseAudioHost('kit-check-stop'), and handOverToShow called it one
+  // line before router.push. That was the whole of the round-1 Test 2
+  // failure: releaseAudioHost stops the player, closes the AudioContext
+  // and nulls trackHash/trackName (lib/audioHost.js), so the handover
+  // destroyed the loaded backing track at the exact moment it was
+  // supposed to carry it into the show. Both triggers failed identically
+  // because the manual button and the countdown are one function.
+  //
+  // The first fix — moving the release out of the UNMOUNT cleanup — was
+  // right and insufficient: it left an explicit call on the handover
+  // path, sitting under a comment about the CAMERA that happened to be
+  // true of cameras and false of audio.
+  //
+  // So the helper is gone rather than merely uncalled, and
+  // releaseAudioHost is no longer imported by this file. Kit Check
+  // cannot release the host even by accident, which is a stronger
+  // guarantee than a comment asking it not to. Release now belongs
+  // exclusively to the live path, on the two events that actually mean
+  // "the session is over" — leave and show-end (components/LiveDemo.jsx).
+  //
+  // The consequence to know about: an artist who starts the mic here and
+  // then navigates somewhere OTHER than the show leaves the graph open.
+  // That was already true before this change (nothing called stopAudio on
+  // that path either), it is not a regression, and it is not fixed here.
 
-  // Everything this page acquired, this page releases. No LiveKit
-  // lifecycle is involved, so nothing else can be holding these.
+  // Camera only. The audio graph is deliberately NOT released here: this
+  // cleanup runs on the route change into the live show, which is
+  // precisely when the artist needs their audio to keep running.
   useEffect(() => () => {
     stopCamera();
-    stopAudio();
-  }, [stopCamera, stopAudio]);
+  }, [stopCamera]);
+
+  // Adopt whatever the host already holds when this page mounts, so
+  // returning to Kit Check mid-session shows the live graph rather than
+  // an empty deck offering to open a microphone that is already open.
+  useEffect(() => {
+    if (!audioHostActive()) return;
+    const existing = getAudioHost();
+    audioHandleRef.current = existing;
+    setAudioNodes(existing.nodes);
+    setAudioContext(existing.audioContext);
+  }, []);
 
   // ── Who am I, and when is my window? ───────────────────────
   useEffect(() => {
@@ -335,9 +374,15 @@ export default function KitCheck() {
   //   * PAIRED CAMERAS -- the same POST to /api/camfeed/pair {migrate},
   //     which rewrites target_room and bumps generation, so every propped
   //     phone follows within one poll (lib/camfeedPairing.js).
-  //   * THE DEVICES -- camera and audio graph released here, because the
-  //     live path acquires its own and two owners of one device is a
-  //     black frame on stage.
+  //   * THE CAMERA -- released here, because the live path acquires its
+  //     own and two owners of one device is a black frame on stage.
+  //   * THE AUDIO GRAPH AND THE BACKING TRACK -- NOT released, and this
+  //     line is the round-1 Test 2 fix. The graph stays open and stays
+  //     owned by lib/audioHost.js, which is mounted at the app root and
+  //     survives a router.push; the live path reuses it rather than
+  //     opening a second microphone. That is what carries the decoded
+  //     AudioBuffer — the thing no database column can restore — into
+  //     the show still playing.
   //   * THE SESSION -- router.push, not a page load, so the Supabase
   //     session in this tab carries over warm.
   //   * THE CUE SHEET AND B-ROLL -- neither is held in this component's
@@ -356,11 +401,21 @@ export default function KitCheck() {
     setHandingOver(true);
     setHandoverError('');
 
-    // Release BEFORE handing over: the live path acquires its own
-    // camera, and two owners of one device is how you get a black
-    // frame on stage.
+    // Release the CAMERA before handing over: the live path acquires its
+    // own, and two owners of one device is how you get a black frame on
+    // stage.
+    //
+    // The AUDIO is deliberately NOT released, and the asymmetry is the
+    // point. This used to call stopAudio() on the line below, which
+    // closed the AudioContext and dropped the loaded backing track — the
+    // round-1 Test 2 failure on both triggers. The reasoning above is
+    // sound for a camera and wrong for audio, because the live path does
+    // NOT acquire its own any more: LiveDemo now reuses whatever graph
+    // the host is already holding (audioHostActive() there, same check
+    // startAudio uses here). One graph, one microphone, carried across
+    // the router.push intact — which is what makes the decoded
+    // AudioBuffer survive the transition at all.
     stopCamera();
-    stopAudio();
 
     // ── THE RIG COMES TOO ──────────────────────────────────────
     // This is the whole reason Kit Check exists: position once, go live
@@ -399,7 +454,7 @@ export default function KitCheck() {
         clearTimeout(guard);
         go();
       });
-  }, [handingOver, upcoming, session, router, stopCamera, stopAudio]);
+  }, [handingOver, upcoming, session, router, stopCamera]);
 
   // ── The last minute before SHOWTIME → countdown, then live ──
   //
