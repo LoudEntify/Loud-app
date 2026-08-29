@@ -153,7 +153,7 @@ export default function AudioDeckPanel({
   useEffect(() => {
     adoptFromHostRef.current = () => {
       const host = getAudioHost();
-      adoptTrack(host.player || null, host.trackHash || null, host.trackName || null);
+      adoptTrack(host.player || null, host.trackHash || null, host.trackName || null, 'host');
     };
   });
   useEffect(() => {
@@ -195,7 +195,9 @@ export default function AudioDeckPanel({
     // changing would discard real work.
     if (cueSheetDirty) return;
     const bound = cueSheets.find((s) => String(s.id) === String(boundId));
-    if (bound) applySheet(bound);
+    if (!bound) return;
+    logHealthEvent('deck_sheet_reconciled', { cueSheetId: bound.id, from: appliedSheetIdRef.current });
+    applySheet(bound);
   }, [sessionState?.cue_sheet_id, cueSheets, cueSheetDirty]);
 
   if (!nodes) {
@@ -248,7 +250,7 @@ export default function AudioDeckPanel({
   // host emit first and the prop callback immediately after. The identity
   // guard below is what makes that harmless instead of two resets and two
   // cue-sheet fetches per load.
-  function adoptTrack(player, newTrackHash, trackLabel) {
+  function adoptTrack(player, newTrackHash, trackLabel, source = 'pick') {
     backingPlayerRef.current = player;
     player?.setSyncDelayMs(syncDelayMs);
     // Cue-Sheet Director (Phase 1) -- the player instance is otherwise
@@ -266,6 +268,17 @@ export default function AudioDeckPanel({
 
     // A new track means a new cue sheet identity -- reset local editing
     // state before loading whatever's saved for it (if anything).
+    // Logged because "did the deck notice the track?" was invisible on
+    // device: the whole failure mode of finding #2 was a panel that
+    // looked idle while audio played, with nothing anywhere saying so.
+    // `source` separates the two routes in, which is the first thing
+    // worth knowing if this ever regresses.
+    logHealthEvent('deck_track_adopted', {
+      trackHash: newTrackHash || null,
+      source,
+      hadPlayer: !!player,
+    });
+
     loadedTrackHashRef.current = newTrackHash;
     lookedUpHashRef.current = null;
     appliedSheetIdRef.current = null;
