@@ -27,7 +27,11 @@ import { createPilotAudioTrack, tuneMicMuted } from '../lib/audioProcessing';
 // The live path is now the SOLE owner of the audio host's lifecycle: it
 // adopts the graph (or reuses Kit Check's), and it is the only surface
 // that releases. See the note on releaseLocalDevices below.
-import { adoptAudioGraph, releaseAudioHost, audioHostActive, getAudioHost } from '../lib/audioHost';
+// audioHostActive/getAudioHost are deliberately NOT imported any more:
+// reading them here is what made the acquisition a check-then-act.
+// ensureAudioGraph is the only supported way for this page to get a
+// graph. adoptAudioGraph remains for the genuine replacement case.
+import { adoptAudioGraph, releaseAudioHost, ensureAudioGraph } from '../lib/audioHost';
 import { useWakeLock } from '../lib/useWakeLock';
 import { usePublisherStats } from '../lib/publisherStats';
 import { useShowSession } from '../lib/useShowSession';
@@ -2513,30 +2517,53 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   // Only the main performer publishes the Case 2 processed audio track.
   // Extra camera-feed devices are video-only, never audio.
+  const liveAudioRunRef = useRef(0);
+  const lastRoomRef = useRef(null);
   useEffect(() => {
-    if (!isMainPerformer) return;
+    if (!isMainPerformer) return undefined;
+
+    // ── ITEM 3: RECORD THAT THIS EFFECT RAN, AND WHY ────────────
+    // The single-flight acquisition below makes a double-run HARMLESS.
+    // It does not make it stop, and it is not known why it happens: the
+    // leading suspect is `room` changing identity, because the parent
+    // re-renders once a second on its clock and rebuilds <LiveKitRoom>'s
+    // `video={{...}}` prop as a fresh object literal each time. That was
+    // never proven, so it is measured here rather than assumed away.
+    //
+    // `roomChanged` is the actual test of that hypothesis. If double
+    // entries show roomChanged true, the re-render churn is confirmed
+    // and worth fixing at the source; if they show it false, the cause
+    // is something else and this says so.
+    liveAudioRunRef.current += 1;
+    const roomChanged = lastRoomRef.current !== null && lastRoomRef.current !== room;
+    lastRoomRef.current = room;
+    logHealthEvent('live_audio_effect_entered', {
+      run: liveAudioRunRef.current,
+      roomChanged,
+    });
+
+    // ── ITEM 2: THE RUN IS CANCELLABLE ──────────────────────────
+    // Previously it was not: the cleanup unpublished and detached
+    // listeners but set no flag, so a superseded run kept going and
+    // clobbered audioHandleRef and the state mirrors after a newer run
+    // had already written them. The graph race was one symptom of that;
+    // this is the general defect.
+    let cancelled = false;
+
     (async () => {
-      // ── REUSE THE HOST'S GRAPH IF THERE IS ONE ──────────────────
-      // The other half of the round-1 Test 2 fix, and it only works as a
-      // pair with Kit Check no longer releasing on handover
-      // (components/KitCheck.jsx). Arriving from Kit Check, the artist
-      // already has an open microphone, a live AudioContext and — the
-      // part that matters — a decoded backing track hanging off its
-      // outputBus. Calling createPilotAudioTrack() unconditionally here
-      // opened a SECOND microphone on the same device and built a second
-      // graph the loaded track was not connected to, which is why simply
-      // deleting the release over there would have traded a dropped
-      // backing track for two live mics.
+      // ── ONE GRAPH, ACQUIRED ATOMICALLY ────────────────────────
+      // Was: check audioHostActive(), await createPilotAudioTrack(),
+      // then adopt — a check-then-act with an await through the middle.
+      // Two concurrent runs both saw an empty host, both built a graph,
+      // and the second adoption released the first as 'replaced', which
+      // nulls host.player and killed the backing track carried through
+      // the handover.
       //
-      // Same audioHostActive() check KitCheck.startAudio uses, for the
-      // same reason and with the same meaning: a graph is live, adopt it,
-      // do not build another.
-      const existing = audioHostActive() ? getAudioHost() : null;
-      const handle = existing || await createPilotAudioTrack();
-      // Adopt only what we created. adoptAudioGraph() releases whatever
-      // it is replacing, so handing it the graph it is already holding
-      // would tear down the thing we just decided to keep.
-      if (!existing) adoptAudioGraph(handle);
+      // ensureAudioGraph collapses that to one atomic operation: live
+      // graph -> reuse it, create in flight -> join it, neither ->
+      // create exactly once. See lib/audioHost.js.
+      const handle = await ensureAudioGraph(createPilotAudioTrack);
+      if (cancelled) return;
       audioHandleRef.current = handle;
       // audioHandleRef is a ref, not state -- setting it alone doesn't
       // trigger a re-render, so AudioDeckPanel (rendered via SwipePages in
@@ -2557,6 +2584,15 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         handle.rawStream?.getAudioTracks?.()[0] ?? null,
         handle.processedTrack
       );
+      // NOTE FOR ANYONE COUNTING GRAPHS IN TELEMETRY: this is now a
+      // property assignment on a SHARED context, so a second run
+      // overwrites the first handler rather than adding one. Two runs
+      // therefore produce ONE statechange stream, and the duplicate
+      // `audiocontext_statechange {state:running}` pair that exposed the
+      // original race will not reappear even if the effect still runs
+      // twice. Count `audio_graph_created` instead — one row per
+      // AudioContext actually built — and `live_audio_effect_entered`
+      // for how often this effect ran.
       handle.audioContext.onstatechange = () => {
         logHealthEvent('audiocontext_statechange', { state: handle.audioContext.state });
       };
@@ -2581,6 +2617,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         logHealthEvent('audio_publish_attempt', { action: 'skipped_show_ended' });
         return;
       }
+      // Superseded runs must not publish. Two runs publishing the same
+      // processedTrack is a duplicate-publish race on top of the graph
+      // race, and now that both runs share ONE graph they would both be
+      // reaching for the same track object.
+      if (cancelled) {
+        logHealthEvent('audio_publish_attempt', { action: 'skipped_cancelled' });
+        return;
+      }
       const publishStartedAt = Date.now();
       logHealthEvent('audio_publish_attempt', {});
       try {
@@ -2597,6 +2641,9 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       }
     })();
     return () => {
+      // Item 2. Everything after an await in the run above checks this,
+      // so a superseded run stops instead of writing over a newer one.
+      cancelled = true;
       detachAudioTrackHealthListenersRef.current?.();
       detachAudioTrackHealthListenersRef.current = null;
       if (audioHandleRef.current) {
@@ -2684,7 +2731,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // released the DEVICES but left lib/audioHost.js still holding a
       // player, a trackHash and a pointer to a now-closed context — a
       // host describing audio that no longer exists. Kit Check's
-      // audioHostActive() and the reuse check in the publish effect above
+      // audioHostActive() and ensureAudioGraph() in the publish effect above
       // both read that state, so a stale host is how you get the next
       // session adopting a dead graph.
       //
