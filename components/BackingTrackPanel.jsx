@@ -9,6 +9,7 @@ import { needsRepick, currentPositionMs } from '../lib/showSessionState';
 import { logHealthEvent } from '../lib/healthLog';
 import { findUploadedTrackByHash, fetchUploadedTrackBlob } from '../lib/uploadedTracks';
 import BackingTrackLibrary from './BackingTrackLibrary';
+import SetListPanel from './SetListPanel';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -84,6 +85,13 @@ export default function BackingTrackPanel({
   // copy, and to fetch it. Without it this panel degrades to exactly
   // its round 1 behaviour: local files and the re-pick prompt.
   artistAccessToken = null,
+  // Round 2 Task 2 — which (show, artist) row a chosen set list binds
+  // to. Kit Check passes the UPCOMING show, /live the running one.
+  sessionTarget = null,
+  // Assembly is a Kit Check activity. In the live room this panel is
+  // for choosing what to play next, not for rebuilding the running
+  // order mid-performance.
+  canEditSetList = false,
 }) {
   // ── ⚠️ THIS PANEL NO LONGER OWNS THE PLAYER ───────────────────
   // It used to hold it in `playerRef` and stop() it on unmount, so any
@@ -653,6 +661,24 @@ export default function BackingTrackPanel({
         Wear headphones -- this plays out loud on your device so you can perform along with it, which means your own
         mic would pick it up a second time without headphones.
       </p>
+
+      {/* ── THE SET LIST, AS ITS OWN SECTION ─────────────────────
+          Above the library, because the running order is what the
+          artist reads during a show and the library is where songs come
+          from before one. Both are in the AUDIO deck; b-roll is in the
+          VIDEO deck and stays there. */}
+      <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
+        <SetListPanel
+          artistAccessToken={artistAccessToken}
+          showId={sessionTarget?.showId || null}
+          artistId={sessionTarget?.artistId || null}
+          loadedHash={loadedHash}
+          canEdit={canEditSetList}
+          // The same uploaded-track loader the library uses. Loads and
+          // binds the cue sheet; does not start playing.
+          onPickTrack={(track) => loadUploaded(track, 0)}
+        />
+      </div>
 
       {/* ── THE LIBRARY, AS ITS OWN SECTION ──────────────────────
           Rendered here rather than beside BRollLibrary deliberately.

@@ -691,6 +691,14 @@ export default function KitCheck() {
 
             {audioNodes && (
               <AudioDeckPanel
+                /* Task 2 — set lists are assembled HERE, and bind to the
+                   upcoming show's row so the choice survives the
+                   handover. patchSessionState upserts, so the row not
+                   existing yet is not a problem. */
+                sessionTarget={upcoming?.id && session?.user?.id
+                  ? { showId: upcoming.id, artistId: session.user.id }
+                  : null}
+                canEditSetList
                 nodes={audioNodes}
                 audioContext={audioContext}
                 showEnded={false}

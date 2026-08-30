@@ -4465,6 +4465,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           artistAccessToken={artistAccessToken}
           onCueSheetChange={setCueSheet}
           sessionState={sessionState}
+          // Task 2 — the row a chosen set list binds to. Same (show,
+          // artist) key useShowSession already uses, so the binding
+          // rides the row that survives both go-live triggers.
+          sessionTarget={showId && artistId ? { showId, artistId } : null}
           deckCollapsed={deckCollapsed}
           onToggleDeckCollapsed={toggleDeckCollapsed}
           feedsCollapsed={feedsCollapsed}

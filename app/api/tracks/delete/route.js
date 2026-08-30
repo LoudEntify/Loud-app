@@ -51,6 +51,44 @@ export async function POST(request) {
     }
     if (!row) return NextResponse.json({ error: 'No such track.' }, { status: 404 });
 
+    // ── IS THIS TRACK IN A SET LIST? ────────────────────────────
+    // Refused if so, and the refusal NAMES the sets. Someone deleting a
+    // track is thinking about storage space; they are not thinking about
+    // a running order they built last week, and "cannot delete" without
+    // saying why would send them looking for a bug.
+    //
+    // set_list_items.backing_track_id is ON DELETE RESTRICT, so the
+    // database would refuse this anyway. That constraint is the
+    // backstop; this check is the one that can be helpful about it.
+    //
+    // A track in NO set list falls straight through to the delete below,
+    // exactly as it did before set lists existed — same flow, same
+    // "cue sheets are kept" message. That path is deliberately untouched.
+    const { data: usedIn, error: usedErr } = await admin
+      .from('set_list_items')
+      .select('set_lists ( id, name )')
+      .eq('backing_track_id', id);
+
+    // A missing set_list_items table means set lists have not been
+    // migrated on this environment, which means the track cannot be in
+    // one. Not an error — carry on and delete.
+    if (usedErr && !/relation .* does not exist|schema cache/i.test(usedErr.message || '')) {
+      console.error('[tracks/delete] set list check failed:', usedErr);
+      return NextResponse.json({ error: 'Could not check whether that track is in a set list.' }, { status: 500 });
+    }
+    const sets = (usedIn || []).map((r) => r.set_lists).filter(Boolean);
+    if (sets.length > 0) {
+      const names = [...new Set(sets.map((s) => s.name))];
+      const list = names.length === 1
+        ? `“${names[0]}”`
+        : `${names.slice(0, -1).map((n) => `“${n}”`).join(', ')} and “${names[names.length - 1]}”`;
+      return NextResponse.json({
+        error: `That track is in ${names.length === 1 ? 'the set list' : 'the set lists'} ${list}. `
+          + 'Remove it from there first — nothing has been deleted.',
+        inSetLists: names,
+      }, { status: 409 });
+    }
+
     const { error: rmErr } = await admin.storage.from(TRACK_BUCKET).remove([row.storage_path]);
     if (rmErr) {
       // Reported rather than swallowed: if the object survives, deleting
