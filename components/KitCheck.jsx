@@ -13,6 +13,7 @@ import RehearsalRoom from './RehearsalRoom';
 import { adoptAudioGraph, audioHostActive, getAudioHost } from '../lib/audioHost';
 import { createPilotAudioTrack } from '../lib/audioProcessing';
 import { getSession, getProfile } from '../lib/supabaseAuth';
+import { initHealthLog } from '../lib/healthLog';
 import { getSupabase } from '../lib/supabaseClient';
 import { isWindowOpen, nextUpcomingShow, msUntilWindow, humanCountdown, canHandOverNow, handoverState } from '../lib/scheduling';
 
@@ -358,6 +359,28 @@ export default function KitCheck() {
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, [session, loadUpcoming]);
+
+  // ── TELEMETRY CONTEXT, FILED UNDER THE SHOW BEING PREPARED ──
+  //
+  // Kit Check never called initHealthLog, so every logHealthEvent on
+  // this page was discarded before it reached the queue
+  // (lib/healthLog.js drops when no showId is set). That silently
+  // blinded the whole pre-show half of the session — the half where the
+  // artist opens the microphone, loads a backing track and waits for a
+  // countdown, which is exactly where two of this round's defects lived.
+  //
+  // Filed under the UPCOMING show's room_name rather than a Kit Check
+  // identifier of its own, deliberately: that is the same key the live
+  // session will use, so preparation and performance land in ONE
+  // capture and one export. Splitting them would mean correlating two
+  // pulls by hand to answer any question that spans the handover, which
+  // is most of the interesting ones.
+  useEffect(() => {
+    const room = upcoming?.room_name;
+    const uid = session?.user?.id;
+    if (!room || !uid) return;
+    initHealthLog({ showId: room, participantIdentity: uid, role: 'kit-check' });
+  }, [upcoming, session]);
 
   // ── THE HANDOVER — ONE PATH, TWO TRIGGERS ──────────────────
   //
