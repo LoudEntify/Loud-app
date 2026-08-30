@@ -633,6 +633,7 @@ export default function AudioDeckPanel({
           audioContext={audioContext}
           outputBus={nodes.outputBus}
           sessionState={sessionState}
+          artistAccessToken={artistAccessToken}
           showEnded={showEnded}
           onPlayerChange={handleBackingPlayerChange}
           cues={cues}

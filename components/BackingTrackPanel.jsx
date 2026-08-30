@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { loadBackingTrack } from '../lib/audioProcessing';
 import { shotFamilyColor } from '../lib/shotTypes';
 import { computeTrackHash } from '../lib/trackHash';
 import { getAudioHost, setBackingPlayer, getBackingPlayer, subscribeAudioHost } from '../lib/audioHost';
 import { needsRepick, currentPositionMs } from '../lib/showSessionState';
+import { findUploadedTrackByHash, fetchUploadedTrackBlob } from '../lib/uploadedTracks';
+import BackingTrackLibrary from './BackingTrackLibrary';
 
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
@@ -77,6 +79,10 @@ export default function BackingTrackPanel({
   // exactly as it did before, which is what keeps it usable from Kit
   // Check where there is no show to key a row by.
   sessionState = null,
+  // Round 2 — needed to ask whether the row's track has an uploaded
+  // copy, and to fetch it. Without it this panel degrades to exactly
+  // its round 1 behaviour: local files and the re-pick prompt.
+  artistAccessToken = null,
 }) {
   // ── ⚠️ THIS PANEL NO LONGER OWNS THE PLAYER ───────────────────
   // It used to hold it in `playerRef` and stop() it on unmount, so any
@@ -96,6 +102,14 @@ export default function BackingTrackPanel({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
   const [loading, setLoading] = useState(false);
+  // Round 2 — the uploaded copy of whatever the row names, if there is
+  // one. `undefined` means "not asked yet", null means "asked, there
+  // isn't one". The distinction matters: showing the re-pick prompt
+  // before the lookup returns would flash an instruction at the artist
+  // and then withdraw it, which is worse than a beat of nothing.
+  const [uploadedMatch, setUploadedMatch] = useState(undefined);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoError, setAutoError] = useState(null);
   const [peaks, setPeaks] = useState(null);
   const rafRef = useRef(null);
   const playheadRef = useRef(null); // DOM ref -- width updated directly, not via React state, so 200 bars don't re-render every frame
@@ -183,6 +197,79 @@ export default function BackingTrackPanel({
   // effect above, and releaseAudioHost() when a session genuinely ends
   // (lib/audioHost.js). Unmounting means nothing to the audio any more,
   // which is the entire point.
+
+  // ── LOAD A TRACK THE APP CAN FETCH FOR ITSELF ─────────────────
+  // The uploaded path. Identical to handleFile below from the decode
+  // onwards — same loadBackingTrack, same computeTrackHash, same
+  // setBackingPlayer — because the bytes are the same bytes. What
+  // differs is only where they came from, and that a Blob from storage
+  // needs no user gesture.
+  const loadUploaded = useCallback(async (track, seekToMs) => {
+    if (!audioContext || !outputBus || !artistAccessToken) return false;
+    setAutoLoading(true);
+    setAutoError(null);
+    try {
+      const { blob, title } = await fetchUploadedTrackBlob(track.id, artistAccessToken);
+      const [player, hash] = await Promise.all([
+        loadBackingTrack(audioContext, outputBus, blob),
+        computeTrackHash(blob),
+      ]);
+      // ── THE PROPERTY, CHECKED RATHER THAN TRUSTED ─────────────
+      // The bytes fetched back must hash to what the row said. If they
+      // do not, the object and its row have diverged and playing it
+      // would put the wrong audio under the artist's cue sheet — a
+      // silent, on-air failure. Refusing and falling back to the
+      // re-pick prompt is the safe direction.
+      if (hash !== track.sha256) {
+        setAutoError('That stored track no longer matches its record. Re-select the file.');
+        setUploadedMatch(null);
+        return false;
+      }
+      player.setVolume(volume);
+      if (seekToMs > 0) player.seek(seekToMs / 1000);
+      setBackingPlayer(player, hash, title || track.title || 'Backing track');
+      setDuration(player.duration);
+      setPeaks(computePeaks(player.audioBuffer));
+      setFileName(title || track.title || 'Backing track');
+      setPlaying(false);
+      onPlayerChange?.(player, hash, title || track.title);
+      return true;
+    } catch (err) {
+      // Falls back to the re-pick prompt rather than dead-ending: the
+      // artist can always still choose the file by hand.
+      setAutoError(String(err?.message || err));
+      return false;
+    } finally {
+      setAutoLoading(false);
+    }
+  }, [audioContext, outputBus, artistAccessToken, volume, onPlayerChange]);
+
+  // ── DOES THE ROW'S TRACK EXIST IN STORAGE, AND IF SO, JUST LOAD IT ──
+  // This is what removes the re-pick path for uploaded tracks. The
+  // question is asked once per (hash, host state): the row names a
+  // track this device is not holding — is there an uploaded copy?
+  //   yes -> fetch and resume silently, seeking to where they were
+  //   no  -> fall through to the re-pick prompt, unchanged from round 1
+  const rowHash = sessionState?.track_hash || null;
+  const autoTriedRef = useRef(null);
+  useEffect(() => {
+    if (!rowHash || !artistAccessToken) { setUploadedMatch(undefined); return; }
+    if (loadedHash === rowHash) return;          // already holding it
+    if (autoTriedRef.current === rowHash) return; // asked for this hash already
+    autoTriedRef.current = rowHash;
+    let cancelled = false;
+    (async () => {
+      const match = await findUploadedTrackByHash(rowHash, artistAccessToken);
+      if (cancelled) return;
+      setUploadedMatch(match);
+      if (!match) return;
+      // Resume where the row says they were. currentPositionMs bounds
+      // its own extrapolation, so a stale row resumes at the last
+      // position actually recorded rather than a guess.
+      await loadUploaded(match, currentPositionMs(sessionState));
+    })();
+    return () => { cancelled = true; };
+  }, [rowHash, loadedHash, artistAccessToken, sessionState, loadUploaded]);
 
   // ── WHAT THE SERVER REMEMBERS THAT THIS DEVICE CANNOT ─────────
   // The read side of Task 1, and the answer to "the row had a track name
@@ -295,17 +382,42 @@ export default function BackingTrackPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Conditionalised in round 2, not replaced. "Not uploaded
+          anywhere" stayed true for every track until uploads existed,
+          and is still true of a locally picked one — so the label now
+          says which kind is loaded rather than asserting a blanket
+          policy that is only half true. */}
       <span style={{ fontSize: 11, letterSpacing: '0.1em', color: '#888780', textTransform: 'uppercase' }}>
-        Backing track (from your device -- not uploaded anywhere)
+        {loadedHash && uploadedMatch && loadedHash === uploadedMatch.sha256
+          ? 'Backing track (in your library)'
+          : fileName
+            ? 'Backing track (from your device -- not uploaded)'
+            : 'Backing track'}
       </span>
 
       {!fileName ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {/* The resume offer. Names the exact file and the exact time,
-              because "you had something loaded" is not actionable and
-              this is read at speed, mid-show, by someone who has just
-              watched their deck go blank. */}
-          {resume && (
+          {/* ── THE UPLOADED CASE: NO PROMPT, JUST A STATUS ──────
+              Nothing is asked of the artist here. The app has the bytes
+              and is fetching them; the only reason this renders at all
+              is that a deck which sits blank for two seconds looks
+              broken. */}
+          {autoLoading && (
+            <span style={{ fontSize: 11, color: '#2ec4b6' }}>
+              Reloading {resume?.name || 'your backing track'}
+              {resume?.positionMs > 0 ? ` — resuming at ${formatTime(resume.positionMs / 1000)}` : ''}…
+            </span>
+          )}
+
+          {/* ── THE LOCAL CASE: THE PROMPT, NARROWED ─────────────
+              Only shown once the lookup has come back empty
+              (uploadedMatch === null). Before round 2 this fired for
+              every remembered track; now it fires only for ones the app
+              genuinely cannot fetch, which is exactly the set of
+              locally-picked files. `undefined` means the lookup has not
+              answered yet, and flashing an instruction and withdrawing
+              it is worse than a beat of nothing. */}
+          {resume && !autoLoading && uploadedMatch === null && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: 13, color: '#fdfffc' }}>{resume.name}</span>
               <span style={{ fontSize: 11, color: '#2ec4b6' }}>
@@ -313,14 +425,23 @@ export default function BackingTrackPanel({
                   ? `Re-select this file to resume at ${formatTime(resume.positionMs / 1000)}`
                   : 'Re-select this file to load it again'}
               </span>
+              {/* Conditionalised, not deleted. This sentence is still
+                  exactly true of a locally picked file, and that is the
+                  only case that reaches this branch. */}
               <span style={{ fontSize: 11, color: '#888780' }}>
-                Your device cannot reopen it on its own — the file never left this browser.
+                This one was never uploaded, so your device cannot reopen it on its own.
+                Upload it once and it will come back by itself next time.
               </span>
             </div>
           )}
+
+          {autoError && (
+            <span style={{ fontSize: 11, color: '#e71d36' }}>{autoError}</span>
+          )}
+
           <label style={{ display: 'inline-block' }}>
             <span className="control-btn" style={{ display: 'inline-block' }}>
-              {loading ? 'Loading...' : resume ? 'Re-select audio file' : 'Choose audio file'}
+              {loading ? 'Loading...' : resume && uploadedMatch === null ? 'Re-select audio file' : 'Choose audio file'}
             </span>
             <input type="file" accept="audio/*" onChange={handleFile} style={{ display: 'none' }} />
           </label>
@@ -413,6 +534,22 @@ export default function BackingTrackPanel({
         Wear headphones -- this plays out loud on your device so you can perform along with it, which means your own
         mic would pick it up a second time without headphones.
       </p>
+
+      {/* ── THE LIBRARY, AS ITS OWN SECTION ──────────────────────
+          Rendered here rather than beside BRollLibrary deliberately.
+          They share a bucket and a 500MB allowance and nothing else: a
+          clip is something you CUT TO, a track is what you PERFORM
+          ALONG WITH. B-roll's library lives in the video deck for the
+          same reason this one lives in the audio deck — next to the
+          thing it feeds. Shared storage underneath, distinct surfaces
+          above. */}
+      <div style={{ borderTop: '1px solid #3a3a37', paddingTop: 12, marginTop: 4 }}>
+        <BackingTrackLibrary
+          artistAccessToken={artistAccessToken}
+          loadedHash={loadedHash}
+          onPickTrack={(track) => loadUploaded(track, 0)}
+        />
+      </div>
     </div>
   );
 }
