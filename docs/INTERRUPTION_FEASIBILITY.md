@@ -436,16 +436,100 @@ muted, ended, or needed re-acquiring.
 
 ---
 
-## 7 · Spec revisions to expect
+## 7 · The rules, redrafted against evidence — APPROVED 2026-09-03
 
-Provisional, pending both runs:
+The original three rules, rewritten from the iOS capture rather than from
+expectation. **Two rules, not three.**
 
-1. **Rule 2 needs an iOS clause, or has to be dropped on iOS.** If the audio
-   session does not survive backgrounding there, "the artist is still performing"
-   is not a state that exists on the primary device, and the nearest achievable
-   behaviour is to make the stop *fast and announced* rather than silent.
-2. **Rule 3's automatic resume may be a tap.** Design the affordance either way;
-   let the capability test decide which fires.
-3. **Rule 1's DND exception comes out** and becomes the pre-show prompt (§1).
-4. **Rule 1 is detectable as "something took your audio", not as a call.** The
-   ringing-versus-answered split may or may not be observable on iOS; §5.2.4.
+### RULE 1 · CALL — confirmed, unchanged
+
+**Observed signature:** both tracks mute together **while the page is still
+visible**, and the context goes to WebKit's `interrupted`. Answering suspends the
+page outright (19.6s gap, audio ratio 0.00). An outgoing call does the same at
+ratio 0.02.
+
+**Behaviour:** the OS has taken audio and camera; the app does not get a vote.
+The audience cuts to another camera if one exists, otherwise the holding state.
+The artist is told their audio was interrupted, never that they took a call.
+
+**DND:** a pre-show prompt in Kit Check, never a claim (§1). With DND on, the
+call does not ring and none of this fires — the OS enforces the exception the app
+cannot read.
+
+**Still open:** resume was observed to be automatic for the *context*, but the
+**mic track stayed muted for a further ~6 seconds** while the page looked
+healthy. Until the targeted re-run in §8, "resume is automatic" is NOT settled,
+and the RESUME affordance stays exactly where it is.
+
+### RULE 2 · AWAY FROM THE SCREEN — merged, was rules 2 and 3
+
+Minimise and lock are **one observed state**, because on the measured device they
+are indistinguishable: identical event sequence, identical wake-lock and context
+columns, audio ratio 1.00 in both. Opening another camera app produces the same
+signature again. The app cannot tell which happened and does not pretend to.
+
+**Observed signature:** camera track muted, audio clock keeping perfect pace,
+JavaScript still running, page hidden. Classifier state `backgrounded_degraded`.
+
+**Behaviour:**
+
+1. **The camera pauses** — the platform's decision, reported, not caused by us.
+2. **The audio keeps going out.** Ruled explicitly. The original rule 3 stopped
+   both on the reading that a locked phone means the artist has stepped away;
+   the app cannot distinguish that from a phone in a pocket mid-song, and cutting
+   a performer's voice because their screen went dark is the worse of the two
+   available failures. **No code may stop publishing on an interruption** without
+   a signal that distinguishes intent, and no capture so far contains one.
+3. **The audience cuts to another camera if one exists, otherwise the holding
+   state.** Already works with no new code: the muted camera track fires
+   `TrackMuted`, which is already `publication_muted` in the liveness registry.
+4. **The artist is told clearly, on return**, what happened and that their
+   microphone stayed on. Wording pending approval — see §8.
+
+**What must never be built from this:** a line anywhere promising that minimising
+or locking keeps the artist live. This is one run, on one handset, in one
+browser. The state is *reported when observed*, in the past tense, and never
+predicted.
+
+### RULE 3 · (retired — merged into rule 2)
+
+### A shape the spec did not have: BRIEF AUDIO GRAB
+
+The assistant/alarm step produced something none of the three rules described:
+**9.8 seconds of audio interruption with the page visible and both tracks
+unmuted**, ratio 0.11, and the context's `interrupted` state arriving *after* the
+app was already back in the foreground.
+
+No mute event, no visibility change, no track flag moved. The only signal that
+changed was the audio clock — which is what the classifier derives audio
+liveness from, so the branch fires correctly and needs no new rule. The
+late-arriving context state is informational and is deliberately not acted on.
+
+Its one consequence is the **confirm-before-announce delay** (`lib/awaySignal.js`,
+`ANNOUNCE_CONFIRM_MS`): a grab shorter than the sample window must not make the
+audience's holding frame appear and vanish. Two samples, still ahead of the 3s
+watchdog, and asymmetric — coming back is announced immediately, because a stale
+away claim costs a held frame nobody should be seeing.
+
+---
+
+## 8 · Owed, and explicitly not settled
+
+Carried forward so none of it can quietly become assumed:
+
+1. **Every camera claim rests on declared state, not observed frames.** A local
+   counter structurally cannot settle the hidden cases (§4.1). What the room
+   actually received needs a real show with a second device and the existing
+   receiving-side frame watchdog. Keep it marked that way.
+2. **The 6-second post-call mic mute.** The context auto-resumed; the microphone
+   track did not, for six further seconds, and the unmute coincided exactly with
+   the next step's app switch, so the cause is not isolated. Owed: a targeted
+   re-run that ends a call and then does nothing at all, to see when the track
+   comes back on its own. Until then "resume is automatic" is not settled.
+3. **A Safari run.** Chrome on iOS is WKWebView — the engine is Safari's, the app
+   container and its audio-session configuration are not, and call handling lives
+   exactly there.
+4. **An Android run.** Every branch in the Android column of §4.1 is still
+   unverified.
+5. **Artist-facing wording for the merged state**, pending approval before it
+   ships.

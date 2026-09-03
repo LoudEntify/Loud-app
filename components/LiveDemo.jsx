@@ -3046,12 +3046,28 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // receiving client — running this there would add a timer to a device
   // whose whole job is to hold a camera steady.
   //
-  // The rules for what each interruption SHOULD do differ per case in
-  // MULTI_PERFORMER terms (a call outranks the show, a lock means they
-  // stepped away, minimising may not); those are deliberately NOT
-  // implemented here. What is implemented is the part that is the same
-  // in every case and that the audience needs either way: the room finds
-  // out promptly, and the artist gets one control back.
+  // ── THE INVARIANT: NOTHING HERE STOPS PUBLISHING ──────────────
+  // Ruled on 2026-09-03, after the iOS run, and load-bearing enough to
+  // state where somebody would be tempted to break it.
+  //
+  // The original spec had a locked phone pause both audio and camera,
+  // on the reading that a locked phone means the artist has stepped
+  // away. The measurements killed that: on iOS 26.6 a lock does not stop
+  // audio (clock ratio 1.00), does not suspend the page, and produces an
+  // event sequence IDENTICAL to minimising — same order, same wake lock,
+  // same context state (docs/INTERRUPTION_FEASIBILITY.md §4.1). The app
+  // cannot tell a phone that has been set down from one in a pocket
+  // mid-song.
+  //
+  // So it does not guess. The camera pausing is the platform's decision
+  // and is reported; the audio keeps going out, because cutting a
+  // performer's voice because their screen went dark is the worse
+  // failure of the two available. If a future change wants to stop
+  // publishing on an interruption, it needs a signal that distinguishes
+  // intent — and no such signal exists in any capture taken so far.
+  //
+  // What is implemented is the part that is the same in every case: the
+  // room finds out promptly, and the artist gets one control back.
   const getLocalTracks = useCallback(() => {
     const lp = room?.localParticipant;
     return {
