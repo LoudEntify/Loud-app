@@ -51,7 +51,7 @@ import {
   roleOfTrack,
   sourceKey,
 } from '../lib/trackSources';
-import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
+import { createBrollPublisher, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState } from '../lib/showState';
@@ -3759,7 +3759,40 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   const [activeBrollClipId, setActiveBrollClipId] = useState(null);
   const [brollBusy, setBrollBusy] = useState(false);
   const [brollError, setBrollError] = useState('');
-  const brollPlayerRef = useRef(null);
+  // The session's b-roll publisher. ONE per show — the publication it
+  // holds is established once and swapped into, never re-published.
+  const brollPublisherRef = useRef(null);
+  // The auto director, reachable from callbacks that must not take it as
+  // a dependency (stopBroll runs from a timer and from teardown).
+  const autoRef = useRef(null);
+
+  // ── ONE VIDEO SENDER ACTIVE AT A TIME ─────────────────────────
+  // Muting the camera's PUBLICATION while a clip is on air, rather than
+  // stopping anything. The publication stays, so the liveness registry
+  // sees `publication_muted` — an impairment it already understands and
+  // already recovers from with probation — instead of a camera that
+  // vanished.
+  //
+  // This is what keeps the fix honest about aggregate bitrate: the b-roll
+  // sender exists from session start, but between them only one is ever
+  // sending, so cueing a clip does not double what the link is asked
+  // for.
+  //
+  // It does NOT stop publishing on an interruption — the round-2
+  // invariant is about interruptions the artist did not choose. Cueing a
+  // clip is a deliberate act with an explicit return path.
+  const setCameraPublicationMuted = useCallback(async (muted, reason) => {
+    const pub = room?.localParticipant?.getTrackPublication?.(Track.Source.Camera);
+    if (!pub?.track) return false;
+    try {
+      if (muted) await pub.mute(); else await pub.unmute();
+      logHealthEvent('camera_publication_muted', { muted, reason });
+      return true;
+    } catch (err) {
+      logHealthEvent('camera_publication_mute_failed', { muted, reason, error: String(err?.message || err) });
+      return false;
+    }
+  }, [room]);
   // Resolved after mount rather than during render. captureStream is a
   // browser capability and the server has no opinion about it; deciding
   // in an effect keeps the first client render identical to the server's
@@ -3798,14 +3831,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   }, [isMainPerformer]);
 
   const stopBroll = useCallback(async (reason) => {
-    const player = brollPlayerRef.current;
-    brollPlayerRef.current = null;
+    const publisher = brollPublisherRef.current;
     setActiveBrollClipId(null);
-    if (player) {
+    if (publisher?.playing) {
       logHealthEvent('broll_stopped', { reason });
-      await player.stop();
+      await publisher.stop();
     }
-  }, []);
+    // The camera comes back BEFORE auto does. Unmuting is instant but a
+    // recovering publication serves probation in the liveness registry,
+    // and letting auto resume first would give it a window where the
+    // artist's own camera is still ineligible.
+    await setCameraPublicationMuted(false, `broll_${reason}`);
+    autoRef.current?.resumeFor?.('broll');
+    logHealthEvent('auto_hold_released', { owner: 'broll', holders: autoRef.current?.holders ?? null });
+  }, [setCameraPublicationMuted]);
 
   // THE RETURN CUT. Fired when the clip ends, BEFORE the track is
   // unpublished (the unpublish is driven by the effect below, on a
@@ -3815,9 +3854,23 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // re-resolves it -- so if the artist's camera changed, dropped or was
   // swapped during the clip, the return lands on what is live now rather
   // than on a stale target.
-  const returnFromBroll = useCallback(() => {
+  const returnFromBroll = useCallback(async () => {
     const previous = brollReturnShotRef.current;
     brollReturnShotRef.current = null;
+
+    // ── THE CAMERA COMES BACK BEFORE THE CUT IS BUILT ─────────
+    // Not tidiness — ordering, and getting it wrong breaks every clip.
+    // availableRoles() skips muted publications, and the camera is muted
+    // for the clip's duration. Building the return command first would
+    // resolve against a slot with no camera in it, refuse, and take the
+    // 'no_camera_to_return_to' path — so every clip would end by tearing
+    // the stage down instead of cutting back to the performer.
+    //
+    // Awaited, so the publication is genuinely unmuted before
+    // availableRoles reads it. stopBroll unmutes again a moment later;
+    // that call is idempotent and stays as the backstop for the paths
+    // that never reach here.
+    await setCameraPublicationMuted(false, 'broll_return');
     // 'wide' is the default return, not the previous shot, when there
     // wasn't one: cueing a clip as the very first shot of a show is
     // legitimate, and the thing to come back to is the widest honest
@@ -3826,8 +3879,9 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     logHealthEvent('broll_return_cut', { shot: shotKey, hadPrevious: !!previous });
     const command = buildAndFireCommand(shotKey, 'human', {});
     if (!command) {
-      // Nothing to cut back TO -- the artist's camera is off, or every
-      // camera dropped while the clip was playing. The clip still has to
+      // Nothing to cut back TO -- the artist's camera is genuinely off,
+      // or every camera dropped while the clip was playing. (Not the
+      // muted-for-the-clip case: that is unmuted immediately above.) The clip still has to
       // come off air, so take it down directly rather than waiting on an
       // off-air effect that watches for a shot change that will never
       // arrive. The stage falls to its own "be right back" interstitial,
@@ -3835,7 +3889,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       logHealthEvent('broll_return_unresolved', { attemptedShot: shotKey });
       stopBroll('no_camera_to_return_to');
     }
-  }, [buildAndFireCommand, stopBroll]);
+  }, [buildAndFireCommand, stopBroll, setCameraPublicationMuted]);
 
   const cueBroll = useCallback(async (clip) => {
     setBrollError('');
@@ -3851,30 +3905,37 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // One clip at a time. Swapping means the previous one comes down
       // first -- two published b-roll tracks would both answer to the
       // 'broll' role and the resolution between them would be arbitrary.
-      if (brollPlayerRef.current) await stopBroll('replaced');
+      if (brollPublisherRef.current?.playing) await stopBroll('replaced');
 
-      const player = createBrollPlayer({
-        room,
-        onEnded: () => {
-          // Cut away FIRST. The track is still published and still
-          // holding its final frame at this moment, which is the right
-          // picture to be showing while the cut travels.
-          returnFromBroll();
-        },
-        onError: ({ error }) => {
-          setBrollError(error);
-          returnFromBroll();
-        },
-      });
-      brollPlayerRef.current = player;
+      const publisher = brollPublisherRef.current;
+      if (!publisher) {
+        setBrollError('B-roll is not ready on this device.');
+        return;
+      }
 
       // Captured BEFORE the cut, so the return knows where to go back to.
       brollReturnShotRef.current = activeShotRef.current[role]?.shot ?? null;
 
-      const result = await player.start({ clip, accessToken: artistAccessToken });
+      // ── HOLD AUTO FOR THE CLIP'S DURATION ─────────────────────
+      // The 3-4 second clip lifetime was never a b-roll defect. Auto's
+      // own hold timer was already running when the clip was cued, it
+      // fired a few seconds later, the shot left the clip, and the
+      // off-air effect took it down 500ms after that. Named by owner, so
+      // releasing this hold cannot release cue mode's.
+      autoRef.current?.suspendFor?.('broll');
+      logHealthEvent('auto_hold_taken', { owner: 'broll', holders: autoRef.current?.holders ?? null });
+
+      // ── ONE TRACK SENDING AT A TIME ───────────────────────────
+      // Muted BEFORE the clip goes live, not after: the point is that
+      // aggregate demand never doubles, and doing it in the other order
+      // leaves a window where both are sending.
+      await setCameraPublicationMuted(true, 'broll_on_air');
+
+      const result = await publisher.play({ clip, accessToken: artistAccessToken });
       if (result.error) {
-        brollPlayerRef.current = null;
         brollReturnShotRef.current = null;
+        autoRef.current?.resumeFor?.('broll');
+        await setCameraPublicationMuted(false, 'broll_failed');
         setBrollError(result.error);
         return;
       }
@@ -3938,9 +3999,65 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     return () => clearTimeout(t);
   }, [activeShot, role, activeBrollClipId, stopBroll]);
 
+  // ── PREWARM: THE PUBLICATION EXISTS BEFORE ANY CLIP DOES ──────
+  // The round's actual fix. Establishing the sender while the show is
+  // quiet means cueing a clip is a swap on a transceiver every viewer
+  // negotiated at join — no new track, nothing for the congestion
+  // controller to re-probe from zero, and no window in which subscribers
+  // have not yet seen the track.
+  //
+  // Gated on the performer and on a live-ish show rather than on mount:
+  // a viewer has nothing to publish, and establishing it during
+  // 'scheduled' would hold a sender open through a soundcheck that may
+  // run for an hour.
+  //
+  // Re-runs on reconnect through `room` identity changing; prewarm() is
+  // idempotent and returns early when the publication is already there,
+  // so this cannot produce a second b-roll track.
+  useEffect(() => {
+    if (!isMainPerformer || !room) return undefined;
+    if (displayShowState === 'ended') return undefined;
+    if (!isBrollPlaybackSupported()) return undefined;
+
+    let cancelled = false;
+    const publisher = createBrollPublisher({
+      room,
+      onEnded: () => {
+        // Cut away FIRST. The clip's final frame is still on the sender
+        // at this moment, which is the right picture to be showing while
+        // the cut travels.
+        returnFromBroll();
+      },
+      onError: ({ error }) => {
+        setBrollError(error);
+        returnFromBroll();
+      },
+    });
+    brollPublisherRef.current = publisher;
+
+    (async () => {
+      const result = await publisher.prewarm();
+      if (cancelled) return;
+      if (result?.error && result.error !== 'unsupported_browser') {
+        // Not fatal, and deliberately not shouted at the artist: b-roll
+        // simply will not be available, and the panel already says so
+        // when a cue fails. Recorded so a show without clips can be told
+        // apart from a show where nobody tried.
+        logHealthEvent('broll_unavailable', { reason: result.error });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      const p = brollPublisherRef.current;
+      brollPublisherRef.current = null;
+      p?.teardown?.('effect_cleanup');
+    };
+  }, [isMainPerformer, room, displayShowState, returnFromBroll]);
+
   // Leaving, ending, or unmounting mid-clip must not leave a published
   // track behind on a room this component no longer owns.
-  useEffect(() => () => { brollPlayerRef.current?.stop?.(); }, []);
+  useEffect(() => () => { brollPublisherRef.current?.teardown?.('unmount'); }, []);
 
   // Cue-Sheet Director (Phase 1) -- cueDirector owns its own health
   // events (cue_fired/cue_fallback), not 'director_shot_emitted' (that
@@ -4028,6 +4145,11 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       getCurrentFeed,
     });
   }, [isMainPerformer, room, fireAutoShot, getAutoAvailableShots, resolveAutoFeed, getCurrentFeed]);
+
+  // Mirrored so callbacks with empty dependency lists can reach the
+  // current director without taking it as a dependency and being
+  // recreated on every camera change.
+  useEffect(() => { autoRef.current = auto; }, [auto]);
 
   // ─── Cue-Sheet Director (CD-3/CD-4) ───────────────────────────
   // cueSheet is the last SAVED sheet for whatever track is currently
@@ -4198,8 +4320,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // Same suspend()/resume() pair onExclusiveMode already drives for
       // staccato -- cue playback is another exclusive mode, not a
       // special case (see the phase-gate plan, point (d)).
-      suspendAuto: () => auto?.suspend(),
-      resumeAuto: () => auto?.resume(),
+      // Named owner, not the bare suspend/resume pair. Cue mode and a
+      // b-roll clip can be held at the same time, and releasing one must
+      // not release the other — see the suspendedBy note in
+      // lib/autoDirector.js for the defect this shape prevents.
+      suspendAuto: () => auto?.suspendFor('cue'),
+      resumeAuto: () => auto?.resumeFor('cue'),
     });
   }, [isMainPerformer, room, cueSheet, fireCueShot, getBackingTrackState, auto, role]);
 
@@ -4618,7 +4744,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
             // Phase 2 diagnostic instrumentation -- log-only, call
             // unchanged from before.
             logHealthEvent(on ? 'director_suspend' : 'director_resume', {});
-            if (on) auto?.suspend(); else auto?.resume();
+            if (on) auto?.suspendFor('staccato'); else auto?.resumeFor('staccato');
           }}
           onCommand={(cmd) => setActiveShot((prev) => ({ ...prev, [cmd.slot]: cmd }))}
           mode={mode}

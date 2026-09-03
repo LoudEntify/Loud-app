@@ -1650,3 +1650,104 @@ threshold), and the bound if it ever were is `frames_stalled` →
 recovered → 750ms probation on a key that never disappeared — degraded,
 not a CAMERA LOST cascade. Both sids are logged on the rotate row so a
 timeline can prove it was a lens change.
+
+# MVP ROUND 3 — 2026-09-03
+
+Branch `feature/mvp-round-3`, cut from `main` at c08cd4b.
+
+## Piece 1 — B-roll reaches viewers and egress
+
+### The misdiagnosis, on the record
+
+The 3-4 second clip lifetime was reported, and initially treated, as a
+b-roll defect. **It was not.** `BROLL_OFFAIR_GRACE_MS` is 500ms and only
+starts once the shot has already left the clip. What moved the shot was
+the **auto director's own hold timer, already running when the clip was
+cued** — `bRoll: 8-14s`, `closeUp: 6-10s`, so the residual at any given
+moment is typically a few seconds. It fired, cut to a camera, the
+off-air effect saw the shot leave, and 500ms later the clip came down.
+
+`cueDirector` and staccato both suspend auto for their duration. The
+b-roll path never did. Nothing in the b-roll code was wrong; the clip was
+being cut away from by a timer that predated it.
+
+Recorded rather than quietly corrected, because the shape of the mistake
+generalises: a feature that looks broken from inside its own file can be
+a scheduler somewhere else that nobody suspended.
+
+### The bitrate collapse, and why the obvious fix was refused
+
+Cause was already proven from the artist's own telemetry and was NOT
+re-investigated: publishing a second 1080x1920 track mid-show collapses
+availableOutgoingBitrate 6.9 -> 1.0 Mbps in ~4s, uplink hits zero, the
+top simulcast layer drops, recovery ~11s.
+
+The obvious fix — swap the clip onto the CAMERA publication with
+replaceTrack — was rejected. The clip's pixels would flow through a
+publication named and sourced as a camera, so every parser in
+lib/trackSources.js would classify a clip as the performer's face. That
+is the exact failure that file exists to prevent, and it would be baked
+into recordings and into the training data those recordings become. A
+bitrate fix does not get to weaken that rule.
+
+### What was built instead
+
+The b-roll publication is **established once, at session start**, from a
+1080x1920 black canvas via `captureStream(0)` — one frame on demand,
+then nothing, so it costs no per-frame work for the rest of the show.
+That mattered specifically because the round-2 CPU investigation is
+still open and a placeholder running at 1fps would contaminate it.
+
+Playing a clip is `replaceTrack()` + `unmute()` on a sender every viewer
+negotiated at join. No new transceiver, no renegotiation, nothing for
+the congestion controller to re-probe from zero. Encoding is capped at
+2Mbps, single layer: the artist's steady state used 3.0 of 6.9Mbps, so a
+clip fits inside headroom that already existed instead of competing for
+it.
+
+The camera publication is **muted while a clip is on air** — one sender
+carrying traffic at a time, so aggregate demand never doubles across the
+cut. Muted rather than stopped, so the liveness registry sees
+`publication_muted`, an impairment it already understands and already
+recovers from with probation.
+
+### The ordering bug this introduced, found by reading rather than by running
+
+`availableRoles()` skips muted publications. So muting the camera for the
+clip's duration meant the RETURN cut resolved against a slot with no
+camera in it, refused, and took the `no_camera_to_return_to` path —
+every clip would have ended by tearing the stage down instead of cutting
+back to the performer.
+
+The camera is therefore unmuted, and awaited, BEFORE the return command
+is built. `stopBroll` unmutes again a moment later; that call is
+idempotent and remains the backstop for the paths that never reach the
+return cut.
+
+## Auto's suspend registry — owners, not a boolean
+
+`suspended` became `suspendedBy`, a Set of owner names, because b-roll is
+now the third thing that can hold auto down.
+
+A boolean has a defect that could only ever surface in a real show with a
+cue sheet running: cue mode suspends auto, a clip is cued inside that
+mode, the clip ends, and its resume() clears the flag — auto starts
+cutting underneath a cue sheet that believes it has exclusive control. A
+depth counter fixes the nesting and introduces a worse failure: it can be
+unbalanced, and an unbalanced counter cannot be told from the outside
+whether it is stuck or loose.
+
+A set of named owners cannot be unbalanced. Double-suspend from one owner
+is a no-op, resuming an owner that never suspended is a no-op, and auto
+runs exactly when nobody holds it. `holders` is exposed for telemetry, so
+"why is auto not cutting" is answerable from a CSV.
+
+`suspend()`/`resume()` remain, routed through the registry as owner
+'legacy', because two mechanisms is how the nesting defect returns.
+
+## Deferred to the director roadmap
+
+**An auto director that decides when to drop in b-roll.** Auto is
+suspended for a clip's duration and resumes on the return cut; it does
+not select clips. Working first, clever later — the director's remit
+should not expand while its output is invisible to viewers.
