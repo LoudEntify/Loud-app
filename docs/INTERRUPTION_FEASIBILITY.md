@@ -110,12 +110,52 @@ depends on the answers:
 
 | Built | Where |
 |---|---|
-| Holding state — "Back in a moment" over the held frame, live surfaces only | `HOLDING_OVERLAY` in `components/LiveDemo.jsx` |
+| Holding state — "Back in a moment" for the audience, specific cause on the artist's console | `holdingOverlay()` in `components/LiveDemo.jsx` |
 | DND pre-show prompt, per artist per device, never claiming DND is on | `lib/dndPrompt.js`, `components/DndPrompt.jsx`, rendered in Kit Check |
 | The shape classifier | `lib/interruptionState.js` |
 | Departure announcement on capability loss | `lib/awaySignal.js`, consumed as the `announced_away` impairment reason in `lib/trackLiveness.js` |
 | Resume affordance | `components/ResumeAffordance.jsx` |
 | Capability language throughout | `describeInterruption()` — the single place artist-facing interruption copy is written |
+
+### 3a.1 The two readers of one held frame — approved wording
+
+Same pill, same position, different text depending on who is looking. Not
+stacked: the console line replaces the audience line. The audience needs to know
+the show is not broken and they should stay; the artist is the only person who
+can fix it and needs to know what happened.
+
+**Audience, every case:** Back in a moment
+
+**Group A — the artist's own capture** (`describeInterruptionShort`):
+
+| Branch | Console line |
+|---|---|
+| `audio_interrupted` | Your microphone was interrupted |
+| `camera_taken` | Another app took your camera |
+| `capture_lost` | Your sound and picture stopped |
+| `backgrounded_degraded` | Your camera stopped while you were away |
+| suspension, on return | The show paused while you were away |
+| `backgrounded_running` | *(nothing — nothing was lost, so no frame is held)* |
+
+**Group B — the held feed is not theirs** (`describeFeedLoss`, shapes from
+`feedLossShape` in `lib/trackLiveness.js`):
+
+| Shape | Console line |
+|---|---|
+| `froze` | This camera froze — check the phone |
+| `lost_connection` | This camera lost connection |
+| `switched_off` | This camera was switched off |
+| `away` | The other performer is away |
+
+Rules these obey, and which any future line must: under 40 characters, because
+the console is a phone; plain English; **"check the phone" is the only
+imperative in the set** — where the action depends on state the artist cannot
+see, naming the fact beats guessing at an instruction, and the RESUME card
+already carries the action for the cases that have one. The pill carries the
+fact, the card carries the action. The backgrounded and suspended lines are past
+tense and describe this device this time; neither promises what minimising does,
+and neither claims to know whether the phone was locked or backgrounded, because
+it cannot tell.
 
 **Not built, and still blocked:** the per-case behaviours. What a call should do
 that a minimise should not, whether audio pauses or continues, what resumes

@@ -57,9 +57,14 @@ import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { describeTransport } from '../lib/transportDiagnostics';
-import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
+import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useAwayIdentities, useAwayAnnouncer } from '../lib/awaySignal';
-import { useCapabilityWatch } from '../lib/interruptionState';
+import {
+  useCapabilityWatch,
+  describeInterruptionShort,
+  describeFeedLoss,
+  SUSPENDED_RETURN_LINE,
+} from '../lib/interruptionState';
 import ResumeAffordance from './ResumeAffordance';
 import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
@@ -117,37 +122,60 @@ const MAX_AUTOMATIC_RECOVERIES = 3;
 // deliberately interim: a designed holding card comes later, and what
 // matters until then is that nobody sees a bare frozen frame with no
 // explanation.
-const HOLDING_OVERLAY = (
-  <div
-    // Fix (D) -- top-centre, not the bottom band. The bottom is
-    // contested by the control cluster, the feeds strip and the deck,
-    // and the pill was landing on top of the controls. Top-centre is the
-    // one horizontal band with nothing else in it: the topbar owns the
-    // corners, not the middle.
-    style={{
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      top: 56,
-      display: 'flex',
-      justifyContent: 'center',
-    }}
-  >
-    <span
+//
+// ── ONE PILL, TWO READERS ─────────────────────────────────────
+// The audience keeps that line. The artist's own console gets the
+// specific cause instead — not stacked with it, instead of it. They are
+// doing different jobs: the audience needs to know the show is not
+// broken and they should stay, and the artist is the only person who can
+// fix it and needs to know what happened.
+//
+// Every console line comes from lib/interruptionState.js, which owns all
+// artist-facing wording; nothing here composes a sentence of its own.
+// Empty line means the audience default, so a state nobody has written a
+// line for degrades to reassurance rather than to a blank pill.
+function holdingOverlay(line) {
+  return (
+    <div
+      // Fix (D) -- top-centre, not the bottom band. The bottom is
+      // contested by the control cluster, the feeds strip and the deck,
+      // and the pill was landing on top of the controls. Top-centre is
+      // the one horizontal band with nothing else in it: the topbar owns
+      // the corners, not the middle.
       style={{
-        fontSize: 11,
-        letterSpacing: '0.08em',
-        color: 'rgba(253, 255, 252, 0.75)',
-        background: 'rgba(1, 22, 39, 0.55)',
-        border: '1px solid rgba(46, 196, 182, 0.3)',
-        borderRadius: 999,
-        padding: '4px 10px',
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 56,
+        display: 'flex',
+        justifyContent: 'center',
+        // The console lines are longer than the audience one and the
+        // console is a phone. Padding keeps the pill off both edges;
+        // nowrap keeps it one line, which is the whole point of a line
+        // read at a glance from behind a microphone.
+        padding: '0 12px',
       }}
     >
-      Back in a moment
-    </span>
-  </div>
-);
+      <span
+        style={{
+          fontSize: 11,
+          letterSpacing: '0.08em',
+          color: 'rgba(253, 255, 252, 0.75)',
+          background: 'rgba(1, 22, 39, 0.55)',
+          border: '1px solid rgba(46, 196, 182, 0.3)',
+          borderRadius: 999,
+          padding: '4px 10px',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: '100%',
+        }}
+      >
+        {line || 'Back in a moment'}
+      </span>
+    </div>
+  );
+}
 
 // Portrait is the output target always (Stage 1 of the portrait capture
 // work) -- requested uniformly, for every source, not just phones.
@@ -3344,6 +3372,34 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // pattern as wasInterstitialRef above.
   const chosenDebugRef = useRef({});
 
+  // ── WHICH LINE THIS READER GETS ───────────────────────────────
+  // Viewers get nothing here and fall through to "Back in a moment".
+  // The performer's own console gets the specific cause, in this order
+  // of precedence:
+  //
+  //   1. Their OWN capture, if something of it is lost. Always the most
+  //      actionable thing on screen — it is the only failure they can do
+  //      anything about from where they are standing.
+  //   2. A recent suspension, if nothing of theirs is currently lost.
+  //      Narrow by construction: if the capture did not survive the
+  //      freeze, (1) is more specific and wins.
+  //   3. What happened to the feed being held — a propped phone, or the
+  //      other performer.
+  //
+  // Recomputed per render rather than memoised: it is four property
+  // reads and a switch, and a stale line about a camera that has since
+  // come back would be worse than the cost it saves.
+  const SUSPENDED_LINE_WINDOW_MS = 10000;
+  const consoleLineFor = (chosen) => {
+    if (!isMainPerformer) return '';
+    const own = describeInterruptionShort(capability.state);
+    if (own) return own;
+    if (capability.suspendedAt && now - capability.suspendedAt < SUSPENDED_LINE_WINDOW_MS) {
+      return SUSPENDED_RETURN_LINE;
+    }
+    return describeFeedLoss(feedLossShape(chosen, awayIdentities));
+  };
+
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(letter);
     const eligible = filterEligible(candidates, ineligibleTracks);
@@ -3442,7 +3498,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={HOLDING_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} showEnded={displayShowState === 'ended'} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={holdingOverlay(consoleLineFor(chosen))} onReselect={handleReselect} activeImpaired={activeImpaired} showEnded={displayShowState === 'ended'} />
       </div>
     );
   };
