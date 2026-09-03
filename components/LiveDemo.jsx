@@ -66,6 +66,7 @@ import {
   SUSPENDED_RETURN_LINE,
 } from '../lib/interruptionState';
 import ResumeAffordance from './ResumeAffordance';
+import AwayReturnNotice from './AwayReturnNotice';
 import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
 import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
@@ -4693,6 +4694,16 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         needsGesture={needsResumeGesture}
         onResume={handleResume}
       />
+
+      {/* Interruption round · the merged state, reported on return.
+          Rules 2 and 3 became one observed state — camera paused, audio
+          continuing, artist away from the screen — and it exists only
+          while nobody is looking at this screen, so the only honest
+          moment to say anything is afterwards. Performer only: a viewer
+          has no capture to have been away from. */}
+      {isMainPerformer && displayShowState !== 'ended' && (
+        <AwayReturnNotice episode={capability.awayEpisode} />
+      )}
 
       {/* Tap-to-react (PRD row 54). Mounted for every role that can see
           the stage, artist included — an artist should be able to react

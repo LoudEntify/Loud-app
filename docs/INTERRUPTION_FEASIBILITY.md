@@ -483,8 +483,24 @@ JavaScript still running, page hidden. Classifier state `backgrounded_degraded`.
 3. **The audience cuts to another camera if one exists, otherwise the holding
    state.** Already works with no new code: the muted camera track fires
    `TrackMuted`, which is already `publication_muted` in the liveness registry.
-4. **The artist is told clearly, on return**, what happened and that their
-   microphone stayed on. Wording pending approval — see §8.
+4. **The artist is told clearly, on return** — `components/AwayReturnNotice.jsx`,
+   wording approved 2026-09-03:
+
+   > Your camera paused while you were away.
+   > Your microphone stayed on.
+   > *You were away for 41s.*
+
+   A return notice rather than a live one, because the state only exists
+   while nobody is looking at the screen. That constraint is what keeps the
+   copy honest: it reports what just happened on this device, rather than
+   describing how the platform behaves. Second line because the artist would
+   never guess it and might have wanted to prevent it. Third line because it
+   answers the only question worth asking on return — how bad was that — and
+   four seconds and two minutes are different situations.
+
+   Nothing about what the audience saw: this measured the phone, not
+   delivery. Shown only past 5s away, top of console, auto-dismissed at 10s,
+   tap to clear.
 
 **What must never be built from this:** a line anywhere promising that minimising
 or locking keeps the artist live. This is one run, on one handset, in one
@@ -531,5 +547,5 @@ Carried forward so none of it can quietly become assumed:
    exactly there.
 4. **An Android run.** Every branch in the Android column of §4.1 is still
    unverified.
-5. **Artist-facing wording for the merged state**, pending approval before it
-   ships.
+5. ~~Artist-facing wording for the merged state~~ — **closed 2026-09-03**,
+   approved and shipped (§7, rule 2).
