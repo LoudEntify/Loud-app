@@ -55,6 +55,10 @@ export default function AudioDeckPanel({
   // that, adopting a track on arrival would quietly rebind the row to a
   // different sheet than the artist chose.
   sessionState = null,
+  // Passed straight through to BackingTrackPanel -> SetListPanel. Not
+  // consumed at this level.
+  sessionTarget = null,
+  canEditSetList = false,
 }) {
   const [manualMix, setManualMix] = useState(false);
   const [values, setValues] = useState(PRESET);
@@ -633,6 +637,9 @@ export default function AudioDeckPanel({
           audioContext={audioContext}
           outputBus={nodes.outputBus}
           sessionState={sessionState}
+          artistAccessToken={artistAccessToken}
+          sessionTarget={sessionTarget}
+          canEditSetList={canEditSetList}
           showEnded={showEnded}
           onPlayerChange={handleBackingPlayerChange}
           cues={cues}

@@ -13,18 +13,33 @@
 -- unmounted the artist panel. This table is the durable copy.
 --
 -- ── WHAT THIS DELIBERATELY DOES NOT HOLD ──────────────────────
--- The AUDIO. The backing track is a file chosen from the artist's own
--- device and decoded in the browser; it is never uploaded (see
--- components/BackingTrackPanel.jsx). So this row stores the track's
--- IDENTITY — its SHA-256 hash and filename — not its bytes.
+-- The AUDIO. This row stores the track's IDENTITY — its SHA-256 hash
+-- and filename — not its bytes. That is still true and still correct.
 --
--- The practical consequence, stated here because it drives the UI: a
--- client-side route change keeps the decoded audio alive in memory and
--- everything resumes seamlessly. A genuine page RELOAD does not, and no
--- database column can change that — the browser cannot re-open a local
--- file without a fresh user gesture. In that case this row still tells
--- the artist exactly what to re-select and where they were, which is the
--- honest best available and much better than starting over.
+-- ⚠️ AMENDED BY MVP ROUND 2. When this was written, a backing track was
+-- ALWAYS a file chosen from the artist's own device and decoded in the
+-- browser, never uploaded. That is now only one of two cases, and the
+-- text below has been narrowed rather than deleted because it remains
+-- exactly true of the first:
+--
+--   LOCALLY PICKED (unchanged). A client-side route change keeps the
+--   decoded audio alive in memory and everything resumes seamlessly. A
+--   genuine page RELOAD does not, and no database column can change
+--   that — the browser cannot re-open a local file without a fresh user
+--   gesture. This row still tells the artist exactly what to re-select
+--   and where they were, which is the honest best available.
+--
+--   UPLOADED (docs/mvp2_01_backing_tracks.sql). track_hash resolves to
+--   a storage object through the unique (artist_id, sha256) index on
+--   backing_tracks, so the app fetches the bytes itself and resumes
+--   without asking. The re-pick prompt does not appear for these.
+--
+-- Note what did NOT change: no column was added here for round 2. The
+-- hash already resolves to an object, and a storage_path column would
+-- be a second copy of a fact that index answers. That is the standing
+-- rule for this table — a column when the fact is genuinely new and
+-- derivable from nothing, nothing when it duplicates something already
+-- resolvable.
 --
 -- ── WHAT STAYS OFF THE DATABASE ───────────────────────────────
 -- Shot commands. Those are ephemeral, sub-second, and belong on the

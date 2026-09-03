@@ -103,6 +103,7 @@ export default function BroadcastStage({
   // panel rendered in two layouts; a prop added to one and not the other
   // is a feature that works only in portrait.
   sessionState = null,
+  sessionTarget = null,
   deckCollapsed,
   onToggleDeckCollapsed,
   commentsCollapsed,
@@ -408,6 +409,7 @@ export default function BroadcastStage({
                         artistAccessToken={artistAccessToken}
                         onCueSheetChange={onCueSheetChange}
                         sessionState={sessionState}
+                        sessionTarget={sessionTarget}
                       />
                     ),
                   },
@@ -484,6 +486,7 @@ export default function BroadcastStage({
               artistAccessToken={artistAccessToken}
               onCueSheetChange={onCueSheetChange}
               sessionState={sessionState}
+              sessionTarget={sessionTarget}
             />
           </div>
           <div className="desktop-side-column desktop-side-column--right">
