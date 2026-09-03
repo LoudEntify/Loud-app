@@ -2,9 +2,11 @@
 
 Round-3 groundwork. 3 September 2026 · branch `feature/mvp-round-2`
 
-**Status: nothing built. This is the feasibility record and the probe protocol.**
-The interruption rules themselves are not implemented and must not be until the
-Android run is done and the iPhone run is scheduled.
+**Status: the platform-independent pieces are built (§3a). The three interruption
+RULES are not, and must not be until the redraft in §7 is approved.**
+
+**Evidence held:** desktop (this repo's own show captures) and **iOS 26.6 /
+Chrome** (probe run 2026-09-03, §4.1). **Still owed: Android, and iOS Safari.**
 
 **Topology, decided:** the artist's **phone is the primary device** — the phone
 they signed up on, their main camera, and the console. Additional camfeed phones
@@ -199,32 +201,85 @@ keeps the codebase's standing rule — feature-detect and measure, never sniff t
 user agent (`lib/brollPlayback.js`, `lib/useSourceDimensions.js`,
 `components/LiveDemo.jsx`'s fullscreen note all follow it).
 
-### 4.1 Branch verification status — UNVERIFIED UNTIL OBSERVED
+### 4.1 Branch verification status — from captures, not reasoning
 
-The branches ship as written. What has actually been *reached on a device* is a
-separate question from whether the branch is correct, and this table is the
-record. **A branch marked unverified has never been observed; it must not be
-described as working, in a report, a commit message or a conversation, until a
-capture shows it.** Update this table from probe CSVs, not from reasoning.
+**A branch marked unverified has never been observed and must not be described as
+working** — in a report, a commit message or a conversation — until a capture
+shows it. Updated from probe CSVs only.
 
-| Branch (`lib/interruptionState.js`) | Desktop | Android | iOS |
+#### Provenance of the iOS column
+
+| | |
+|---|---|
+| **Run** | `interruption-ios-chrome.csv` (as exported: `interruption-probe-2026-09-03T18-31-28-384Z.csv`), 486 rows, 8 scripted steps |
+| **Device** | iPhone, screen 390×844 @3x, front camera 480×640 @30fps, 48kHz audio |
+| **OS / browser** | **iOS 26.6, Chrome (CriOS 152.0.7977.64)** — user agent reports `AppleWebKit/605.1.15`, so the engine is WebKit |
+| **NOT Safari** | Chrome on iOS is WKWebView, so the rendering and media engine are Safari's. What is *not* shared is the app container and its audio-session configuration, which is exactly where call handling lives. **These rows are evidence about WebKit-on-iOS-in-Chrome. A Safari run is still owed**, and any row below could move. |
+
+#### What each branch has actually reached
+
+| Branch | Desktop | Android | iOS 26.6 / Chrome |
 |---|---|---|---|
-| `live` | **observed** — every capture in this repo | unverified | unverified |
-| `backgrounded_running` | **observed** — 270s hidden, nothing lost (§2.3) | unverified | unverified |
-| `backgrounded_degraded` | not expected (desktop loses nothing) | unverified — **the branch Android is most likely to settle**, if the camera is released on backgrounding while audio continues | unverified |
-| `audio_interrupted` | unverified | unverified — reachable if a call leaves the page foregrounded | unverified — **the branch that decides whether rule 1 is separable from rule 3** |
-| `camera_taken` | unverified | unverified — the "camera taken" probe step targets exactly this | unverified |
-| `capture_lost` | unverified | unverified | unverified |
-| `suspended_return` (retrospective, not a branch) | not expected | unverified | unverified — expected on both minimise and lock, which is what would collapse rules 2 and 3 |
+| `live` | **observed** — every capture in this repo | unverified | **observed** — baseline |
+| `backgrounded_running` | **observed** — 270s hidden, nothing lost (§2.3) | unverified | **not reached** — every backgrounding muted the camera, so it lands in `backgrounded_degraded` instead |
+| `backgrounded_degraded` | not expected | unverified | **observed** — minimise, lock, and camera-taken all produce it: video track muted, audio clock ratio **1.00** |
+| `audio_interrupted` | unverified | unverified | **observed** — the assistant/alarm step: 9.8s at ratio **0.11** with the page visible and both tracks unmuted |
+| `camera_taken` | unverified | unverified | **not reached** — opening the camera app backgrounds the browser, so it arrives as `backgrounded_degraded`. The branch may be unreachable on this platform rather than merely unseen |
+| `capture_lost` | unverified | unverified | **observed** — call ringing: audio and video tracks mute together while the page is still visible, context → `interrupted` |
+| `suspended_return` | not expected | unverified | **observed** — answered call only: one **19.6s** JS gap, and 2.9s on the outgoing call. **Not** produced by minimise or lock |
 
-Two branches Android **cannot** settle on its own, whatever the run shows:
+#### Measured windows
 
-1. **`audio_interrupted` on iOS.** Android reaching it proves the branch works; it
-   says nothing about whether iOS leaves the page foregrounded during a call
-   banner. If iOS does not, rule 1 has no separate shape there.
-2. **Any claim that a branch is *not* reachable.** A branch not seen in one
-   20-minute run is a branch not seen, not a branch that cannot happen. Absence of
-   a row is the weakest evidence in this document and is never a verdict.
+| Step | Hidden | Audio ratio | JS ticks while hidden | Longest gap |
+|---|---|---|---|---|
+| minimise | 6.9s | **1.00** | 7 | 1.0s |
+| lock | 6.2s | **1.00** | 6 | 1.0s |
+| call answered | 23.8s | **0.00** | 5 | **19.6s** |
+| call outgoing | 23.7s | **0.02** | 23 | **2.9s** |
+| assistant/alarm | 25.4s | **1.00** | 25 | 1.2s |
+| camera taken | 53.2s | **1.00** | 53 | 1.0s |
+
+Ratio is the AudioContext clock's advance divided by wall-clock advance across the
+window: 1.00 means the audio thread never stopped.
+
+#### ⚠️ The video half of this run is DECLARED STATE, not observed frames
+
+`video_frames` reads **0 in all 486 rows**. Two causes, both real:
+
+1. **A bug in the probe.** `sample()` does
+   `q?.totalVideoFrames ?? videoEl.webkitDecodedFrameCount`. On WebKit,
+   `getVideoPlaybackQuality()` exists but does not populate `totalVideoFrames`
+   for a MediaStream-backed element — it returns **0**, which is a number, so
+   `??` never falls through to the WebKit counter. The fallback could not fire.
+2. **A limit no fix removes.** Even with a working counter, a *local* element
+   stops being decoded while the page is hidden, so the count would read ~0
+   whether the camera was capturing or not. **For the hidden cases a local frame
+   counter can never be conclusive.**
+
+So every video claim here rests on the track's `muted` flag — declared state,
+read locally by a page that was running, which is the one situation where that
+signal is sound (see the header note in `lib/interruptionState.js`). It is
+sufficient to say *the browser stopped the camera*; it is **not** sufficient to
+say what the room received. **Only a remote observer can settle that** — the
+existing frame watchdog, in a real show, with a second device.
+
+#### Minimise, lock and camera-taken are INDISTINGUISHABLE on this device
+
+Stated plainly because a design decision rests on it. All three produced the
+identical event sequence:
+
+```
+video_track_mute → window_blur → visibility_hidden
+    → window_focus → visibility_visible → video_track_unmute
+```
+
+with identical `wake_lock`, `audio_ctx_state` and track columns throughout, and
+an audio ratio of 1.00 in every case. **There is no signal in this capture that
+separates them.** The earlier prediction — that iOS would suspend JavaScript in
+both — was wrong, and wrong in the useful direction: nothing suspends, audio
+never stops. But "behaves better than expected" is not "tells them apart", and
+any rule needing to know *which* of the three happened cannot be built on this
+evidence.
 
 ---
 
