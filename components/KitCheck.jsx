@@ -7,6 +7,7 @@ import { CameraRotate, VideoCamera, VideoCameraSlash } from '@phosphor-icons/rea
 import AudioDeckPanel from './AudioDeckPanel';
 import EmptyState from './EmptyState';
 import PairingPanel from './PairingPanel';
+import DndPrompt from './DndPrompt';
 import RehearsalRoom from './RehearsalRoom';
 // No releaseAudioHost import, deliberately — see the note above stopCamera's
 // cleanup. Kit Check adopts and reads the host; it never tears it down.
@@ -661,6 +662,13 @@ export default function KitCheck() {
                 />
               </div>
             </div>
+
+            {/* ── BEFORE YOU GO LIVE ──────────────────────────
+                Placed under the camera column rather than in a banner:
+                this belongs to the same act as propping the phones, and
+                it is a reminder rather than an alert. It asks; it never
+                claims DND is on, because no app can see that. */}
+            <DndPrompt artistId={session?.user?.id ?? null} />
           </div>
 
           {/* ── Composed view / audio + cues ────────────────── */}

@@ -58,6 +58,9 @@ import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible } from '../lib/trackLiveness';
+import { useAwayIdentities, useAwayAnnouncer } from '../lib/awaySignal';
+import { useCapabilityWatch } from '../lib/interruptionState';
+import ResumeAffordance from './ResumeAffordance';
 import { getSession, getProfile, onAuthStateChange } from '../lib/supabaseAuth';
 import { getSupabase } from '../lib/supabaseClient';
 import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpcomingShow } from '../lib/scheduling';
@@ -90,14 +93,31 @@ import './reactions.css';
 // keeps the manual banner and nothing reconnects on its own.
 const MAX_AUTOMATIC_RECOVERIES = 3;
 
-// Fix (a2c) -- the "camera lost" treatment shown over a frozen last
-// frame, LIVE SURFACES ONLY. The egress template deliberately passes no
-// lostOverlay and gets the bare frozen frame: readable status text baked
-// into a recording is exactly what that template exists to exclude.
+// Fix (a2c), re-worded for the interruption round -- the treatment shown
+// over a frozen last frame, LIVE SURFACES ONLY. The egress template
+// deliberately passes no lostOverlay and gets the bare frozen frame:
+// readable status text baked into a recording is exactly what that
+// template exists to exclude.
+//
 // Deliberately subtle -- a held frame with a quiet label reads as "this
 // feed dropped", where a full-bleed error card would read as "the show
 // broke".
-const CAMERA_LOST_OVERLAY = (
+//
+// ── WHY IT NO LONGER SAYS "CAMERA LOST" ───────────────────────
+// Because most of the people reading it are the audience, and CAMERA
+// LOST is an engineer's sentence: it names a component and implies a
+// fault. The states that actually produce this frame are, in order of
+// how often they will happen, an artist whose phone was interrupted and
+// a camera that dropped — and the first is not a fault at all, it is a
+// person who will be back.
+//
+// "Back in a moment" is true of every path that reaches here, says what
+// the audience needs (this is not broken, do not leave), and promises
+// nothing about a cause the platform never reported. It is also
+// deliberately interim: a designed holding card comes later, and what
+// matters until then is that nobody sees a bare frozen frame with no
+// explanation.
+const HOLDING_OVERLAY = (
   <div
     // Fix (D) -- top-centre, not the bottom band. The bottom is
     // contested by the control cluster, the feeds strip and the deck,
@@ -124,7 +144,7 @@ const CAMERA_LOST_OVERLAY = (
         padding: '4px 10px',
       }}
     >
-      CAMERA LOST
+      Back in a moment
     </span>
   </div>
 );
@@ -157,7 +177,7 @@ const HIGH_RES_VIDEO_CAPTURE = { resolution: { height: 1920, aspectRatio: 9 / 16
 // each client applies it on arrival; unpublishing the instant we fire
 // would mean any client that had not yet applied it was looking at a
 // shot whose target had just disappeared — which renders as a frozen
-// frame under the CAMERA LOST pill, for a clip that ended exactly as
+// frame under the holding pill, for a clip that ended exactly as
 // intended. Holding the clip's final frame for this long costs nothing
 // and makes that window impossible.
 //
@@ -1458,9 +1478,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // deliberately still subscribe to Camera alone, because a phone looking
   // at itself and a rehearsal room have no b-roll to see.
   const tracks = useTracks(STAGE_TRACK_SOURCES);
+  // Interruption round -- who has announced that their own capture
+  // stopped (lib/awaySignal.js). Fed into the registry below rather than
+  // consulted separately, so an announced absence and an observed one
+  // reach the shot chain through the same single decision.
+  const awayIdentities = useAwayIdentities(room);
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
   // instance feeding every selection on this device.
-  const ineligibleTracks = useIneligibleTracks(room, tracks);
+  const ineligibleTracks = useIneligibleTracks(room, tracks, { awayIdentities });
 
   // Finding A -- selection telemetry on the LIVE client, not just the
   // recorder. The previous round wired this only into EgressPage, so
@@ -1991,6 +2016,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // sentinels below.
   const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
+
 
   // Fix (c) (SHOW-1 diagnosis round) -- publish-failure recovery.
   // Root cause (confirmed against the compiled livekit-client source):
@@ -2983,6 +3009,72 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // lifecycle, so its default ('live') is already correct.
   const showPhase = displayShowState === 'soundcheck' ? 'soundcheck' : 'live';
 
+  // ── INTERRUPTION HANDLING (round 3) ───────────────────────────
+  // Three pieces, in the order they fire: watch this device's own
+  // capture, announce a loss to the room, offer the artist a way back.
+  //
+  // Performer only. A viewer has no capture to lose, and a camfeed phone
+  // publishes video the frame watchdog already covers from every
+  // receiving client — running this there would add a timer to a device
+  // whose whole job is to hold a camera steady.
+  //
+  // The rules for what each interruption SHOULD do differ per case in
+  // MULTI_PERFORMER terms (a call outranks the show, a lock means they
+  // stepped away, minimising may not); those are deliberately NOT
+  // implemented here. What is implemented is the part that is the same
+  // in every case and that the audience needs either way: the room finds
+  // out promptly, and the artist gets one control back.
+  const getLocalTracks = useCallback(() => {
+    const lp = room?.localParticipant;
+    return {
+      // The RAW capture, not the published track. The published audio is
+      // the Web Audio graph's output, which keeps producing a valid
+      // MediaStreamTrack full of silence when the microphone underneath
+      // it has been taken — the exact failure that would otherwise look
+      // perfectly healthy from here.
+      audio: audioHandleRef.current?.rawStream?.getAudioTracks?.()[0] ?? null,
+      video: lp?.getTrackPublication?.(Track.Source.Camera)?.track?.mediaStreamTrack ?? null,
+    };
+  }, [room]);
+
+  const capability = useCapabilityWatch({
+    audioContext,
+    getTracks: getLocalTracks,
+    enabled: isMainPerformer && displayShowState !== 'ended',
+  });
+
+  useAwayAnnouncer(room, {
+    lost: capability.lost,
+    reason: capability.state,
+    enabled: isMainPerformer && displayShowState !== 'ended',
+  });
+
+  // The gesture is offered only when the capability did NOT come back on
+  // its own. `audioContext.state` is the test: a session that recovered
+  // is running again by the time this renders, and this card never
+  // appears. A session still suspended or (WebKit) interrupted needs a
+  // user gesture that no amount of retrying from here can substitute for.
+  const needsResumeGesture = isMainPerformer
+    && displayShowState !== 'ended'
+    && capability.lost
+    && !!audioContext
+    && audioContext.state !== 'running';
+
+  const handleResume = useCallback(async () => {
+    try {
+      await audioContext?.resume?.();
+    } catch {
+      // Refused. Fall through to the republish attempt anyway — it can
+      // rebuild a graph whose track genuinely ended, which is a
+      // different failure with a different fix.
+    }
+    // Reuses the existing recovery path rather than a second one: it
+    // already knows how to republish a live track and how to rebuild the
+    // whole graph when the underlying capture has ended.
+    await ensureAudioPublished('interruption_resume');
+    return audioHandleRef.current?.audioContext?.state === 'running';
+  }, [audioContext, ensureAudioPublished]);
+
   // Artist-side End Show (SHOW_LIFECYCLE_SPEC.md 3e). Optimistically
   // updates this device's own cached `show` immediately (same reasoning
   // as Go Live's optimistic update), writes to Supabase best-effort, and
@@ -3258,7 +3350,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     const cmd = activeShot[letter];
     // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
     // that feed is impaired. The artist cut there on purpose; the answer
-    // is a stable frozen frame with the CAMERA LOST treatment until they
+    // is a stable frozen frame with the holding treatment until they
     // cut away or it revives, not a silent re-pick. Searched against the
     // unfiltered pool for exactly that reason.
     // PARSE SITE 5 of 6, and the one that actually decides what is on
@@ -3350,7 +3442,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     return (
       <div style={{ width: '100%', height: '100%', transform: mirror ? 'scaleX(-1)' : 'none' }}>
-        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={CAMERA_LOST_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} showEnded={displayShowState === 'ended'} />
+        <ShotVideo candidates={candidates} activeTrackRef={chosen} command={effectiveCommand} placeholder={placeholder} lostOverlay={HOLDING_OVERLAY} onReselect={handleReselect} activeImpaired={activeImpaired} showEnded={displayShowState === 'ended'} />
       </div>
     );
   };
@@ -3452,7 +3544,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // the auto director can never choose an impaired feed for itself. A
   // HUMAN tap deliberately resolves against the unfiltered list instead
   // -- cutting to a camera that has died is allowed, and answered with a
-  // stable frozen frame plus the CAMERA LOST treatment.
+  // stable frozen frame plus the holding treatment.
   const ineligibleRef = useRef(ineligibleTracks);
   useEffect(() => {
     ineligibleRef.current = ineligibleTracks;
@@ -3763,7 +3855,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // The delay is the important part. Unpublishing the instant the cut
   // fires would race it: clients that had not yet applied the new
   // command would be looking at a shot whose target had just vanished --
-  // a frozen frame under a CAMERA LOST pill, for a clip that ended
+  // a frozen frame under the holding pill, for a clip that ended
   // exactly as intended. The clip holds its last frame for this long
   // instead, and by the time it goes nobody is looking at it.
   useEffect(() => {
@@ -4515,6 +4607,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
           isPerformer={isMainPerformer}
         />
       )}
+
+      {/* Interruption round · the capture equivalent of the rung above.
+          ConnectionRecovery answers "the room is unreachable"; this
+          answers "the room is fine and this device has stopped feeding
+          it", which needs a different sentence and a different action.
+
+          Renders only when the capability did NOT return by itself —
+          see needsResumeGesture. On a platform that restores an
+          interrupted session on its own, the artist never sees it. */}
+      <ResumeAffordance
+        state={capability.state}
+        needsGesture={needsResumeGesture}
+        onResume={handleResume}
+      />
 
       {/* Tap-to-react (PRD row 54). Mounted for every role that can see
           the stage, artist included — an artist should be able to react

@@ -103,6 +103,41 @@ the probe is for.
 
 ---
 
+## 3a · What has now been built
+
+Shipped on `feature/mvp-round-2`, ahead of any probe run, because none of it
+depends on the answers:
+
+| Built | Where |
+|---|---|
+| Holding state — "Back in a moment" over the held frame, live surfaces only | `HOLDING_OVERLAY` in `components/LiveDemo.jsx` |
+| DND pre-show prompt, per artist per device, never claiming DND is on | `lib/dndPrompt.js`, `components/DndPrompt.jsx`, rendered in Kit Check |
+| The shape classifier | `lib/interruptionState.js` |
+| Departure announcement on capability loss | `lib/awaySignal.js`, consumed as the `announced_away` impairment reason in `lib/trackLiveness.js` |
+| Resume affordance | `components/ResumeAffordance.jsx` |
+| Capability language throughout | `describeInterruption()` — the single place artist-facing interruption copy is written |
+
+**Not built, and still blocked:** the per-case behaviours. What a call should do
+that a minimise should not, whether audio pauses or continues, what resumes
+automatically — all of it waits on §5.2.
+
+**The one behaviour the announcement adds that nothing else could.** The frame
+watchdog watches video. A performer whose microphone is taken while their camera
+keeps running is, to every pre-existing signal, perfectly healthy: publication
+live, unmuted, subscribed, frames arriving. The audience simply hears nothing,
+indefinitely, and nothing in the system disagrees. The announcement is the only
+mechanism that catches that, and it is why this piece was worth building before
+the probe rather than after.
+
+**The announcement expires by design.** An away claim stands for 20s and is
+renewed every 6s while the loss lasts. If the `back` never arrives — device died,
+message lost, tab discarded — the claim lapses and the ordinary signals take over;
+by then a genuinely absent performer has stalled frames and the watchdog holds the
+feed impaired on its own evidence. The fast path decays into the slow path rather
+than overriding it forever.
+
+---
+
 ## 4 · Classify by shape, never by cause
 
 The platform will not say *what* interrupted the artist. It will say what still
@@ -124,11 +159,38 @@ keeps the codebase's standing rule — feature-detect and measure, never sniff t
 user agent (`lib/brollPlayback.js`, `lib/useSourceDimensions.js`,
 `components/LiveDemo.jsx`'s fullscreen note all follow it).
 
+### 4.1 Branch verification status — UNVERIFIED UNTIL OBSERVED
+
+The branches ship as written. What has actually been *reached on a device* is a
+separate question from whether the branch is correct, and this table is the
+record. **A branch marked unverified has never been observed; it must not be
+described as working, in a report, a commit message or a conversation, until a
+capture shows it.** Update this table from probe CSVs, not from reasoning.
+
+| Branch (`lib/interruptionState.js`) | Desktop | Android | iOS |
+|---|---|---|---|
+| `live` | **observed** — every capture in this repo | unverified | unverified |
+| `backgrounded_running` | **observed** — 270s hidden, nothing lost (§2.3) | unverified | unverified |
+| `backgrounded_degraded` | not expected (desktop loses nothing) | unverified — **the branch Android is most likely to settle**, if the camera is released on backgrounding while audio continues | unverified |
+| `audio_interrupted` | unverified | unverified — reachable if a call leaves the page foregrounded | unverified — **the branch that decides whether rule 1 is separable from rule 3** |
+| `camera_taken` | unverified | unverified — the "camera taken" probe step targets exactly this | unverified |
+| `capture_lost` | unverified | unverified | unverified |
+| `suspended_return` (retrospective, not a branch) | not expected | unverified | unverified — expected on both minimise and lock, which is what would collapse rules 2 and 3 |
+
+Two branches Android **cannot** settle on its own, whatever the run shows:
+
+1. **`audio_interrupted` on iOS.** Android reaching it proves the branch works; it
+   says nothing about whether iOS leaves the page foregrounded during a call
+   banner. If iOS does not, rule 1 has no separate shape there.
+2. **Any claim that a branch is *not* reachable.** A branch not seen in one
+   20-minute run is a branch not seen, not a branch that cannot happen. Absence of
+   a row is the weakest evidence in this document and is never a verdict.
+
 ---
 
 ## 5 · What can be designed now, and what waits
 
-### 5.1 Designable and buildable now — no iPhone dependency
+### 5.1 Designable and buildable now — no iPhone dependency · ALL BUILT (see §3a)
 
 1. **The holding state** — "Back in a moment" over the held frame. Existing
    overlay, existing freeze-frame, existing egress exclusion.
@@ -169,6 +231,15 @@ user agent (`lib/brollPlayback.js`, `lib/useSourceDimensions.js`,
 5. **Any artist-facing copy that promises what minimising does.** Shipping
    "minimising keeps you live" before it is measured is precisely the iOS
    assumption-as-fact this document exists to prevent.
+
+   **Enforced in one place.** Every artist-facing interruption sentence comes
+   from `describeInterruption()` in `lib/interruptionState.js`, which carries
+   this constraint as a comment above the map. The backgrounded strings describe
+   what was observed on this device just now, in the past tense, and promise
+   nothing about next time. `components/ResumeAffordance.jsx` and
+   `components/DndPrompt.jsx` mention minimising nowhere at all. If a future
+   change needs a sentence about it, that map is where the constraint must be
+   argued with — not a new string somewhere else.
 
 ### 5.3 Adjacent consequence of the topology decision, flagged not solved
 
