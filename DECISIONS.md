@@ -1758,3 +1758,80 @@ indefinitely, with no indication whether they are coming back.
 Leaning toward (2): collapsing and re-expanding as someone drops in and
 out would be worse than a steady layout, and a layout that moves on its
 own is the thing a viewer notices most.
+
+## Piece 3, second pass — stacked versus, and invites that arrive
+
+### Orientation is measured, not inferred
+
+`useOrientation` asked the POINTER: coarse plus a portrait viewport meant
+"phone", anything else meant "desktop". That answers a question about the
+input device when the question is about the box.
+
+**Foldables break it outright, and that is what made this necessary
+rather than tidier.** A folded Z Fold is a narrow portrait phone;
+unfolded it is a wide near-square tablet. Same device, same coarse
+pointer, two different correct layouts — so pointer type gets one of the
+two states wrong every time, and it can change MID-SHOW while somebody
+is performing.
+
+The stage now measures its own aspect ratio through a **ResizeObserver**,
+which handles fold, unfold, rotation and window resize with one
+mechanism. A `window.resize` listener would happen to catch a fold, since
+folding changes the viewport; it cannot catch the case the window never
+sees — the stage's own box changing when a panel collapses or the deck
+expands.
+
+**Stacked below 1:1, side by side above it.** Two portrait feeds side by
+side in a narrow box are two slivers of a person. The inverse is equally
+true: two portrait feeds stacked in a wide box each get a very short,
+very wide panel and letterbox into a strip. On a 16:9 desktop, stacked
+gives each panel ≈3.6:1 against portrait video's 0.56 — severe waste —
+where side by side gives ≈0.89:1.
+
+**The split survives the flip by construction.** It is stored as a
+percentage share, not pixels and not an axis-specific value: 60 means
+"slot A gets 60%" of the height when stacked and of the width when side
+by side. Nothing resets on an orientation change. Confirmed by reading;
+a device-test step exists to confirm it by running.
+
+### Invites are delivered, not copied
+
+The invite was a URL the artist copied into WhatsApp. That took the
+invitation off the platform, made the other artist accept somewhere else,
+and left no record of who invited whom — the feature worked and felt like
+a workaround.
+
+**What changed: delivery. What did not: the token model.** The token is
+still single-use, still on the show_slots row, still what grants the
+slot, still what `/join/[token]` resolves. `show_slots`, `claim-slot`,
+`join-show` and the 18+ gating are untouched. A human no longer carries
+it.
+
+**The notification is written by the invite route, and can only be
+written there.** notifications' RLS allows insert for the row's OWNER
+only — deliberately, because a client-insertable cross-user notification
+is a spam primitive. Inviting is one user causing a row for another, so
+it needs the service role.
+
+**Delivery failure is reported, not swallowed.** The slot row is written
+and the token is valid even if the notification insert fails, so the
+response carries `notified` separately from `ok`. The UI offers the link
+only in that case — offering it beside a successful notification would
+teach the artist to send both, which is the off-platform habit this
+change exists to remove.
+
+### The three product answers
+
+1. **Must the invited artist be on Loudentify?** For the default, yes —
+   you cannot notify somebody who does not exist. The link survives as an
+   explicit secondary action for artists who have not signed up. Same
+   token underneath.
+2. **Decline or no response?** The show stays scheduled with slot B
+   pending and A is told. Silently becoming solo changes what the
+   audience was promised; cancelling punishes A for someone else's
+   inaction. A can invite someone else — re-minting already revokes the
+   previous token. **Declining is not built**: `show_slots` has no status
+   column and "declined" is a third state, which is its own decision.
+3. **See details before accepting?** Yes, and it already worked — the
+   accept page is deliberately readable logged-out and shows who invited
+   you, to what, and when.

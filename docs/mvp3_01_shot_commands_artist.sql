@@ -78,12 +78,11 @@ select column_name, data_type, is_nullable, column_default
 from information_schema.columns
 where table_name = 'shot_commands' and column_name = 'artist_id';
 
--- 2. FULL COLUMN LIST — expect 10 rows. Stated as a count because a
+-- 2. FULL COLUMN LIST — expect 11 rows. Stated as a count because a
 --    migration that quietly adds two columns and a migration that adds
 --    one look identical from query 1 alone.
 --    command_id, show_id, slot, shot, from_shot, source_role,
---    transition, decision_source, show_phase, artist_id
---    (plus fired_at if present in your copy — count accordingly)
+--    transition, decision_source, show_phase, fired_at, artist_id
 select column_name, data_type, is_nullable
 from information_schema.columns
 where table_name = 'shot_commands'
@@ -129,13 +128,20 @@ where pg_class.relname = 'shot_commands';
 --
 --    Uses a real auth.users id so the FK is genuinely exercised; if the
 --    subselect returns no rows the probe is inconclusive, not passing.
-insert into shot_commands (command_id, show_id, slot, shot, decision_source, artist_id)
+--
+--    ⚠️ fired_at IS NOT NULL and has no default. The first version of
+--    this file omitted it and the insert failed on a null violation —
+--    corrected here rather than left for the next person to rediscover.
+--    Every NOT NULL column without a default has to appear in a probe,
+--    which is a reason to read the column list from query 2 before
+--    running this one rather than trusting the list in the comment.
+insert into shot_commands (command_id, show_id, slot, shot, decision_source, fired_at, artist_id)
 values (
-  gen_random_uuid(), 'migration-probe', 'a', 'wide', 'human',
+  gen_random_uuid(), 'migration-probe', 'a', 'wide', 'human', now(),
   (select id from auth.users limit 1)
 );
 
-select command_id, show_id, slot, artist_id
+select command_id, show_id, slot, fired_at, artist_id
 from shot_commands where show_id = 'migration-probe';
 
 -- 7. CLEANUP — expect the delete to remove exactly the probe row, and

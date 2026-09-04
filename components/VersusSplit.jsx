@@ -5,25 +5,68 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 const MIN_PERCENT = 25;
 const MAX_PERCENT = 75;
 
-function useOrientation() {
-  const getOrientation = () => {
-    if (typeof window === 'undefined') return 'landscape';
-    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
-    if (!isCoarsePointer) return 'landscape';
-    return window.matchMedia('(orientation: portrait)').matches
-      ? 'portrait'
-      : 'landscape';
-  };
+// ── ORIENTATION IS MEASURED, NOT INFERRED ─────────────────────
+// This used to ask the POINTER: coarse pointer plus a portrait viewport
+// meant "phone", anything else meant "desktop". That answers a question
+// about the input device when the question is about the BOX.
+//
+// Foldables break it outright, and they are the case that made this
+// necessary rather than tidier. A folded Z Fold is a narrow portrait
+// phone; unfolded it is a wide near-square tablet. Same device, same
+// coarse pointer, two different correct layouts — so pointer type gets
+// one of the two states wrong every time, and it can change MID-SHOW
+// while someone is performing.
+//
+// Measuring the stage element's own aspect ratio answers all of it with
+// one mechanism: fold, unfold, tablet rotation, and a browser window
+// being resized.
+//
+// ── WHY A ResizeObserver AND NOT window.resize ────────────────
+// A window listener would happen to catch a fold, because folding
+// changes the viewport. It cannot catch the case the window never sees:
+// the STAGE's own box changing while the window does not — a panel
+// collapsing, the deck expanding, the comments dock opening. The
+// observer subsumes the window case and covers that one too.
+const STACK_BELOW_ASPECT = 1;
 
-  const [orientation, setOrientation] = useState(getOrientation);
+function useStageOrientation(ref, forced) {
+  // 'landscape' as the pre-measurement default, deliberately: it is what
+  // a server render and the first paint assume, and a stage that starts
+  // stacked and snaps sideways reads worse than one that starts side by
+  // side and settles.
+  const [orientation, setOrientation] = useState('landscape');
 
   useEffect(() => {
-    const update = () => setOrientation(getOrientation());
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
+    if (forced) return undefined;
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
 
-  return orientation;
+    const measure = (width, height) => {
+      if (!width || !height) return;
+      // Taller than wide -> stack. Two portrait feeds side by side in a
+      // narrow box are two slivers of a person; stacked they are two
+      // usable frames. The inverse is just as true: two portrait feeds
+      // stacked in a WIDE box each get a very short, very wide panel and
+      // letterbox into a strip.
+      setOrientation(width / height < STACK_BELOW_ASPECT ? 'portrait' : 'landscape');
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box) measure(box.width, box.height);
+    });
+    observer.observe(el);
+    // Measured once immediately as well: ResizeObserver fires on observe
+    // in every current engine, but relying on that leaves the first
+    // paint's orientation depending on a behaviour nothing here
+    // guarantees.
+    const rect = el.getBoundingClientRect();
+    measure(rect.width, rect.height);
+
+    return () => observer.disconnect();
+  }, [ref, forced]);
+
+  return forced || orientation;
 }
 
 // VersusSplit renders either solo (single panel, no divider) or versus
@@ -71,10 +114,19 @@ export default function VersusSplit({
   // file would be adjusting nothing.
   fixedSplit = null,
 }) {
-  const detectedOrientation = useOrientation();
-  const orientation = forceOrientation || detectedOrientation;
-  const [split, setSplit] = useState(fixedSplit ?? 50);
   const stageRef = useRef(null);
+  const orientation = useStageOrientation(stageRef, forceOrientation);
+  // ── THE SPLIT SURVIVES THE FLIP, BY CONSTRUCTION ──────────────
+  // A PERCENTAGE SHARE, not an axis-specific value and not pixels. 60
+  // means "slot A gets 60%" — of the height when stacked, of the width
+  // when side by side. So a fold mid-show carries the ratio across
+  // unchanged: same proportion, different axis.
+  //
+  // That is a property of storing a share rather than a measurement, and
+  // it is why nothing here resets on an orientation change. If this ever
+  // became a pixel offset, folding would reset the viewer to 50/50 and
+  // they would notice instantly.
+  const [split, setSplit] = useState(fixedSplit ?? 50);
   const draggingRef = useRef(false);
 
   const clampSplit = (v) => Math.min(MAX_PERCENT, Math.max(MIN_PERCENT, v));
