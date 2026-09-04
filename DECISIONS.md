@@ -1751,3 +1751,73 @@ runs exactly when nobody holds it. `holders` is exposed for telemetry, so
 suspended for a clip's duration and resumes on the return cut; it does
 not select clips. Working first, clever later — the director's remit
 should not expand while its output is invisible to viewers.
+
+## Piece 1, second pass — the blank stage had TWO causes
+
+The first device run fixed the bitrate collapse and produced a blank
+stage. Both causes were in the same commit and only one of them was
+obvious.
+
+**Cause 1 — the mute happened first.** `camera_publication_muted
+{muted:true}` at 20:48:52.339, `broll_published` at 20:48:54.693: 2.354
+seconds with the camera off and no clip yet. 1.066s on the second clip.
+The audience had nothing to display for the whole of that window,
+because what they were watching was turned off before its replacement
+started.
+
+**Cause 2 — the cut did not wait for frames.** This one survives the
+mute's removal, and fixing only the visible cause would have left it in
+place to surface later on a slower connection. `replaceTrack()`
+resolving means the sender has ACCEPTED a track, not that the track has
+encoded anything. The cut fired on that promise, so the shot could point
+at a sender that had produced no frames — a dead layer whose duration is
+short on a fast machine and unbounded on a slow one.
+
+### The ruling
+
+The camera is no longer muted at all. Not because the mute was proven
+unnecessary, but because keeping it required proof nobody had while
+removing it is measurable in the same run that fixes the blank stage.
+
+The cut now waits on `waitForFrames()` — framesSent or framesEncoded
+advancing past the baseline the placeholder left behind, polled, with a
+4s ceiling. If frames never arrive the clip does not go on air at all
+and says so; putting a dead sender on air and leaving the audience to
+look at it is the worse outcome.
+
+**The invariant is written where someone would be tempted to break it**
+(components/LiveDemo.jsx, at the point the mute used to be): if a mute
+is ever genuinely needed, it happens only after frame confirmation and
+never on a timer. Re-add it on rows, not on reasoning.
+
+### Why the previous capture could not have settled it
+
+The run muted the camera for the clip's entire duration, so it contains
+almost no window where both senders were live. The only overlap was
+~500ms between the return unmute and the b-roll mute, against a 2s
+sampling cadence. A run built around the mute cannot measure whether the
+mute is needed.
+
+Worse, the sampler could not have measured it either: it took
+`.find((p) => p.track?.sender)` — the FIRST video publication with a
+sender — so with two senders it sampled an arbitrary one and computed
+deltas across whichever it happened to pick. Now keyed by trackSid, one
+series per sender, plus a `pub_aggregate` row per sample carrying
+totalUplinkBps against availableOutgoingBitrate and the sender count.
+
+## Deferred — dynacast, as its own item
+
+`dynacast` is off (SDK default `false`, not overridden here). With it on,
+the publisher stops sending layers no subscriber is consuming, which is
+the bandwidth saving the mute was buying, decided by the SFU from real
+demand rather than by us on a guess, with no blank window and no
+ordering to get wrong.
+
+Two caveats intact, and they are why it is not part of this fix:
+
+  1. It may not stop the camera at all while a clip is on air. The
+     artist's own console still shows the camera in the feeds strip and
+     other clients may still subscribe, and dynacast only pauses what
+     nobody wants.
+  2. It changes publishing behaviour for EVERY track in the app, not
+     just b-roll. That does not belong in a b-roll change.
