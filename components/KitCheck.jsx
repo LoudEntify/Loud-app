@@ -334,11 +334,57 @@ export default function KitCheck() {
   //    Check do nothing at all. Silence is the worse of the two.
   //
   // So: a try/catch that puts a real message ON SCREEN, and a poll.
-  const loadUpcoming = useCallback(async (userId) => {
+  // ── AN INVITED PERFORMER HAS SHOWS TOO ────────────────────────
+  // This query was `shows.artist_id = me` — the OWNER column, the same
+  // assumption that made an accepted Versus invisible on the invited
+  // artist's profile. Here it had a worse consequence: `upcoming` stayed
+  // null for a guest, so Kit Check showed them NO COUNTDOWN and NO GO
+  // LIVE NOW. They could reach Kit Check and then had no way through to
+  // the show they were about to perform in, and no sense of when it
+  // started.
+  //
+  // Owned shows still come straight from the table under RLS. Shows they
+  // were INVITED to cannot: show_slots is service-role only, so those
+  // come through /api/performer/my-slots, which is the same route the
+  // profile uses. Merged into one list before nextUpcomingShow picks,
+  // because "which show is next" must consider both kinds — a guest
+  // spot tonight beats a show they own next week.
+  const loadUpcoming = useCallback(async (userId, accessToken) => {
     try {
       const { data, error } = await getSupabase().from('shows').select('*').eq('artist_id', userId);
       if (error) throw error;
-      setUpcoming(nextUpcomingShow(data || []));
+
+      let invited = [];
+      if (accessToken) {
+        try {
+          const res = await fetch('/api/performer/my-slots', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (res.ok) {
+            const body = await res.json();
+            invited = (body.slots || [])
+              .filter((x) => x.status === 'claimed')
+              // Back to the row shape the window helpers and the
+              // hand-over expect. Mapped here rather than at each use so
+              // the two spellings cannot drift.
+              .map((x) => ({
+                id: x.show.id,
+                room_name: x.show.roomName,
+                slated_at: x.show.slatedAt,
+                duration_minutes: x.show.durationMinutes,
+                performance_mode: x.show.performanceMode,
+                state: x.show.state,
+                title: x.show.title,
+              }));
+          }
+        } catch {
+          // A guest spot that cannot be loaded is not a reason to hide
+          // an owned show. Owned shows still work; the guest one is
+          // simply absent, which is the pre-existing behaviour.
+        }
+      }
+
+      setUpcoming(nextUpcomingShow([...(data || []), ...invited]));
       setShowLoadError('');
     } catch (err) {
       // Never silent again. If Kit Check cannot work out when the artist
@@ -352,11 +398,12 @@ export default function KitCheck() {
   useEffect(() => {
     const userId = session?.user?.id;
     if (!userId) return undefined;
-    loadUpcoming(userId);
+    const token = session?.access_token;
+    loadUpcoming(userId, token);
     // Cheap: one indexed query per artist per 20s, only while this page
     // is open. Far cheaper than an artist missing their own show.
-    const id = setInterval(() => loadUpcoming(userId), 20000);
-    const onVisible = () => { if (document.visibilityState === 'visible') loadUpcoming(userId); };
+    const id = setInterval(() => loadUpcoming(userId, token), 20000);
+    const onVisible = () => { if (document.visibilityState === 'visible') loadUpcoming(userId, token); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, [session, loadUpcoming]);
