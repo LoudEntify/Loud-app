@@ -4640,6 +4640,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   
     liveSlots,
       artistId,
+    room,
 };
 
   return (

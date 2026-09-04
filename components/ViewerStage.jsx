@@ -28,6 +28,8 @@ export default function ViewerStage({
   activePerformerSlot,
   presentSlots,
   liveSlots,
+  // For the glow's audio levels — see lib/glowLevels.js.
+  room,
   comments,
   sendComment,
   commentsExpanded,
@@ -55,6 +57,7 @@ export default function ViewerStage({
             renderA={renderSlot('a')}
             renderB={renderSlot('b')}
             liveSlots={liveSlots}
+            room={room}
           />
         ) : (
           <VersusSplit

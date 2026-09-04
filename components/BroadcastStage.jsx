@@ -239,6 +239,7 @@ export default function BroadcastStage({
             renderA={renderSlot('a')}
             renderB={renderSlot('b')}
             liveSlots={liveSlots}
+            room={room}
           />
         ) : (
           <VersusSplit

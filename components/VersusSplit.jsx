@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useGlowLevels } from '../lib/glowLevels';
 
 const MIN_PERCENT = 25;
 const MAX_PERCENT = 75;
@@ -109,18 +110,50 @@ function useStageOrientation(ref, forced) {
 // So the cue is now a real element, inside the panel, above the video,
 // with pointer-events off so it cannot eat a tap. Still purely visual,
 // still incapable of shifting layout: absolute, inset 0, no flow.
-const LIVE_BORDER_STYLE = {
-  position: 'absolute',
-  inset: 0,
-  pointerEvents: 'none',
-  // High enough to sit over ShotRendering's own layers, which run 0-3.
-  zIndex: 6,
-  border: '2px solid #2ec4b6',
-  boxShadow: '0 0 14px rgba(46, 196, 182, 0.55), inset 0 0 14px rgba(46, 196, 182, 0.35)',
-};
+// ── THE GLOW IS LIGHT, NOT A LABEL ────────────────────────────
+// A soft bleed off the edge of the panel that brightens and reaches
+// further as that artist gets louder, and settles back when they stop.
+// A viewer arriving mid-show should know who is performing without
+// reading anything, and it should read as live rather than as a badge.
+//
+// Solo is teal. Versus gives each artist their own colour so the two
+// halves are never ambiguous: A teal, B orange.
+const GLOW = { a: '46, 196, 182', b: '255, 159, 28' };
+
+// Level 0 is not invisible: a live-but-quiet performer still carries a
+// faint edge, because the cue answers "who is on" as well as "who is
+// loud". Silence dims it; it does not switch it off.
+const GLOW_MIN_OPACITY = 0.35;
+
+function glowStyle(slot, mode) {
+  // In solo there is only one panel and it is always teal, whichever
+  // slot the single performer happens to occupy.
+  const rgb = mode === 'solo' ? GLOW.a : (GLOW[slot] ?? GLOW.a);
+  const level = `var(--glow-${slot}, 0)`;
+  return {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    // Above ShotRendering's own layers, which run 0-3.
+    zIndex: 6,
+    // No border: a hard line reads as a label. The bleed is two stacked
+    // shadows, blurred and low-alpha, so the edge fades out rather than
+    // stopping.
+    boxShadow: `inset 0 0 10px rgba(${rgb}, 0.5), inset 0 0 26px rgba(${rgb}, 0.28)`,
+    // ── THE TWO COMPOSITED PROPERTIES, AND NOTHING ELSE ───────
+    // opacity and transform are what a browser can animate without
+    // layout or paint. Brightness is opacity; reach is scale, a
+    // fraction of a percent so the glow spreads without the panel
+    // appearing to move. Driven entirely by a CSS variable that a
+    // non-React writer updates — see lib/glowLevels.js.
+    opacity: `calc(${GLOW_MIN_OPACITY} + (1 - ${GLOW_MIN_OPACITY}) * ${level})`,
+    transform: `scale(calc(1 + 0.006 * ${level}))`,
+    transition: 'opacity 140ms linear, transform 140ms linear',
+    willChange: 'opacity, transform',
+  };
+}
 // Long enough not to strobe when someone taps mute twice in a second,
 // short enough to still read as a response to the tap.
-const LIVE_BORDER_TRANSITION = 'opacity 220ms ease';
 
 export default function VersusSplit({
   mode = 'versus',
@@ -136,9 +169,16 @@ export default function VersusSplit({
   // a replay viewer adjusting a layout that was already baked into the
   // file would be adjusting nothing.
   fixedSplit = null,
+  // The live room, for the audio levels that drive the glow. Optional:
+  // a surface without one renders the cue at its resting brightness
+  // rather than not at all.
+  room = null,
 }) {
   const stageRef = useRef(null);
   const orientation = useStageOrientation(stageRef, forceOrientation);
+  // Writes --glow-a / --glow-b straight onto the stage element. No React
+  // state, so a level change re-renders nothing.
+  useGlowLevels(room, stageRef);
   // ── THE SPLIT SURVIVES THE FLIP, BY CONSTRUCTION ──────────────
   // A PERCENTAGE SHARE, not an axis-specific value and not pixels. 60
   // means "slot A gets 60%" — of the height when stacked, of the width
@@ -184,6 +224,7 @@ export default function VersusSplit({
       <div className={`versus-stage ${orientation}`}>
         <div className="contestant-panel slot-a solo">
           {renderA ? renderA() : 'performer'}
+          {liveSlots?.a && <div aria-hidden="true" style={glowStyle('a', 'solo')} />}
         </div>
       </div>
     );
@@ -199,7 +240,7 @@ export default function VersusSplit({
         style={{ flexBasis: `${fixedSplit ?? split}%` }}
       >
         {renderA ? renderA() : 'contestant a'}
-        {liveSlots?.a && <div aria-hidden="true" style={{ ...LIVE_BORDER_STYLE, transition: LIVE_BORDER_TRANSITION }} />}
+        {liveSlots?.a && <div aria-hidden="true" style={glowStyle('a', mode)} />}
       </div>
 
       {/* A pinned split has no drag handle: the recorder has no viewer,
@@ -239,7 +280,7 @@ export default function VersusSplit({
         style={{ flexBasis: `${100 - (fixedSplit ?? split)}%` }}
       >
         {renderB ? renderB() : 'contestant b'}
-        {liveSlots?.b && <div aria-hidden="true" style={{ ...LIVE_BORDER_STYLE, transition: LIVE_BORDER_TRANSITION }} />}
+        {liveSlots?.b && <div aria-hidden="true" style={glowStyle('b', mode)} />}
       </div>
     </div>
   );

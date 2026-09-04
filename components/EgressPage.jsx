@@ -381,6 +381,7 @@ function EgressStage({ layout }) {
           forceOrientation="portrait"
           fixedSplit={50}
           liveSlots={liveSlots}
+            room={room}
           renderA={renderSlot('a')}
           renderB={renderSlot('b')}
         />
