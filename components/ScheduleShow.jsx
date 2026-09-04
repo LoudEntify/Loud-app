@@ -56,6 +56,7 @@ export default function ScheduleShow() {
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const [opponent, setOpponent] = useState(null);
   const [form, setForm] = useState({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
   // Versus invites, keyed by show id. Minted on demand rather than at
   // schedule time -- an artist may schedule a versus show days before
@@ -124,7 +125,7 @@ export default function ScheduleShow() {
       // live path. One room per show, derived from the id so it is
       // unique and readable in LiveKit's dashboard.
       const roomName = `show-${Math.random().toString(36).slice(2, 10)}`;
-      const { error: err } = await getSupabase().from('shows').insert({
+      const { data: created, error: err } = await getSupabase().from('shows').insert({
         artist_id: session.user.id,
         room_name: roomName,
         slated_at: slated.toISOString(),
@@ -138,7 +139,7 @@ export default function ScheduleShow() {
         // Legacy column, populated rather than left null -- see the
         // artistName note above.
         artist_name: artistName || 'Artist',
-      });
+      }).select('id').single();
       if (err) {
         // Show the real database message. A generic string here is what
         // turned a one-line constraint failure into a test sitting.
@@ -149,6 +150,22 @@ export default function ScheduleShow() {
         );
         return;
       }
+      // ── THE INVITE IS PART OF SCHEDULING ──────────────────────
+      // When an opponent was chosen in the form, the show and the invite
+      // are ONE action from the artist's point of view. Minted after the
+      // insert rather than before, because the invite needs a show id
+      // and a show with an invite pointing at nothing is worse than a
+      // show with an empty slot.
+      //
+      // A failure here does NOT fail the scheduling. The show exists and
+      // is correct; what failed is the invite, and the card's own picker
+      // is still there to retry it. Saying "could not schedule" about a
+      // show that was scheduled would send the artist looking for a
+      // problem that is not there.
+      if (created?.id && form.mode === 'versus' && opponent) {
+        await createInvite({ id: created.id }, opponent);
+      }
+      setOpponent(null);
       setForm({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
       await load(session.user.id);
     } finally {
@@ -332,6 +349,52 @@ export default function ScheduleShow() {
               ))}
             </div>
           </div>
+
+          {/* ── THE OPPONENT IS CHOSEN HERE, NOT AFTERWARDS ──────
+              This lived on the scheduled show's card, because that is
+              where the control it replaced happened to live. The
+              requirement said "at the point of scheduling", and
+              inheriting the placement of the thing being replaced is how
+              a feature ends up correct and unreachable.
+
+              OPTIONAL, deliberately. You often have the date before you
+              have the opponent — that is how booking works — and forcing
+              a choice at creation would stop an artist holding a slot
+              while they ask around. Empty here leaves slot B pending and
+              the card's own picker is how it gets filled later. */}
+          {form.mode === 'versus' && (
+            <div>
+              <div style={labelStyle}>WHO ARE YOU UP AGAINST</div>
+              {opponent ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${TEAL}`, padding: '9px 11px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: INK }}>
+                    {opponent.display_name || opponent.username}
+                    {opponent.username && (
+                      <span style={{ fontWeight: 400, color: 'rgba(1,22,39,0.5)' }}> @{opponent.username}</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpponent(null)}
+                    style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >
+                    CHANGE
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <ArtistPicker
+                    accessToken={session.access_token}
+                    onSelect={(a) => setOpponent(a)}
+                  />
+                  <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 5, lineHeight: 1.5 }}>
+                    Optional — you can schedule now and invite someone later. They get a
+                    notification in Loudentify, not a link to copy.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {error && <div style={{ fontSize: 12, color: '#e71d36' }}>{error}</div>}
 

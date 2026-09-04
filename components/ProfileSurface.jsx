@@ -7,6 +7,7 @@ import AvatarRing from './AvatarRing';
 import EmptyState from './EmptyState';
 import AuthButton from './AuthButton';
 import ScheduleShow from './ScheduleShow';
+import InvitedShows from './InvitedShows';
 import BRollLibrary from './BRollLibrary';
 import CueSheetLibrary from './CueSheetLibrary';
 import RecordingsLibrary from './RecordingsLibrary';
@@ -53,6 +54,9 @@ const ghostBtn = {
 
 export default function ProfileSurface({ artistId }) {
   const [viewer, setViewer] = useState(undefined); // undefined = unknown
+  // Held for the owner-only invited-shows section, which reads a
+  // service-role route rather than a table the client can see.
+  const [viewerToken, setViewerToken] = useState(null);
   const [profile, setProfile] = useState(undefined);
   const [upcoming, setUpcoming] = useState([]);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -83,6 +87,7 @@ export default function ProfileSurface({ artistId }) {
       const session = await getSession();
       if (cancelled) return;
       setViewer(session?.user ?? null);
+      setViewerToken(session?.access_token ?? null);
 
       if (session?.user?.id && session.user.id !== artistId) {
         const followed = await fetchFollowedArtistIds(session.user.id);
@@ -230,6 +235,12 @@ export default function ProfileSurface({ artistId }) {
             )}
           </div>
         </div>
+
+        {/* Owner-only: shows this artist is IN but did not create.
+            A pending invitation is a conversation between two artists,
+            not a public fact about either — a visitor has no business
+            seeing who has been asked and has not answered. */}
+        {isOwner && <InvitedShows accessToken={viewerToken} />}
 
         {/* ── Upcoming shows: both modes ───────────────────────
             A visitor should be able to see when this artist is next on;

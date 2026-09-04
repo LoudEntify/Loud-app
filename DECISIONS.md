@@ -1835,3 +1835,82 @@ change exists to remove.
 3. **See details before accepting?** Yes, and it already worked — the
    accept page is deliberately readable logged-out and shows who invited
    you, to what, and when.
+
+## Piece 3, third pass — placement, visibility, and unread
+
+### The !open gate: inherited, not chosen
+
+It hid the Versus invite control the moment the broadcast window opened —
+exactly when an artist stood with an empty slot B most needs it. It
+arrived with Product Ruling 1's sweep, which was aimed at a show with no
+END (a GO LIVE that would arm a show slated last Tuesday), and every
+control on the card got the same treatment.
+
+Nothing downstream refuses a late claim: `/api/performer/claim-slot` has
+no window check at all. `join-show` does enforce the window, and that is
+correct and separate — it gates GOING LIVE, so a late-invited artist
+accepts and then joins inside the window like anyone else. Removed.
+`!expired` stays.
+
+### The placement failure, named because it is the second one
+
+**The picker was built where the code being replaced happened to live,
+rather than where the requirement said.** The requirement said "at the
+point of scheduling"; the old INVITE OPPONENT button was on the show
+card, so the replacement went on the show card. It was correct, deployed,
+and unreachable at the moment it was wanted.
+
+Same shape as blaming the b-roll teardown on b-roll because the symptom
+appeared there, rather than on the auto director's hold timer that
+actually caused it. **Inheriting the placement of the thing you are
+replacing** is a real failure mode: it feels like a faithful swap and it
+silently discards the requirement.
+
+The picker is now in the scheduling form, OPTIONAL — you often have the
+date before the opponent, and forcing a choice at creation would stop an
+artist holding a slot while they ask around. The card path stays as the
+way to fill a slot left empty.
+
+### Invited shows were invisible to the invited artist
+
+Every "my shows" query in the app is `shows.artist_id = me` — the OWNER
+column. Right while a show had one artist; Versus broke it without
+anything appearing to break. An artist who accepts an invite has a slot,
+will publish a camera and will perform, and the show appears **nowhere**
+for them: not in their diary, not on their profile. It existed in exactly
+one place — a notification, which is dismissible, easily missed, and
+gone once read.
+
+So an artist could accept a booking and then have no way to find it.
+
+Fixed with `/api/performer/my-slots` and `components/InvitedShows.jsx`,
+covering both halves: pending invitations with an accept action, and
+accepted shows under "YOU ARE PERFORMING IN".
+
+**A route rather than a query, because `show_slots` is deliberately
+zero-policy and service-role only.** Opening it to clients would expose
+every invite token in the table — the token is the credential, and the
+table is not browsable for the same reason a password table is not. The
+response carries the show and the slot status, and the token only for a
+PENDING invite belonging to the caller.
+
+Owner-only on the profile: a pending invitation is a conversation
+between two artists, not a public fact about either.
+
+### The badge could not have shipped alone
+
+`read_at` existed on the table and **nothing in the app ever wrote to
+it.** Notifications.jsx read it to draw a per-row dot; no code path ever
+set it. Every notification stayed unread forever, which was invisible
+precisely because nothing counted them.
+
+Adding a badge to that would have produced a number that counts up for
+the life of the account and never comes down — not an indicator, an
+accusation. So `markAllNotificationsRead` ships in the same module as
+`fetchUnreadCount`, and the panel calls it on open, AFTER rendering: the
+rows already fetched keep their original `read_at`, so the dots stay
+visible for that viewing and the badge clears for next time.
+
+Messages deliberately gets no badge. `MessageThread` is an honest empty
+state with no threads table and no delivery — a badge over it could only
+ever show zero.

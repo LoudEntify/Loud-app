@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Broadcast, ChatCircleText, UserPlus, Bell } from '@phosphor-icons/react';
 import { getSupabase } from '../lib/supabaseClient';
 import { getSession } from '../lib/supabaseAuth';
+import { markAllNotificationsRead } from '../lib/unreadCount';
 import EmptyState from './EmptyState';
 
 const INK = '#011627';
@@ -57,6 +58,19 @@ export default function Notifications() {
           .limit(50);
         if (cancelled) return;
         setItems(error ? [] : (data || []));
+
+        // ── MARKED READ ON OPEN, AFTER RENDERING ──────────────────
+        // The rows already fetched keep their original read_at, so the
+        // unread dots stay visible for THIS viewing — opening the panel
+        // should not erase the thing that tells you which items are new
+        // while you are still looking at them. The write clears the
+        // badge for next time.
+        //
+        // Before this, nothing in the app ever wrote read_at. Every
+        // notification stayed unread forever, which was invisible
+        // because nothing counted them; adding a badge without this
+        // would have produced a number that only ever grew.
+        if (session?.user?.id) markAllNotificationsRead(session.user.id);
       } catch {
         if (!cancelled) setItems([]);
       }
