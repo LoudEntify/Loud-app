@@ -1821,3 +1821,86 @@ Two caveats intact, and they are why it is not part of this fix:
      nobody wants.
   2. It changes publishing behaviour for EVERY track in the app, not
      just b-roll. That does not belong in a b-roll change.
+
+## Piece 1, third pass — b-roll had no reconnect story
+
+Two device rounds, four faults, one cause. Stated as plainly as it
+deserves: **b-roll was the only publication in this app with no reconnect
+handling.**
+
+Audio has `ensureAudioPublished`, wired to `RoomEvent.Reconnected` and
+`SignalConnected`. The camera is re-asserted by `<LiveKitRoom video>`
+calling `setCameraEnabled` on every `SignalConnected` — there are two
+existing fixes in LiveDemo that exist because of that re-assertion.
+B-roll had neither, and held a publication object captured once at
+session start.
+
+### What the SDK actually does
+
+`livekit-client` 2.22.0, `republishAllTracks` (line 30721), called from
+`applyJoinResponse` on a full reconnect (line 32163):
+
+    yield this.unpublishTrack(track, false);
+    yield this.publishOrRepublishTrack(track, pub.options, true);
+
+Unpublish, then republish — **a new publication object with a new
+trackSid**. Three `broll_source_ended` rows with three different sids in
+one capture is three reconnects.
+
+### Why it failed in two different ways
+
+**Silently (fault 1).** `setMediaStreamTrack` (line 20579) attaches to
+the sender only `if (this.sender && sender.transport?.state !==
+'closed')`. When that is false it SKIPS the attach and resolves
+successfully. No throw, so no error row; then `getSenderStats()` returns
+`[]` with no sender, the frame poll sums zero for four seconds, and the
+result reads `no_frames` — which describes the clip, not the fault.
+
+**Loudly (fault 2).** Later, once `unpublishTrack` had cleared `.track`
+on the stale object: `Cannot read properties of undefined (reading
+'replaceTrack')`.
+
+`broll_late_prewarm` never fired in either case because its guard was
+`if (!publication)` and a stale object is truthy.
+
+### A plausible theory, checked and falsified
+
+The proposed cause was the `captureStream(0)` placeholder: a sender
+established from a source that emits one frame and then nothing might
+never start encoding, so `replaceTrack` onto it would succeed
+structurally and produce nothing.
+
+**Checked against the SDK source and falsified.** There is no persistent
+"never started" state; `replaceTrack` swaps the source and encoding
+follows whatever the current track produces. The placeholder is a
+legitimate idle source. The failure was reconnect survival, which the
+placeholder has nothing to do with.
+
+Recorded because it is the third time this project has formally killed a
+plausible theory with evidence rather than letting it stand, and the
+habit is worth more than any individual finding.
+
+### The rule this produced
+
+    "DOES THE REFERENCE EXIST" AND "DOES THE REFERENCE WORK" ARE
+    DIFFERENT QUESTIONS. NEVER ANSWER THE SECOND BY ASKING THE FIRST.
+
+`isUsablePublication()` walks to the thing that does the work — the RTP
+sender and its transport — rather than testing the handle for
+truthiness. The publication is now resolved fresh from
+`room.localParticipant` at every use and never stored.
+
+### Muting is gone entirely
+
+Three failures came from it: the broken return cut, the blank stage, and
+the ordering dependence at `setMediaStreamTrack` line 20589
+(`enabled = isUnmuting ? true : !this.isMuted`, so a clip swapped into a
+muted publication arrives DISABLED). The publication now idles on a
+single black frame — indistinguishable from muted on the wire, with none
+of the state.
+
+One thing the mute was doing by accident had to be done on purpose:
+`availableRoles()` skipped muted publications, which is what kept an
+idle b-roll track from being offered as a source. It is now excluded
+explicitly, from the fact that actually decides it — whether a clip is on
+air.

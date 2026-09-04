@@ -50,7 +50,7 @@ import {
   matchesTarget,
   roleOfTrack,
   sourceKey,
-} from '../lib/trackSources';
+  isBrollTrack,} from '../lib/trackSources';
 import { createBrollPublisher, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
@@ -3288,6 +3288,17 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     const roles = new Set();
     trackList.forEach((t) => {
       if (t.publication?.isMuted) return;
+      // ── AN IDLE B-ROLL PUBLICATION IS NOT AN AVAILABLE SOURCE ──
+      // It is published for the whole show and it is no longer muted
+      // between clips, so `isMuted` above stopped excluding it. Without
+      // this, a cue sheet naming a `broll` role with no clip_id would
+      // resolve, cut, and put a black frame on air — and the artist's
+      // panel would offer B-ROLL CLIP with nothing to play.
+      //
+      // The mute was doing this by accident. Now it is done on purpose,
+      // from the one fact that actually decides it: whether a clip is
+      // on air on this device right now.
+      if (isBrollTrack(t) && !brollPhaseRef.current.startsWith('clip')) return;
       if (!belongsToSlot(t, slot)) return;
       const r = roleOfTrack(t);
       if (r) roles.add(r);
@@ -4020,9 +4031,24 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // 'scheduled' would hold a sender open through a soundcheck that may
   // run for an hour.
   //
-  // Re-runs on reconnect through `room` identity changing; prewarm() is
-  // idempotent and returns early when the publication is already there,
-  // so this cannot produce a second b-roll track.
+  // ── THE RECONNECT STORY B-ROLL DID NOT HAVE ──────────────────
+  // The defect behind two device rounds, named plainly: b-roll was the
+  // only publication in this app with no reconnect handling. Audio has
+  // ensureAudioPublished on RoomEvent.Reconnected and SignalConnected.
+  // The camera is re-asserted by <LiveKitRoom video> calling
+  // setCameraEnabled on every SignalConnected. B-roll had neither, and
+  // held a captured publication object across reconnects that
+  // republishAllTracks had already unpublished and replaced.
+  //
+  // Now it has one, on the same two events audio uses. ensurePublication
+  // is idempotent and single-flight, and in the common case it finds the
+  // publication LiveKit already republished for us and does nothing at
+  // all.
+  //
+  // returnFromBroll is a dependency and is stable across the identities
+  // that matter here; if it ever starts churning, this effect will start
+  // tearing the publication down and re-establishing it, which is
+  // exactly the symptom to look for.
   useEffect(() => {
     if (!isMainPerformer || !room) return undefined;
     if (displayShowState === 'ended') return undefined;
@@ -4044,8 +4070,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     });
     brollPublisherRef.current = publisher;
 
-    (async () => {
-      const result = await publisher.prewarm();
+    const ensure = async (reason) => {
+      const result = await publisher.ensurePublication(reason);
       if (cancelled) return;
       if (result?.error && result.error !== 'unsupported_browser') {
         // Not fatal, and deliberately not shouted at the artist: b-roll
@@ -4054,10 +4080,22 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         // apart from a show where nobody tried.
         logHealthEvent('broll_unavailable', { reason: result.error });
       }
-    })();
+    };
+
+    ensure('mount');
+
+    // Reconnected fires after republishAllTracks has finished, which is
+    // the moment the answer to "is there a usable b-roll publication"
+    // can have changed without anything here running.
+    const onReconnected = () => { ensure('room_reconnected'); };
+    const onSignalConnected = () => { ensure('signal_connected'); };
+    room.on(RoomEvent.Reconnected, onReconnected);
+    room.on(RoomEvent.SignalConnected, onSignalConnected);
 
     return () => {
       cancelled = true;
+      room.off(RoomEvent.Reconnected, onReconnected);
+      room.off(RoomEvent.SignalConnected, onSignalConnected);
       const p = brollPublisherRef.current;
       brollPublisherRef.current = null;
       p?.teardown?.('effect_cleanup');
