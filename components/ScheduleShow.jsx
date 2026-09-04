@@ -406,7 +406,29 @@ export default function ScheduleShow() {
                       invitation off the platform and left no record of
                       who invited whom; it survives only for artists who
                       have no account to notify. */}
-                  {(s.performance_mode === 'versus') && !open && !expired && (
+                  {/* ── !open REMOVED, DELIBERATELY ────────────────
+                      The gate used to be `!open && !expired`, inherited
+                      from Product Ruling 1's sweep rather than chosen: it
+                      hid the invite control the moment the broadcast
+                      window opened.
+
+                      That is backwards. A Versus whose window has opened
+                      with an empty slot B is a DEAD SHOW, and it is
+                      precisely when the artist most needs to fill it —
+                      stood there with nobody in the other half and no way
+                      to ask anyone.
+
+                      Nothing downstream refuses a late claim:
+                      /api/performer/claim-slot has no window check at
+                      all. join-show DOES enforce the window, and that is
+                      correct and separate — it gates GOING LIVE, so a
+                      late-invited artist accepts and then joins inside
+                      the window like anybody else.
+
+                      !expired stays. An invite to a show whose window
+                      closed unused is genuinely dead, and offering one is
+                      the "diary that says now" problem Ruling 1 fixed. */}
+                  {(s.performance_mode === 'versus') && !expired && (
                     <div style={{ marginTop: 8 }}>
                       {invited[s.id] ? (
                         <div style={{ border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
