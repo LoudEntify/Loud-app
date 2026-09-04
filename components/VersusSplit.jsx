@@ -94,10 +94,33 @@ function useStageOrientation(ref, forced) {
 // Identical in egress, never amplified. The moment the recording gets a
 // heavier treatment than the live stage, prominence starts doing the job
 // that size was forbidden from doing.
-const LIVE_BORDER = 'inset 0 0 0 2px #2ec4b6, inset 0 0 14px rgba(46, 196, 182, 0.45)';
+// ── ⚠️ AN OVERLAY, NOT A box-shadow ON THE PANEL ──────────────
+// The first version set an inset box-shadow on .contestant-panel and it
+// was invisible on every surface. Two reasons, both structural rather
+// than a wiring fault:
+//
+//   1. An inset shadow paints in the element's OWN background layer,
+//      BENEATH its children. The panel is filled by ShotVideo's
+//      absolutely-positioned layers at inset:0, so a full-bleed video
+//      covers the shadow completely.
+//   2. .contestant-panel carries a clip-path, which clips the element's
+//      rendering — including its shadow — at the chamfered corner.
+//
+// So the cue is now a real element, inside the panel, above the video,
+// with pointer-events off so it cannot eat a tap. Still purely visual,
+// still incapable of shifting layout: absolute, inset 0, no flow.
+const LIVE_BORDER_STYLE = {
+  position: 'absolute',
+  inset: 0,
+  pointerEvents: 'none',
+  // High enough to sit over ShotRendering's own layers, which run 0-3.
+  zIndex: 6,
+  border: '2px solid #2ec4b6',
+  boxShadow: '0 0 14px rgba(46, 196, 182, 0.55), inset 0 0 14px rgba(46, 196, 182, 0.35)',
+};
 // Long enough not to strobe when someone taps mute twice in a second,
 // short enough to still read as a response to the tap.
-const LIVE_BORDER_TRANSITION = 'box-shadow 220ms ease';
+const LIVE_BORDER_TRANSITION = 'opacity 220ms ease';
 
 export default function VersusSplit({
   mode = 'versus',
@@ -173,13 +196,10 @@ export default function VersusSplit({
     >
       <div
         className="contestant-panel slot-a"
-        style={{
-          flexBasis: `${fixedSplit ?? split}%`,
-          boxShadow: liveSlots?.a ? LIVE_BORDER : 'none',
-          transition: LIVE_BORDER_TRANSITION,
-        }}
+        style={{ flexBasis: `${fixedSplit ?? split}%` }}
       >
         {renderA ? renderA() : 'contestant a'}
+        {liveSlots?.a && <div aria-hidden="true" style={{ ...LIVE_BORDER_STYLE, transition: LIVE_BORDER_TRANSITION }} />}
       </div>
 
       {/* A pinned split has no drag handle: the recorder has no viewer,
@@ -216,13 +236,10 @@ export default function VersusSplit({
 
       <div
         className="contestant-panel slot-b"
-        style={{
-          flexBasis: `${100 - (fixedSplit ?? split)}%`,
-          boxShadow: liveSlots?.b ? LIVE_BORDER : 'none',
-          transition: LIVE_BORDER_TRANSITION,
-        }}
+        style={{ flexBasis: `${100 - (fixedSplit ?? split)}%` }}
       >
         {renderB ? renderB() : 'contestant b'}
+        {liveSlots?.b && <div aria-hidden="true" style={{ ...LIVE_BORDER_STYLE, transition: LIVE_BORDER_TRANSITION }} />}
       </div>
     </div>
   );

@@ -31,9 +31,17 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { isWindowOpen, msUntilWindow, humanCountdown } from '../lib/scheduling';
 
 const INK = '#011627';
 const TEAL = '#2ec4b6';
+
+// The window helpers take a SHOW ROW, and this component holds the
+// route's camelCase shape. Mapped in one place rather than at each of
+// the four call sites, so the two spellings cannot drift apart.
+function showForWindow(s) {
+  return { slated_at: s.show.slatedAt, duration_minutes: s.show.durationMinutes };
+}
 
 function when(iso) {
   if (!iso) return '';
@@ -44,6 +52,14 @@ function when(iso) {
 
 export default function InvitedShows({ accessToken }) {
   const [slots, setSlots] = useState(null);
+  // One-second clock, the same one the host's own card runs on, so the
+  // window opens on both artists' screens at the same moment rather than
+  // whenever one of them happens to re-render.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!accessToken) return undefined;
@@ -139,6 +155,55 @@ export default function InvitedShows({ accessToken }) {
                     {' · '}VERSUS
                     {s.host && ` · with ${s.host.displayName || s.host.username}`}
                   </div>
+
+                  {/* ── THE WAY BACK IN ───────────────────────────
+                      Without these an invited performer can SEE their
+                      show and cannot ENTER it. The doors existed only on
+                      the card of the artist who created the show, so a
+                      guest who left the live room for any reason — a
+                      call, a flat battery, a crash, tapping back — was
+                      locked out of a show they were performing in, with
+                      no way back and no explanation.
+
+                      Same window rule as the host's own GO LIVE, from
+                      the same isWindowOpen: a guest is not admitted
+                      earlier or later than the artist who booked them,
+                      and the button says WHEN rather than sitting dead.
+
+                      Kit Check needs no window and never has: it
+                      connects to nothing, so a guest can set up their
+                      camera and audio hours beforehand exactly as a host
+                      can. */}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 9, flexWrap: 'wrap' }}>
+                    <Link
+                      href={isWindowOpen(showForWindow(s), now) ? `/live?show=${s.show.id}` : '#'}
+                      onClick={(e) => { if (!isWindowOpen(showForWindow(s), now)) e.preventDefault(); }}
+                      style={{
+                        padding: '9px 16px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                        textDecoration: 'none',
+                        color: isWindowOpen(showForWindow(s), now) ? '#fdfffc' : 'rgba(1,22,39,0.35)',
+                        background: isWindowOpen(showForWindow(s), now)
+                          ? 'linear-gradient(90deg,#2ec4b6,#ff9f1c)' : 'rgba(1,22,39,0.05)',
+                        cursor: isWindowOpen(showForWindow(s), now) ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      GO LIVE
+                    </Link>
+                    <Link
+                      href="/kit-check"
+                      style={{
+                        padding: '9px 16px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                        textDecoration: 'none', color: TEAL, border: `1px solid ${TEAL}`,
+                      }}
+                    >
+                      KIT CHECK
+                    </Link>
+                  </div>
+                  {!isWindowOpen(showForWindow(s), now) && (
+                    <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.45)', marginTop: 5 }}>
+                      GO LIVE unlocks {humanCountdown(msUntilWindow(showForWindow(s), now))}.
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
