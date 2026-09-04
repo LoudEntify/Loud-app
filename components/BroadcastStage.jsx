@@ -385,7 +385,6 @@ export default function BroadcastStage({
                       <DirectorShotPanel
                         room={room}
                         showId={showId}
-              artistId={artistId}
                         artistId={artistId}
                         slot={role}
                         availableRoles={availableRoles}
