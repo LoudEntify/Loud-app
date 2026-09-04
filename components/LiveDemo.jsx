@@ -58,6 +58,7 @@ import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
+import { useMicState, useMicStateAnnouncer } from '../lib/micState';
 import { useAwayIdentities, useAwayAnnouncer } from '../lib/awaySignal';
 import {
   useCapabilityWatch,
@@ -1512,6 +1513,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // consulted separately, so an announced absence and an observed one
   // reach the shot chain through the same single decision.
   const awayIdentities = useAwayIdentities(room);
+
   // Finding 1 -- shared liveness registry (lib/trackLiveness.js), same
   // instance feeding every selection on this device.
   const ineligibleTracks = useIneligibleTracks(room, tracks, { awayIdentities });
@@ -2045,6 +2047,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // sentinels below.
   const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
+
+  // ── WHO HAS AN OPEN MIC ───────────────────────────────────────
+  // Broadcast because this app's mic mute is a gain node and therefore
+  // invisible to everyone else — see lib/micState.js. Performers
+  // announce; viewers only listen, because a viewer has no microphone
+  // and must never claim a slot.
+  const liveSlots = useMicState(room, {
+    localSlot: isMainPerformer ? role : null,
+    localMicOn: micOn,
+    enabled: true,
+  });
+  useMicStateAnnouncer(room, { slot: isMainPerformer ? role : null, micOn, enabled: isMainPerformer });
 
 
   // Fix (c) (SHOW-1 diagnosis round) -- publish-failure recovery.
@@ -3312,6 +3326,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
     const command = buildShotCommand({
       showId: roomName,
+      artistId,
       slot: letter,
       shotKey,
       fromShotKey: activeShot[letter]?.shot ?? null,
@@ -3698,6 +3713,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     const { targetIdentity, targetSourceKey } = resolveTarget(sourceTracks, role, sourceRole);
     const command = buildShotCommand({
       showId: roomName,
+      artistId,
       slot: role,
       shotKey,
       fromShotKey: activeShotRef.current[role]?.shot ?? null,
@@ -3889,6 +3905,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       const identity = room.localParticipant.identity;
       const command = buildShotCommand({
         showId: roomName,
+      artistId,
         slot: role,
         shotKey: 'bRollClip',
         fromShotKey: brollReturnShotRef.current,
@@ -4509,8 +4526,22 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     activeBrollClipId,
     brollBusy,
     brollError,
-    brollSupported,
-  };
+    // ── B-ROLL IS SLOT A ONLY, AND PARKED FOR EVERYONE ────────
+    // Two separate facts, both load-bearing.
+    //
+    // PARKED: b-roll has never reached viewers in any session that
+    // reconnected — see the shelf notes in DECISIONS.md. It is not
+    // shipped for anyone until it works for one performer.
+    //
+    // SLOT A ONLY: even once it works, a second performer publishing a
+    // second clip track doubles precisely the thing that knocked the
+    // congestion controller over. Whether two clip senders coexist is
+    // unmeasured, and a Versus is the worst place to find out.
+    brollSupported: brollSupported && role === 'a',
+  
+    liveSlots,
+      artistId,
+};
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>

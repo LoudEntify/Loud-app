@@ -78,6 +78,7 @@ export default function DirectorShotPanel({
   room,
   showId,
   slot,
+  artistId = null,
   availableRoles = [],
   tracks = [],
   showPhase = 'live', // 'soundcheck' | 'live' -- tags every command this panel fires
@@ -130,12 +131,13 @@ export default function DirectorShotPanel({
             room,
             showId,
             slot,
+            artistId,
             availableRoles,
             resolveTargetFor: (role) => resolveTarget(tracksRef.current, slot, role),
             showPhase: () => showPhaseRef.current,
           })
         : null,
-    [room, showId, slot, availableRoles]
+    [room, showId, slot, artistId, availableRoles]
   );
 
   // Safety: kill the sequencer if the panel unmounts mid-mode

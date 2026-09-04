@@ -40,10 +40,40 @@ function useOrientation() {
 // directly instead of relying on pointer-type inference. Real viewers
 // (LiveDemo/RoomInner) don't pass this, so their existing pointer-based
 // behavior is untouched.
-export default function VersusSplit({ mode = 'versus', renderA, renderB, forceOrientation }) {
+// ── THE LIVE BORDER ───────────────────────────────────────────
+// Teal, mildly neonised, drawn INSIDE the panel via an inset shadow
+// rather than a border box — an outset border would change the panel's
+// geometry and the whole point of this cue is that it never touches
+// layout. Size belongs to the participant (they drag the split);
+// emphasis belongs to the show. Two owners, two mechanisms, no
+// collision.
+//
+// Identical in egress, never amplified. The moment the recording gets a
+// heavier treatment than the live stage, prominence starts doing the job
+// that size was forbidden from doing.
+const LIVE_BORDER = 'inset 0 0 0 2px #2ec4b6, inset 0 0 14px rgba(46, 196, 182, 0.45)';
+// Long enough not to strobe when someone taps mute twice in a second,
+// short enough to still read as a response to the tap.
+const LIVE_BORDER_TRANSITION = 'box-shadow 220ms ease';
+
+export default function VersusSplit({
+  mode = 'versus',
+  renderA,
+  renderB,
+  forceOrientation,
+  // Which slots have an open microphone. One, both, or neither — see
+  // lib/micState.js for why this is rendered literally and never
+  // arbitrated.
+  liveSlots = null,
+  // Replay and the recorder pass a number here. It pins the ratio AND
+  // removes the drag handle: a recording has no viewer to adjust it, and
+  // a replay viewer adjusting a layout that was already baked into the
+  // file would be adjusting nothing.
+  fixedSplit = null,
+}) {
   const detectedOrientation = useOrientation();
   const orientation = forceOrientation || detectedOrientation;
-  const [split, setSplit] = useState(50);
+  const [split, setSplit] = useState(fixedSplit ?? 50);
   const stageRef = useRef(null);
   const draggingRef = useRef(false);
 
@@ -89,10 +119,24 @@ export default function VersusSplit({ mode = 'versus', renderA, renderB, forceOr
       ref={stageRef}
       className={`versus-stage ${orientation}`}
     >
-      <div className="contestant-panel slot-a" style={{ flexBasis: `${split}%` }}>
+      <div
+        className="contestant-panel slot-a"
+        style={{
+          flexBasis: `${fixedSplit ?? split}%`,
+          boxShadow: liveSlots?.a ? LIVE_BORDER : 'none',
+          transition: LIVE_BORDER_TRANSITION,
+        }}
+      >
         {renderA ? renderA() : 'contestant a'}
       </div>
 
+      {/* A pinned split has no drag handle: the recorder has no viewer,
+          and a replay viewer would be dragging a ratio already baked
+          into the file. Rendered as a plain divider so the two panels
+          still read as two panels. */}
+      {fixedSplit != null ? (
+        <div className="divider" aria-hidden="true" />
+      ) : (
       <div
         className="divider drag-divider"
         onPointerDown={onPointerDown}
@@ -116,8 +160,16 @@ export default function VersusSplit({ mode = 'versus', renderA, renderB, forceOr
           <span className="drag-dot" />
         </div>
       </div>
+      )}
 
-      <div className="contestant-panel slot-b" style={{ flexBasis: `${100 - split}%` }}>
+      <div
+        className="contestant-panel slot-b"
+        style={{
+          flexBasis: `${100 - (fixedSplit ?? split)}%`,
+          boxShadow: liveSlots?.b ? LIVE_BORDER : 'none',
+          transition: LIVE_BORDER_TRANSITION,
+        }}
+      >
         {renderB ? renderB() : 'contestant b'}
       </div>
     </div>

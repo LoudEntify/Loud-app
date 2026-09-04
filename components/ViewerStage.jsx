@@ -27,6 +27,7 @@ export default function ViewerStage({
   renderSlot,
   activePerformerSlot,
   presentSlots,
+  liveSlots,
   comments,
   sendComment,
   commentsExpanded,
@@ -43,11 +44,17 @@ export default function ViewerStage({
   return (
     <div className="stage-root">
       <div className="stage-video-area" onClick={onStageClick}>
+        {/* Same layout the artist's console shows. Deliberately one
+            mental model of the show: the artist should see roughly what
+            the audience sees, and a spotlight for one and a split for
+            the other is how a director gets surprised by their own
+            broadcast. */}
         {isVersus ? (
-          <SpotlightStage
-            activeSlot={activePerformerSlot}
-            slots={presentSlots}
-            renderSlot={renderSlot}
+          <VersusSplit
+            mode="versus"
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+            liveSlots={liveSlots}
           />
         ) : (
           <VersusSplit

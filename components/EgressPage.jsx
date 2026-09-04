@@ -50,6 +50,7 @@ import { Track } from 'livekit-client';
 import '@livekit/components-styles';
 import './reactions.css';
 import VersusSplit from './VersusSplit';
+import { useMicState } from '../lib/micState';
 import SpotlightStage from './SpotlightStage';
 import { ShotVideo } from './ShotRendering';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
@@ -117,6 +118,9 @@ function EgressStage({ layout }) {
   // Same source list as the live stage -- ScreenShare is here only
   // because that is how b-roll clips are published (lib/trackSources.js).
   const tracks = useTracks(STAGE_TRACK_SOURCES);
+  // The recorder listens and never announces: it has no microphone and
+  // must never claim a slot.
+  const liveSlots = useMicState(room, { localSlot: null, enabled: true });
   // Finding 1 -- liveness registry with revival probation. See
   // lib/trackLiveness.js for why reappearing in the list is not enough
   // to become selectable again.
@@ -352,18 +356,33 @@ function EgressStage({ layout }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', background: '#011627', overflow: 'hidden' }}>
+      {/* ── THE RECORDING IS AN EVEN SPLIT, DELIBERATELY ──────
+          Not inherited: chosen. Until round 3 the recorder laid the
+          stage out by ACTIVE PERFORMER, which put one artist full-bleed
+          and the other in a thumbnail — and a battle recorded with one
+          performer larger reads as a verdict. The file is the artefact
+          that outlives the show and gets watched by people who were not
+          there, so it does not get to editorialise.
+
+          Fixed 50/50, and fixedSplit also removes the drag handle: a
+          recorder has no viewer to adjust it, and a replay viewer would
+          be dragging a ratio already baked into the pixels.
+
+          The teal live-border IS kept here, and that is also a decision
+          rather than an inheritance. Neutrality is about SIZE — whose
+          turn it was is a record, not a judgement, and it is otherwise
+          unrecoverable from the footage. The treatment is IDENTICAL to
+          the live stage and must never be amplified for the recording;
+          the moment it is heavier here, prominence starts doing the job
+          size was forbidden from doing. */}
       {layout === 'versus' ? (
-        <SpotlightStage
-          activeSlot={activePerformerSlot}
-          slots={presentSlots}
-          renderSlot={renderSlot}
-          // Finding 4, egress half -- SpotlightStage's default is a
-          // literal "Reconnecting performer A…" string, which for the
-          // RECORDER means that text gets burned into the footage the
-          // moment the active performer's tracks drop (which End Show
-          // now deliberately causes, per fix 1d). Same rule as
-          // CLEAN_PLACEHOLDER: no readable status text in a recording.
-          reconnectingPlaceholder={CLEAN_PLACEHOLDER}
+        <VersusSplit
+          mode="versus"
+          forceOrientation="portrait"
+          fixedSplit={50}
+          liveSlots={liveSlots}
+          renderA={renderSlot('a')}
+          renderB={renderSlot('b')}
         />
       ) : (
         <VersusSplit

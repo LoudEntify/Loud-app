@@ -1650,3 +1650,111 @@ threshold), and the bound if it ever were is `frames_stalled` →
 recovered → 750ms probation on a key that never disappeared — degraded,
 not a CAMERA LOST cascade. Both sids are logged on the rotate row so a
 timeline can prove it was a lens change.
+
+---
+
+# MVP ROUND 3 — PIECE 3, VERSUS (branch `feature/mvp-round-3-versus`)
+
+Cut from `main` at c08cd4b, deliberately NOT from the b-roll branch: that
+work is parked and unmerged, and Piece 3 must be able to merge without
+carrying it.
+
+## Three layers, kept separate
+
+| Layer | Scope | Storage | Broadcast |
+|---|---|---|---|
+| Who is performing | per-performer, derived | none — mic state | yes, mute state only |
+| Split ratio | per-participant | local component state | **never** |
+| Egress ratio | fixed even | a constant | n/a |
+
+**Active performer as an ASSIGNMENT is gone.** Two performers cue each
+other verbally and whoever is not performing mutes. That removed the
+switch gesture, the `ACTIVE_PERFORMER_SWITCH` broadcast's purpose, and
+every read of `shows.active_performer_slot` in versus. The column stays —
+dropping a populated column is destructive and buys nothing — and
+`/api/show/active-performer` stays, unrouted.
+
+## The defect this fixed, which was live
+
+**The recorder laid the stage out by active performer.** `EgressPage`
+passed `activeSlot` to `SpotlightStage`, so the recording showed whoever
+was spotlighted full-bleed and the other performer as a thumbnail. A
+battle recorded with one performer larger reads as a verdict, in the
+artefact that outlives the show and gets watched by people who were not
+there. Now a fixed 50/50, stated in code as a neutrality decision rather
+than an inherited default.
+
+## Why the mic-state broadcast exists at all
+
+Because this app's mic mute is a GAIN NODE, not a track mute. `toggleMic`
+ramps `micMuteGain` inside the Web Audio graph — a deliberate earlier fix,
+because muting the published MediaStreamTrack silenced the backing track
+too, the published track being the mix.
+
+The consequence: mute state is invisible to every other participant. No
+`publication.isMuted`, no TrackMuted event, nothing on the wire. So it is
+published explicitly, and that cost was accepted for one reason: **a
+viewer arriving mid-show hears a voice and cannot tell which of two
+similar panels it is coming from.** That is an orientation problem for
+every new arrival, at the moment they decide whether this looks produced
+or confusing.
+
+**The channel carries mute state and nothing else, ever.** The temptation
+to grow it into a general performer-state channel is named and refused in
+`lib/micState.js`: every field added there is a fact living in two places
+that can drift invisibly.
+
+## The border rule: one, both, or neither — always literal
+
+    one open mic   -> one border
+    BOTH open      -> BOTH borders
+    NONE open      -> no borders
+
+Both-unmuted happens whenever they talk over each other, and both being
+lit is the true description of it. Both-muted happens between songs.
+Neither is broken; both are accurate.
+
+**The rejected alternative** was keeping the last speaker lit so the
+stage always shows someone. That is memory, and memory is the derived
+state that drifts: two clients that saw the mutes in a different order
+would light different people, with nothing to reconcile them. Rendering
+the current fact cannot disagree with itself.
+
+Teal #2ec4b6, mildly neonised, drawn INSIDE the panel as an inset shadow
+so it can never shift layout. **Never a size change** — size belongs to
+the participant who dragged their split, emphasis belongs to the show,
+and a viewer who had dragged fully across would never see a size-based
+cue at all. Identical in egress, never amplified.
+
+## Each performer directs their own cameras — now a decision
+
+Kept from the existing `isMainPerformer` behaviour, and no longer
+inherited. A Versus is two artists, each of whom knows their own set. A
+controls the running order; within their turn, each artist's cameras
+follow their own performance. Directing two artists while also performing
+is too much to hold mid-show.
+
+**Consequence, stated:** B's overrides are B's, and `shot_commands` could
+not express that — it recorded `slot`, which is a position in one show,
+not a person. Hence `mvp3_01`.
+
+## Step 11 — one performer disconnects mid-show
+
+**Current behaviour, read from the code rather than tested:** the layout
+HOLDS. `flexBasis` comes from the split percentage and does not depend on
+tracks, so the geometry is unchanged. The absent half falls to
+`ShotVideo`, showing the held last frame under "Back in a moment", or the
+bare placeholder if they never appeared.
+
+Right for a short dropout — that is what the holding state is for. Wrong
+for a long absence: half the screen showing a frozen stranger
+indefinitely, with no indication whether they are coming back.
+
+**Two options, recorded for when it matters, neither built:**
+
+  1. Collapse to full-bleed after a timeout.
+  2. Change the holding copy once absence passes a threshold.
+
+Leaning toward (2): collapsing and re-expanding as someone drops in and
+out would be worse than a steady layout, and a layout that moves on its
+own is the thing a viewer notices most.
