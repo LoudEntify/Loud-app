@@ -36,3 +36,30 @@ next-env.d.ts
 # Smoke-check credentials (see docs/SMOKE_TEST.md) -- never committed.
 smoke.env
 .smoke.env
+
+# ── Device-test captures ──────────────────────────────────────
+# Health-event CSVs pulled from a show for diagnosis. They are evidence
+# for one investigation, often a megabyte each, and they belong in the
+# conversation that produced them rather than in the repository.
+#
+# The ONE exception is deliberate and stays tracked:
+# interruption-ios-chrome.csv, committed as the evidence behind
+# docs/INTERRUPTION_FEASIBILITY.md §4.1 so the table in that document
+# can be re-derived rather than trusted.
+countdown*.csv
+freeze-run-*.csv
+task*.csv
+interruption-probe-*.csv
+
+# ── macOS duplicate-file artefacts ────────────────────────────
+# "lib/useWakeLock 2.js" and friends: stale copies Finder leaves behind
+# when a file is duplicated or restored. They are never imported and
+# they shadow the real module for anyone reading the tree.
+* 2.js
+* 2.jsx
+* 2.mjs
+* 2.sql
+* 2.svg
+
+# Throwaway verification scripts written against a deployment.
+*.tmp.mjs
