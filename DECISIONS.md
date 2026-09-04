@@ -1942,3 +1942,177 @@ That cuts two ways and both are worth writing down:
 disconnect inside a six-minute window is not a normal connection. It
 affects every publication, not just b-roll, and it belongs on the
 round-3 list as its own item rather than as background to this one.
+
+---
+
+# PARKED — B-ROLL TO VIEWERS AND EGRESS (round 3, Piece 1)
+
+**Status: on the shelf, not in the bin. Built, deployed, unmerged, on
+`feature/mvp-round-3`. Four device rounds spent; stopped deliberately
+rather than by exhaustion.**
+
+Anyone picking this up cold should read this section before touching
+`lib/brollPlayback.js`.
+
+## What is built and deployed right now
+
+On the branch, verified in the served bundle, never merged to main:
+
+  * **The publication is established once per session**, from a
+    1080x1920 black canvas via `captureStream(0)` — one frame on demand,
+    then nothing. Playing a clip is `replaceTrack()` on a sender every
+    viewer negotiated at join, not a new publish.
+  * **Capped at 2 Mbps, single layer.** The artist's measured steady
+    state was 3.0 of 6.9 Mbps.
+  * **No muting anywhere in the feature.** The publication idles on one
+    black frame.
+  * **A reconnect story**: `ensurePublication()` on `RoomEvent.Reconnected`
+    and `SignalConnected`, idempotent and single-flight.
+  * **The publication is never stored** — resolved fresh from
+    `room.localParticipant` by track name at every use.
+  * **Structural no-ops report immediately** (`broll_swap_noop`,
+    `broll_publication_stale`) instead of surfacing four seconds later
+    as "no frames".
+  * **Auto is held for a clip's duration** under owner `broll`, released
+    on the return cut.
+  * **Per-sender telemetry**: `pub_stats` carries `source` and `phase`,
+    plus a `pub_aggregate` row per sample with `totalUplinkBps`,
+    `availableOutgoingBitrate` and `utilisation`.
+
+## The four faults, their single cause, and the two-phase shape
+
+**Single cause: b-roll was the only publication in this app with no
+reconnect handling.** Audio has `ensureAudioPublished` on
+`Reconnected`/`SignalConnected`. The camera is re-asserted by
+`<LiveKitRoom video>` calling `setCameraEnabled` on every
+`SignalConnected`. B-roll held a publication object captured once at
+session start and never asked whether it still worked.
+
+On a full reconnect, `republishAllTracks` (livekit-client 2.22.0, line
+30721, called from `applyJoinResponse` line 32163) unpublishes every
+local track and publishes it again — **a new publication, a new
+trackSid**.
+
+That produced two presentations from one cause:
+
+  1. **Silent.** `setMediaStreamTrack` (line 20579) attaches to the
+     sender only `if (this.sender && sender.transport?.state !==
+     'closed')`. When false it skips the attach and **resolves
+     successfully**. `getSenderStats()` then returns `[]`, the frame
+     poll sums zero, and the result reads `no_frames` — describing the
+     clip rather than the fault.
+  2. **Loud.** Once `unpublishTrack` had cleared `.track` on the stale
+     object: `Cannot read properties of undefined (reading
+     'replaceTrack')`.
+
+The boundary between them in the capture is a full `room_disconnected`
+at 10:55:30, confirmed in the rows.
+
+The other two faults were the earlier round's: the **blank stage** (two
+causes — the camera was muted 2.354s before the clip was on air, and the
+cut fired on `replaceTrack` resolving rather than on frames) and the
+**broken return cut** (`availableRoles()` skips muted publications, so
+the return resolved against a slot with no camera in it).
+
+## The hypothesis that was checked and falsified
+
+**Proposed:** the `captureStream(0)` placeholder is the cause — a sender
+established from a source that emits one frame and then nothing may
+never start encoding, so `replaceTrack` onto it succeeds structurally and
+produces nothing.
+
+**Falsified against the SDK source.** There is no persistent "never
+started" state; `replaceTrack` swaps the source and encoding follows
+whatever the current track produces. The placeholder is a legitimate idle
+source and was never implicated. **Do not re-open this line.**
+
+## Confirmed by evidence vs resting on reading
+
+**Confirmed by captures:**
+
+  * Every failure above, with timestamps, including reconnect rows
+    matching each `broll_source_ended` to the second.
+  * The swap mechanism itself works: `via:"swap"`, one trackSid reused
+    across two clips, `kept:true` on teardown, 2 Mbps cap applied, clip
+    running its full duration.
+  * The nested auto-hold registry, exercised against a live cue sheet
+    (`holders:["cue","broll"]`).
+  * **It worked in a clean session and has failed in every session that
+    reconnected.** `show-xpl6ky7m` had no reconnects during the b-roll
+    window — only a normal connect and the prewarm cycle. Every later
+    session reconnected, and in the last one an early cycle at 10:49:41
+    means **not one attempt ever ran against a live publication**.
+
+**Resting on reading the SDK, NOT on a run:**
+
+  * That the rebuilt lifecycle survives a reconnect. The mechanism is
+    read from source; no capture yet shows it recovering.
+  * That the frame gate correctly distinguishes a slow clip from a dead
+    sender in the wild.
+
+**Never verified at all:**
+
+  * **That a clip reaches viewers.** It has not, in any session after
+    the clean one.
+  * **That a clip reaches a recording.** No recorded egress file has
+    ever been pulled for a b-roll clip. The egress subscription lapsed
+    before it could be. This was the original requirement and it remains
+    entirely open.
+
+## For the next person
+
+**Try first, in this order:**
+
+  1. **Get a session that does not reconnect**, and confirm the clean
+     path still works end to end with a viewer on a second device. Until
+     that exists, nothing else can be attributed. See the connection
+     instability item below — it may be the whole story.
+  2. **Pull a recorded egress file.** It is the only thing that answers
+     the recorder-side question, and it has never been done.
+  3. **Read `pub_aggregate` with `phase:"clip_on_air"` and
+     `activeSenders:2`.** It settles whether the camera ever needed
+     muting, which is currently an open question with the mute removed.
+
+**Do NOT retry:**
+
+  * The `captureStream(0)` placeholder theory. Falsified above.
+  * Muting the camera during a clip. Three failures came from it. If it
+    ever returns it happens only after frame confirmation, never on a
+    timer — the invariant is written in `components/LiveDemo.jsx` at the
+    line the mute used to occupy.
+  * Swapping the clip onto the CAMERA publication. It solves the bitrate
+    problem and breaks `lib/trackSources.js`'s founding rule: a clip
+    would be classified as the performer's face, in recordings and in
+    the training data those recordings become.
+  * Re-investigating the original bitrate collapse. Its cause is proven
+    from telemetry and the fix removed the mechanism.
+
+---
+
+# ROUND-3 ITEM — CONNECTION INSTABILITY (promoted from a note)
+
+**Four reconnects, including one full `room_disconnected` (reason 1),
+inside a six-minute window on the artist's own connection.**
+
+This was first written down as background to the b-roll work. It is not
+background. It affects **every** publication; the camera and audio simply
+hide it because both have recovery paths, and b-roll was the one without
+one. That makes b-roll the symptom and this the possible disease.
+
+Why it deserves its own investigation:
+
+  * If it happens on a developer's connection it will be worse on an
+    artist's, in a venue, on mobile data.
+  * It may be **upstream of problems already attributed elsewhere**.
+    Anything diagnosed as a media, encoder or selection fault during a
+    session that was silently reconnecting deserves re-reading with this
+    in mind.
+  * Nothing currently surfaces it. The rows exist
+    (`room_connection_state_changed`, `pub_reconnecting`,
+    `pub_reconnected`) but nothing summarises how often a show
+    reconnected, so a session with four reconnects and a clean one look
+    the same in every report we produce.
+
+First questions: is it network, LiveKit server-side, the token's TTL, or
+something this app does — and does it correlate with anything (b-roll
+publish, show phase, device, duration)?
