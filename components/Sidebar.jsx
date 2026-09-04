@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft } from '@phosphor-icons/react';
 import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
+import { getSession } from '../lib/supabaseAuth';
+import { fetchUnreadCount } from '../lib/unreadCount';
 
 // Matches Sidebar.dc.html from the Claude Design project exactly (icons,
 // labels, active/wallet color rules). PROFILE's destination is the one
@@ -17,6 +19,8 @@ const BASE_ITEMS = [
   { key: 'notifications', label: 'NOTIFICATIONS', href: '/notifications', Icon: Bell },
   { key: 'wallet', label: 'WALLET', href: '/wallet', Icon: Coins },
 ];
+
+const RED_BADGE = '#e71d36';
 
 const TEAL = '#2ec4b6';
 const MUTED = 'rgba(253, 255, 252, 0.55)';
@@ -39,6 +43,27 @@ const HIDE_DELAY_MS = 2000;
 // actually shrink its width (sidebar--collapsed, below) for the page
 // content to reclaim the space, not just translate it off-screen.
 export default function Sidebar({ active = 'live', autoHide = false, collapsed = false, onToggleCollapse }) {
+  // ── UNREAD BADGE ──────────────────────────────────────────────
+  // Read on mount and re-read when the tab regains focus, rather than
+  // subscribed. A count that is a few seconds stale is not a problem; a
+  // realtime subscription held open on every page for a number nobody
+  // acts on immediately is.
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const session = await getSession();
+      if (cancelled) return;
+      setUnread(await fetchUnreadCount(session?.user?.id));
+    };
+    load();
+    // Re-read on return, so opening the panel in another tab and coming
+    // back does not leave a badge claiming unread items that are read.
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, []);
+
   const [hidden, setHidden] = useState(false);
   const timerRef = useRef(null);
 
@@ -101,10 +126,26 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
             const textColor = isActive ? TEAL : MUTED;
             const iconColor = item.key === 'wallet' ? ORANGE : textColor;
             const className = `sidebar-item ${isActive ? 'active' : ''}`;
+            const badge = item.key === 'notifications' && unread > 0 ? unread : null;
             const inner = (
               <>
                 <item.Icon size={17} weight="regular" color={iconColor} className="sidebar-icon" />
                 <span className="sidebar-label">{item.label}</span>
+                {badge !== null && (
+                  <span
+                    aria-label={`${badge} unread`}
+                    style={{
+                      marginLeft: 'auto', minWidth: 17, height: 17, padding: '0 5px',
+                      borderRadius: 999, background: RED_BADGE, color: '#fff',
+                      fontSize: 10, fontWeight: 700, lineHeight: '17px', textAlign: 'center',
+                      // Capped so a long-neglected account shows "9+"
+                      // rather than a number wide enough to break the nav.
+                      boxShadow: '0 0 8px rgba(231,29,54,0.5)',
+                    }}
+                  >
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
               </>
             );
             if (item.href) {

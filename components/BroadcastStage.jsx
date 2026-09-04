@@ -68,6 +68,7 @@ export default function BroadcastStage({
   activeCamera,
   setActiveForSlot,
   activePerformerSlot,
+  liveSlots,
   presentSlots,
   switchingPerformer,
   onSwitchActivePerformer,
@@ -86,6 +87,7 @@ export default function BroadcastStage({
   onStageClick,
   room,
   showId,
+  artistId,
   availableRoles,
   tracks,
   onExclusiveMode,
@@ -216,21 +218,28 @@ export default function BroadcastStage({
           it existed only to widen/reshape the phone-box for versus mode,
           which no longer exists (video is always full-bleed now). */}
       <div className="stage-video-area" onClick={onStageClick}>
+        {/* ── VERSUS RENDERS AS A SPLIT, NOT A SPOTLIGHT ────────
+            Round 3. Both performers on screen at once, at whatever ratio
+            THIS participant has dragged their own divider to. The
+            spotlight layout it replaces sized one performer larger than
+            the other, which is a verdict the app has no business
+            rendering in a battle.
+
+            Who is currently performing is shown by the teal border,
+            driven by mic state (lib/micState.js), never by size — a
+            viewer who had dragged their split fully across would
+            otherwise never see the emphasis at all.
+
+            SpotlightStage is no longer routed to. The file stays, with
+            its own note, rather than being deleted in the same change
+            that stops using it. */}
         {performanceMode === 'versus' ? (
-          <SpotlightStage
-            activeSlot={activePerformerSlot}
-            slots={presentSlots}
-            renderSlot={renderSlot}
-            onSwitch={role === 'a' ? onSwitchActivePerformer : undefined}
-            switching={switchingPerformer}
-            collapsed={feedsCollapsed}
-            onToggleCollapse={onToggleFeedsCollapsed}
-            // Round C -- without this the component can only see "the
-            // active performer's tracks are gone" and always guesses
-            // "Reconnecting", so End Show reads as a dropout. That is
-            // now certain rather than unlikely, because End Show
-            // deliberately unpublishes.
-            showEnded={showEnded}
+          <VersusSplit
+            mode="versus"
+            renderA={renderSlot('a')}
+            renderB={renderSlot('b')}
+            liveSlots={liveSlots}
+            room={room}
           />
         ) : (
           <VersusSplit
@@ -376,6 +385,8 @@ export default function BroadcastStage({
                       <DirectorShotPanel
                         room={room}
                         showId={showId}
+              artistId={artistId}
+                        artistId={artistId}
                         slot={role}
                         availableRoles={availableRoles}
                         tracks={tracks}

@@ -1650,3 +1650,342 @@ threshold), and the bound if it ever were is `frames_stalled` →
 recovered → 750ms probation on a key that never disappeared — degraded,
 not a CAMERA LOST cascade. Both sids are logged on the rotate row so a
 timeline can prove it was a lens change.
+
+---
+
+# MVP ROUND 3 — PIECE 3, VERSUS (branch `feature/mvp-round-3-versus`)
+
+Cut from `main` at c08cd4b, deliberately NOT from the b-roll branch: that
+work is parked and unmerged, and Piece 3 must be able to merge without
+carrying it.
+
+## Three layers, kept separate
+
+| Layer | Scope | Storage | Broadcast |
+|---|---|---|---|
+| Who is performing | per-performer, derived | none — mic state | yes, mute state only |
+| Split ratio | per-participant | local component state | **never** |
+| Egress ratio | fixed even | a constant | n/a |
+
+**Active performer as an ASSIGNMENT is gone.** Two performers cue each
+other verbally and whoever is not performing mutes. That removed the
+switch gesture, the `ACTIVE_PERFORMER_SWITCH` broadcast's purpose, and
+every read of `shows.active_performer_slot` in versus. The column stays —
+dropping a populated column is destructive and buys nothing — and
+`/api/show/active-performer` stays, unrouted.
+
+## The defect this fixed, which was live
+
+**The recorder laid the stage out by active performer.** `EgressPage`
+passed `activeSlot` to `SpotlightStage`, so the recording showed whoever
+was spotlighted full-bleed and the other performer as a thumbnail. A
+battle recorded with one performer larger reads as a verdict, in the
+artefact that outlives the show and gets watched by people who were not
+there. Now a fixed 50/50, stated in code as a neutrality decision rather
+than an inherited default.
+
+## Why the mic-state broadcast exists at all
+
+Because this app's mic mute is a GAIN NODE, not a track mute. `toggleMic`
+ramps `micMuteGain` inside the Web Audio graph — a deliberate earlier fix,
+because muting the published MediaStreamTrack silenced the backing track
+too, the published track being the mix.
+
+The consequence: mute state is invisible to every other participant. No
+`publication.isMuted`, no TrackMuted event, nothing on the wire. So it is
+published explicitly, and that cost was accepted for one reason: **a
+viewer arriving mid-show hears a voice and cannot tell which of two
+similar panels it is coming from.** That is an orientation problem for
+every new arrival, at the moment they decide whether this looks produced
+or confusing.
+
+**The channel carries mute state and nothing else, ever.** The temptation
+to grow it into a general performer-state channel is named and refused in
+`lib/micState.js`: every field added there is a fact living in two places
+that can drift invisibly.
+
+## The border rule: one, both, or neither — always literal
+
+    one open mic   -> one border
+    BOTH open      -> BOTH borders
+    NONE open      -> no borders
+
+Both-unmuted happens whenever they talk over each other, and both being
+lit is the true description of it. Both-muted happens between songs.
+Neither is broken; both are accurate.
+
+**The rejected alternative** was keeping the last speaker lit so the
+stage always shows someone. That is memory, and memory is the derived
+state that drifts: two clients that saw the mutes in a different order
+would light different people, with nothing to reconcile them. Rendering
+the current fact cannot disagree with itself.
+
+Teal #2ec4b6, mildly neonised, drawn INSIDE the panel as an inset shadow
+so it can never shift layout. **Never a size change** — size belongs to
+the participant who dragged their split, emphasis belongs to the show,
+and a viewer who had dragged fully across would never see a size-based
+cue at all. Identical in egress, never amplified.
+
+## Each performer directs their own cameras — now a decision
+
+Kept from the existing `isMainPerformer` behaviour, and no longer
+inherited. A Versus is two artists, each of whom knows their own set. A
+controls the running order; within their turn, each artist's cameras
+follow their own performance. Directing two artists while also performing
+is too much to hold mid-show.
+
+**Consequence, stated:** B's overrides are B's, and `shot_commands` could
+not express that — it recorded `slot`, which is a position in one show,
+not a person. Hence `mvp3_01`.
+
+## Step 11 — one performer disconnects mid-show
+
+**Current behaviour, read from the code rather than tested:** the layout
+HOLDS. `flexBasis` comes from the split percentage and does not depend on
+tracks, so the geometry is unchanged. The absent half falls to
+`ShotVideo`, showing the held last frame under "Back in a moment", or the
+bare placeholder if they never appeared.
+
+Right for a short dropout — that is what the holding state is for. Wrong
+for a long absence: half the screen showing a frozen stranger
+indefinitely, with no indication whether they are coming back.
+
+**Two options, recorded for when it matters, neither built:**
+
+  1. Collapse to full-bleed after a timeout.
+  2. Change the holding copy once absence passes a threshold.
+
+Leaning toward (2): collapsing and re-expanding as someone drops in and
+out would be worse than a steady layout, and a layout that moves on its
+own is the thing a viewer notices most.
+
+## Piece 3, second pass — stacked versus, and invites that arrive
+
+### Orientation is measured, not inferred
+
+`useOrientation` asked the POINTER: coarse plus a portrait viewport meant
+"phone", anything else meant "desktop". That answers a question about the
+input device when the question is about the box.
+
+**Foldables break it outright, and that is what made this necessary
+rather than tidier.** A folded Z Fold is a narrow portrait phone;
+unfolded it is a wide near-square tablet. Same device, same coarse
+pointer, two different correct layouts — so pointer type gets one of the
+two states wrong every time, and it can change MID-SHOW while somebody
+is performing.
+
+The stage now measures its own aspect ratio through a **ResizeObserver**,
+which handles fold, unfold, rotation and window resize with one
+mechanism. A `window.resize` listener would happen to catch a fold, since
+folding changes the viewport; it cannot catch the case the window never
+sees — the stage's own box changing when a panel collapses or the deck
+expands.
+
+**Stacked below 1:1, side by side above it.** Two portrait feeds side by
+side in a narrow box are two slivers of a person. The inverse is equally
+true: two portrait feeds stacked in a wide box each get a very short,
+very wide panel and letterbox into a strip. On a 16:9 desktop, stacked
+gives each panel ≈3.6:1 against portrait video's 0.56 — severe waste —
+where side by side gives ≈0.89:1.
+
+**The split survives the flip by construction.** It is stored as a
+percentage share, not pixels and not an axis-specific value: 60 means
+"slot A gets 60%" of the height when stacked and of the width when side
+by side. Nothing resets on an orientation change. Confirmed by reading;
+a device-test step exists to confirm it by running.
+
+### Invites are delivered, not copied
+
+The invite was a URL the artist copied into WhatsApp. That took the
+invitation off the platform, made the other artist accept somewhere else,
+and left no record of who invited whom — the feature worked and felt like
+a workaround.
+
+**What changed: delivery. What did not: the token model.** The token is
+still single-use, still on the show_slots row, still what grants the
+slot, still what `/join/[token]` resolves. `show_slots`, `claim-slot`,
+`join-show` and the 18+ gating are untouched. A human no longer carries
+it.
+
+**The notification is written by the invite route, and can only be
+written there.** notifications' RLS allows insert for the row's OWNER
+only — deliberately, because a client-insertable cross-user notification
+is a spam primitive. Inviting is one user causing a row for another, so
+it needs the service role.
+
+**Delivery failure is reported, not swallowed.** The slot row is written
+and the token is valid even if the notification insert fails, so the
+response carries `notified` separately from `ok`. The UI offers the link
+only in that case — offering it beside a successful notification would
+teach the artist to send both, which is the off-platform habit this
+change exists to remove.
+
+### The three product answers
+
+1. **Must the invited artist be on Loudentify?** For the default, yes —
+   you cannot notify somebody who does not exist. The link survives as an
+   explicit secondary action for artists who have not signed up. Same
+   token underneath.
+2. **Decline or no response?** The show stays scheduled with slot B
+   pending and A is told. Silently becoming solo changes what the
+   audience was promised; cancelling punishes A for someone else's
+   inaction. A can invite someone else — re-minting already revokes the
+   previous token. **Declining is not built**: `show_slots` has no status
+   column and "declined" is a third state, which is its own decision.
+3. **See details before accepting?** Yes, and it already worked — the
+   accept page is deliberately readable logged-out and shows who invited
+   you, to what, and when.
+
+## Piece 3, third pass — placement, visibility, and unread
+
+### The !open gate: inherited, not chosen
+
+It hid the Versus invite control the moment the broadcast window opened —
+exactly when an artist stood with an empty slot B most needs it. It
+arrived with Product Ruling 1's sweep, which was aimed at a show with no
+END (a GO LIVE that would arm a show slated last Tuesday), and every
+control on the card got the same treatment.
+
+Nothing downstream refuses a late claim: `/api/performer/claim-slot` has
+no window check at all. `join-show` does enforce the window, and that is
+correct and separate — it gates GOING LIVE, so a late-invited artist
+accepts and then joins inside the window like anyone else. Removed.
+`!expired` stays.
+
+### The placement failure, named because it is the second one
+
+**The picker was built where the code being replaced happened to live,
+rather than where the requirement said.** The requirement said "at the
+point of scheduling"; the old INVITE OPPONENT button was on the show
+card, so the replacement went on the show card. It was correct, deployed,
+and unreachable at the moment it was wanted.
+
+Same shape as blaming the b-roll teardown on b-roll because the symptom
+appeared there, rather than on the auto director's hold timer that
+actually caused it. **Inheriting the placement of the thing you are
+replacing** is a real failure mode: it feels like a faithful swap and it
+silently discards the requirement.
+
+The picker is now in the scheduling form, OPTIONAL — you often have the
+date before the opponent, and forcing a choice at creation would stop an
+artist holding a slot while they ask around. The card path stays as the
+way to fill a slot left empty.
+
+### Invited shows were invisible to the invited artist
+
+Every "my shows" query in the app is `shows.artist_id = me` — the OWNER
+column. Right while a show had one artist; Versus broke it without
+anything appearing to break. An artist who accepts an invite has a slot,
+will publish a camera and will perform, and the show appears **nowhere**
+for them: not in their diary, not on their profile. It existed in exactly
+one place — a notification, which is dismissible, easily missed, and
+gone once read.
+
+So an artist could accept a booking and then have no way to find it.
+
+Fixed with `/api/performer/my-slots` and `components/InvitedShows.jsx`,
+covering both halves: pending invitations with an accept action, and
+accepted shows under "YOU ARE PERFORMING IN".
+
+**A route rather than a query, because `show_slots` is deliberately
+zero-policy and service-role only.** Opening it to clients would expose
+every invite token in the table — the token is the credential, and the
+table is not browsable for the same reason a password table is not. The
+response carries the show and the slot status, and the token only for a
+PENDING invite belonging to the caller.
+
+Owner-only on the profile: a pending invitation is a conversation
+between two artists, not a public fact about either.
+
+### The badge could not have shipped alone
+
+`read_at` existed on the table and **nothing in the app ever wrote to
+it.** Notifications.jsx read it to draw a per-row dot; no code path ever
+set it. Every notification stayed unread forever, which was invisible
+precisely because nothing counted them.
+
+Adding a badge to that would have produced a number that counts up for
+the life of the account and never comes down — not an indicator, an
+accusation. So `markAllNotificationsRead` ships in the same module as
+`fetchUnreadCount`, and the panel calls it on open, AFTER rendering: the
+rows already fetched keep their original `read_at`, so the dots stay
+visible for that viewing and the badge clears for next time.
+
+Messages deliberately gets no badge. `MessageThread` is an honest empty
+state with no threads table and no delivery — a badge over it could only
+ever show zero.
+
+## Piece 3, fourth pass — the layout depended on one value arriving twice
+
+### What the device test found
+
+The split rendered for the SHOW OWNER ONLY. The guest (Safari) and a
+viewer (Android Chrome) both saw themselves full-bleed with the other
+artist as a thumbnail.
+
+**It was not SpotlightStage.** That component is no longer rendered
+anywhere — zero `<SpotlightStage` usages in the codebase, and no render
+path keys on ownership or `isMainPerformer` for layout. What they saw was
+`VersusSplit` in SOLO mode, which returns a single full-bleed panel, with
+the feeds strip overlaying the other artist as a thumbnail. Exactly the
+reported picture, produced by the current code.
+
+So `performanceMode` was not `'versus'` on those two clients.
+
+### Why one value arriving by two routes was the real defect
+
+`performanceMode` reaches the client two ways: `join-show`'s response for
+a performer, the show row for a viewer. Both are supposed to say the same
+thing. If either drops it, the show renders correctly for some people and
+wrong for others — a failure that looks like a layout bug and is
+actually a data-delivery bug, and which no amount of layout work fixes.
+
+### The room gets a vote, and it latches
+
+Two performer slots publishing IS a Versus, whatever the value says. This
+CORRECTS A WRONG VALUE, not merely a missing one.
+
+Two properties stop it flapping, and both are needed:
+
+  1. **The declared value is trusted first.** A Versus where only A has
+     joined is still a Versus and renders as a split with an empty half
+     from the first frame. The room's evidence is consulted only when the
+     declared value does not already say versus — so the ordinary start
+     of every Versus never reaches this code and cannot glitch.
+  2. **It latches upward only.** Once two slots have been seen, the
+     session is a Versus for good. B dropping out mid-show does not
+     collapse the layout to solo and re-expand on reconnect, which would
+     be a visible jump every time somebody's signal wobbled.
+
+The one visible correction is a show whose declared value is genuinely
+wrong: solo until B publishes, then split. That is a one-time repair of a
+broken state rather than a flap, and `performance_mode_corrected` records
+it so the source can be fixed rather than the symptom absorbed.
+
+### The instrument, including the control
+
+`performance_mode_resolved` on ALL THREE surfaces — value, the PATH that
+set it (`join_show` | `viewer_token`), both inputs separately
+(`fromResponse`, `fromShowRow`), role, and whether the show row was
+loaded. The owner path is the control: a capture where the working case
+is absent proves nothing about the broken ones.
+
+**Both call sites run initHealthLog first.** They fire during JOIN, before
+RoomInner mounts and before its own initHealthLog, and logHealthEvent
+drops anything logged with no showId. Round 2 lost an entire instrumented
+session to exactly that — "the instruments could not write" — and this
+would have repeated it silently.
+
+## Observations logged, not for action
+
+**Guest capability depends on the guest's browser.** The invited artist
+on Safari had no b-roll: `captureStream()` is unimplemented there, so the
+feature correctly disables itself and says so. The detection is honest,
+but NOTHING IN THE INVITE FLOW WARNS EITHER ARTIST IN ADVANCE — a host
+can invite someone into a show where they will silently have fewer
+capabilities, and neither finds out until they are live. Product gap.
+
+**A Versus where the GUEST is on a phone has never been tested.** Every
+phone test so far has been a solo host. The guest path on a handset —
+portrait split, mic mute, camera, the accept flow on a small screen — is
+entirely unexercised.

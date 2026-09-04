@@ -26,6 +26,22 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react';
 // removes the z-index collision with .stage-mic-cam that was silently
 // swallowing every tap on a tile (the actual root cause, confirmed via
 // elementsFromPoint before this fix, not guessed).
+// ── ⚠️ NO LONGER ROUTED TO (round 3, Versus) ─────────────────
+// Versus now renders as a SPLIT — both performers on screen at once, at
+// whatever ratio each participant has dragged their own divider to
+// (components/VersusSplit.jsx). This file is not rendered by
+// BroadcastStage, ViewerStage or EgressPage any more.
+//
+// Why the layout changed: the spotlight sized one performer larger than
+// the other, and in a battle that reads as a verdict — most damagingly
+// in the RECORDING, which outlives the show and gets watched by people
+// who were not there. Who is currently performing is now shown by a teal
+// border driven by mic state, which cannot fight a viewer's own split
+// setting the way size did.
+//
+// Kept rather than deleted, deliberately and in a separate change from
+// the routing switch: the spotlight is still the right shape if this
+// ever grows past two performers, where a split stops working.
 export default function SpotlightStage({ activeSlot, slots, renderSlot, onSwitch, switching, collapsed, onToggleCollapse, reconnectingPlaceholder, showEnded }) {
   const activePresent = slots.includes(activeSlot);
   const others = slots.filter((s) => s !== activeSlot);

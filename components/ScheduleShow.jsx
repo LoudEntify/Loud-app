@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getSupabase } from '../lib/supabaseClient';
 import { getSession, getProfile } from '../lib/supabaseAuth';
 import EmptyState from './EmptyState';
+import ArtistPicker from './ArtistPicker';
 import {
   DEFAULT_DURATION_MINUTES,
   DURATION_OPTIONS_MINUTES,
@@ -55,11 +56,16 @@ export default function ScheduleShow() {
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  const [opponent, setOpponent] = useState(null);
   const [form, setForm] = useState({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
   // Versus invites, keyed by show id. Minted on demand rather than at
   // schedule time -- an artist may schedule a versus show days before
   // they know who they are facing.
   const [invites, setInvites] = useState({});
+  // Who has been invited to which show, and whether the notification
+  // reached them. Separate from `invites` (the link fallback) because
+  // they are different states with different next actions.
+  const [invited, setInvited] = useState({});
   const [inviteBusy, setInviteBusy] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
 
@@ -119,7 +125,7 @@ export default function ScheduleShow() {
       // live path. One room per show, derived from the id so it is
       // unique and readable in LiveKit's dashboard.
       const roomName = `show-${Math.random().toString(36).slice(2, 10)}`;
-      const { error: err } = await getSupabase().from('shows').insert({
+      const { data: created, error: err } = await getSupabase().from('shows').insert({
         artist_id: session.user.id,
         room_name: roomName,
         slated_at: slated.toISOString(),
@@ -133,7 +139,7 @@ export default function ScheduleShow() {
         // Legacy column, populated rather than left null -- see the
         // artistName note above.
         artist_name: artistName || 'Artist',
-      });
+      }).select('id').single();
       if (err) {
         // Show the real database message. A generic string here is what
         // turned a one-line constraint failure into a test sitting.
@@ -144,6 +150,22 @@ export default function ScheduleShow() {
         );
         return;
       }
+      // ── THE INVITE IS PART OF SCHEDULING ──────────────────────
+      // When an opponent was chosen in the form, the show and the invite
+      // are ONE action from the artist's point of view. Minted after the
+      // insert rather than before, because the invite needs a show id
+      // and a show with an invite pointing at nothing is worse than a
+      // show with an empty slot.
+      //
+      // A failure here does NOT fail the scheduling. The show exists and
+      // is correct; what failed is the invite, and the card's own picker
+      // is still there to retry it. Saying "could not schedule" about a
+      // show that was scheduled would send the artist looking for a
+      // problem that is not there.
+      if (created?.id && form.mode === 'versus' && opponent) {
+        await createInvite({ id: created.id }, opponent);
+      }
+      setOpponent(null);
       setForm({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
       await load(session.user.id);
     } finally {
@@ -151,17 +173,38 @@ export default function ScheduleShow() {
     }
   }
 
-  async function createInvite(show) {
-    setInviteBusy(show.id);
+  // One function for both paths, because they mint the SAME token — the
+  // only difference is whether the app can deliver it. Selecting an
+  // artist notifies them in Loudentify; inviting without one hands back
+  // a link for somebody who has no account to notify.
+  async function createInvite(show, artist = null) {
+    setInviteBusy(artist ? artist.id : show.id);
+    setError('');
     try {
       const res = await fetch('/api/performer/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ show_id: show.id }),
+        body: JSON.stringify({ show_id: show.id, ...(artist ? { invited_user_id: artist.id } : {}) }),
       });
       const body = await res.json();
       if (!res.ok) { setError(body.error || 'Could not create an invite.'); return; }
-      setInvites((prev) => ({ ...prev, [show.id]: `${window.location.origin}/join/${body.inviteToken}` }));
+
+      if (artist) {
+        setInvited((prev) => ({
+          ...prev,
+          [show.id]: {
+            name: body.invited?.displayName || body.invited?.username || artist.display_name || artist.username,
+            // Whether the NOTIFICATION landed, not whether the invite
+            // exists. The slot is written and the token is valid either
+            // way; if delivery failed the artist needs the link instead
+            // of being told it worked.
+            notified: !!body.notified,
+            link: `${window.location.origin}/join/${body.inviteToken}`,
+          },
+        }));
+      } else {
+        setInvites((prev) => ({ ...prev, [show.id]: `${window.location.origin}/join/${body.inviteToken}` }));
+      }
     } finally {
       setInviteBusy(null);
     }
@@ -307,6 +350,52 @@ export default function ScheduleShow() {
             </div>
           </div>
 
+          {/* ── THE OPPONENT IS CHOSEN HERE, NOT AFTERWARDS ──────
+              This lived on the scheduled show's card, because that is
+              where the control it replaced happened to live. The
+              requirement said "at the point of scheduling", and
+              inheriting the placement of the thing being replaced is how
+              a feature ends up correct and unreachable.
+
+              OPTIONAL, deliberately. You often have the date before you
+              have the opponent — that is how booking works — and forcing
+              a choice at creation would stop an artist holding a slot
+              while they ask around. Empty here leaves slot B pending and
+              the card's own picker is how it gets filled later. */}
+          {form.mode === 'versus' && (
+            <div>
+              <div style={labelStyle}>WHO ARE YOU UP AGAINST</div>
+              {opponent ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${TEAL}`, padding: '9px 11px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: INK }}>
+                    {opponent.display_name || opponent.username}
+                    {opponent.username && (
+                      <span style={{ fontWeight: 400, color: 'rgba(1,22,39,0.5)' }}> @{opponent.username}</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpponent(null)}
+                    style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >
+                    CHANGE
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <ArtistPicker
+                    accessToken={session.access_token}
+                    onSelect={(a) => setOpponent(a)}
+                  />
+                  <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 5, lineHeight: 1.5 }}>
+                    Optional — you can schedule now and invite someone later. They get a
+                    notification in Loudentify, not a link to copy.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {error && <div style={{ fontSize: 12, color: '#e71d36' }}>{error}</div>}
 
           <button
@@ -375,33 +464,104 @@ export default function ScheduleShow() {
                   </span>
                 </div>
 
-                  {/* Versus needs a second performer, and that is now an
-                      invite bound to an account rather than a code
-                      anyone holding the string could use. */}
-                  {(s.performance_mode === 'versus') && !open && !expired && (
+                  {/* ── VERSUS NEEDS A SECOND PERFORMER ─────────────
+                      Selection first, link second. The link took the
+                      invitation off the platform and left no record of
+                      who invited whom; it survives only for artists who
+                      have no account to notify. */}
+                  {/* ── !open REMOVED, DELIBERATELY ────────────────
+                      The gate used to be `!open && !expired`, inherited
+                      from Product Ruling 1's sweep rather than chosen: it
+                      hid the invite control the moment the broadcast
+                      window opened.
+
+                      That is backwards. A Versus whose window has opened
+                      with an empty slot B is a DEAD SHOW, and it is
+                      precisely when the artist most needs to fill it —
+                      stood there with nobody in the other half and no way
+                      to ask anyone.
+
+                      Nothing downstream refuses a late claim:
+                      /api/performer/claim-slot has no window check at
+                      all. join-show DOES enforce the window, and that is
+                      correct and separate — it gates GOING LIVE, so a
+                      late-invited artist accepts and then joins inside
+                      the window like anybody else.
+
+                      !expired stays. An invite to a show whose window
+                      closed unused is genuinely dead, and offering one is
+                      the "diary that says now" problem Ruling 1 fixed. */}
+                  {(s.performance_mode === 'versus') && !expired && (
                     <div style={{ marginTop: 8 }}>
-                      {invites[s.id] ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'rgba(1,22,39,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {invites[s.id]}
-                          </span>
+                      {invited[s.id] ? (
+                        <div style={{ border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>
+                            Invited {invited[s.id].name}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 3, lineHeight: 1.5 }}>
+                            {invited[s.id].notified
+                              ? 'They have been notified in Loudentify. Slot B stays open until they accept.'
+                              : 'The invite exists but we could not notify them — send this link instead.'}
+                          </div>
+                          {/* Shown only when delivery FAILED. Offering a
+                              link beside a successful notification would
+                              teach the artist to send both, which is the
+                              off-platform habit this change exists to
+                              remove. */}
+                          {!invited[s.id].notified && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'rgba(1,22,39,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {invited[s.id].link}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => { navigator.clipboard?.writeText(invited[s.id].link); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }}
+                                style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer' }}
+                              >
+                                {copiedId === s.id ? 'COPIED' : 'COPY'}
+                              </button>
+                            </div>
+                          )}
                           <button
                             type="button"
-                            onClick={() => { navigator.clipboard?.writeText(invites[s.id]); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }}
-                            style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer' }}
+                            onClick={() => setInvited((prev) => { const n = { ...prev }; delete n[s.id]; return n; })}
+                            style={{ marginTop: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.5)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                           >
-                            {copiedId === s.id ? 'COPIED' : 'COPY'}
+                            INVITE SOMEONE ELSE
                           </button>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => createInvite(s)}
-                          disabled={inviteBusy === s.id}
-                          style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'transparent', border: `1px solid ${TEAL}`, padding: '7px 11px', cursor: 'pointer' }}
-                        >
-                          {inviteBusy === s.id ? 'CREATING…' : 'INVITE OPPONENT'}
-                        </button>
+                        <>
+                          <ArtistPicker
+                            accessToken={session.access_token}
+                            busy={inviteBusy}
+                            onSelect={(artist) => createInvite(s, artist)}
+                          />
+
+                          {invites[s.id] ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, border: '1px solid rgba(1,22,39,0.18)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'rgba(1,22,39,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {invites[s.id]}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => { navigator.clipboard?.writeText(invites[s.id]); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }}
+                                style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer' }}
+                              >
+                                {copiedId === s.id ? 'COPIED' : 'COPY'}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => createInvite(s)}
+                              disabled={inviteBusy === s.id}
+                              style={{ marginTop: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: 'rgba(1,22,39,0.55)', background: 'transparent', border: '1px solid rgba(1,22,39,0.2)', padding: '6px 10px', cursor: 'pointer' }}
+                            >
+                              {inviteBusy === s.id ? 'CREATING…' : 'INVITE SOMEONE NOT ON LOUDENTIFY'}
+                            </button>
+                          )}
+                        </>
                       )}
                       <div style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.4)', marginTop: 5 }}>
                         Single use. Whoever accepts it while logged in takes slot B, and it stops working.
