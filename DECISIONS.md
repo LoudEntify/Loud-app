@@ -1914,3 +1914,78 @@ visible for that viewing and the badge clears for next time.
 Messages deliberately gets no badge. `MessageThread` is an honest empty
 state with no threads table and no delivery — a badge over it could only
 ever show zero.
+
+## Piece 3, fourth pass — the layout depended on one value arriving twice
+
+### What the device test found
+
+The split rendered for the SHOW OWNER ONLY. The guest (Safari) and a
+viewer (Android Chrome) both saw themselves full-bleed with the other
+artist as a thumbnail.
+
+**It was not SpotlightStage.** That component is no longer rendered
+anywhere — zero `<SpotlightStage` usages in the codebase, and no render
+path keys on ownership or `isMainPerformer` for layout. What they saw was
+`VersusSplit` in SOLO mode, which returns a single full-bleed panel, with
+the feeds strip overlaying the other artist as a thumbnail. Exactly the
+reported picture, produced by the current code.
+
+So `performanceMode` was not `'versus'` on those two clients.
+
+### Why one value arriving by two routes was the real defect
+
+`performanceMode` reaches the client two ways: `join-show`'s response for
+a performer, the show row for a viewer. Both are supposed to say the same
+thing. If either drops it, the show renders correctly for some people and
+wrong for others — a failure that looks like a layout bug and is
+actually a data-delivery bug, and which no amount of layout work fixes.
+
+### The room gets a vote, and it latches
+
+Two performer slots publishing IS a Versus, whatever the value says. This
+CORRECTS A WRONG VALUE, not merely a missing one.
+
+Two properties stop it flapping, and both are needed:
+
+  1. **The declared value is trusted first.** A Versus where only A has
+     joined is still a Versus and renders as a split with an empty half
+     from the first frame. The room's evidence is consulted only when the
+     declared value does not already say versus — so the ordinary start
+     of every Versus never reaches this code and cannot glitch.
+  2. **It latches upward only.** Once two slots have been seen, the
+     session is a Versus for good. B dropping out mid-show does not
+     collapse the layout to solo and re-expand on reconnect, which would
+     be a visible jump every time somebody's signal wobbled.
+
+The one visible correction is a show whose declared value is genuinely
+wrong: solo until B publishes, then split. That is a one-time repair of a
+broken state rather than a flap, and `performance_mode_corrected` records
+it so the source can be fixed rather than the symptom absorbed.
+
+### The instrument, including the control
+
+`performance_mode_resolved` on ALL THREE surfaces — value, the PATH that
+set it (`join_show` | `viewer_token`), both inputs separately
+(`fromResponse`, `fromShowRow`), role, and whether the show row was
+loaded. The owner path is the control: a capture where the working case
+is absent proves nothing about the broken ones.
+
+**Both call sites run initHealthLog first.** They fire during JOIN, before
+RoomInner mounts and before its own initHealthLog, and logHealthEvent
+drops anything logged with no showId. Round 2 lost an entire instrumented
+session to exactly that — "the instruments could not write" — and this
+would have repeated it silently.
+
+## Observations logged, not for action
+
+**Guest capability depends on the guest's browser.** The invited artist
+on Safari had no b-roll: `captureStream()` is unimplemented there, so the
+feature correctly disables itself and says so. The detection is honest,
+but NOTHING IN THE INVITE FLOW WARNS EITHER ARTIST IN ADVANCE — a host
+can invite someone into a show where they will silently have fewer
+capabilities, and neither finds out until they are live. Product gap.
+
+**A Versus where the GUEST is on a phone has never been tested.** Every
+phone test so far has been a solo host. The guest path on a handset —
+portrait split, mic mute, camera, the accept flow on a small screen — is
+entirely unexercised.

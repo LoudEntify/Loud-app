@@ -1045,7 +1045,36 @@ export default function LiveDemo() {
         if (res.ok) {
           setRole(data.slot); // 'a' | 'b' -- isMainPerformer, BroadcastStage and renderSlot all key off this unchanged
           setSessionToken(data.sessionToken);
-          setPerformanceMode(data.performanceMode || show.performance_mode || 'solo');
+          // ── THE CONTROL AND THE SUSPECTS, ON ONE EVENT ────────
+          // Emitted on every surface, not only the two that failed: a
+          // capture where the owner's row is missing tells you as much
+          // as one where the guest's is wrong, and without the working
+          // case there is nothing to compare against.
+          //
+          // `path` is the whole point. performanceMode arrives by two
+          // different routes and the device test could not tell which
+          // one dropped it.
+          {
+            const resolved = data.performanceMode || show.performance_mode || 'solo';
+            // ⚠️ initHealthLog FIRST. This fires during JOIN, before
+            // RoomInner mounts and before its own initHealthLog runs —
+            // and logHealthEvent drops anything logged with no showId.
+            // Round 2 already lost a whole instrumented session to
+            // exactly that ("the instruments could not write"), so the
+            // context is established here rather than assumed. It is
+            // idempotent: RoomInner's own call updates it and never
+            // resets the queue.
+            initHealthLog({ showId: show.room_name });
+            logHealthEvent('performance_mode_resolved', {
+              value: resolved,
+              path: 'join_show',
+              fromResponse: data.performanceMode ?? null,
+              fromShowRow: show?.performance_mode ?? null,
+              role: data.slot ?? null,
+              showLoaded: !!show,
+            });
+            setPerformanceMode(resolved);
+          }
           setConn({
             token: data.livekitToken,
             url: data.url,
@@ -1117,7 +1146,22 @@ export default function LiveDemo() {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Token request failed');
-      setPerformanceMode(show.performance_mode || 'solo');
+      {
+        const resolved = show.performance_mode || 'solo';
+        // Same reason as the performer path above: this runs before
+        // RoomInner exists, so the logger has nowhere to file an event
+        // until a context is set.
+        initHealthLog({ showId: show.room_name });
+        logHealthEvent('performance_mode_resolved', {
+          value: resolved,
+          path: 'viewer_token',
+          fromResponse: null,
+          fromShowRow: show?.performance_mode ?? null,
+          role: data.assignedRole ?? 'viewer',
+          showLoaded: !!show,
+        });
+        setPerformanceMode(resolved);
+      }
       setConn({
         token: data.token,
         url: data.url,
@@ -3276,6 +3320,61 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     return Array.from(set).sort();
   }, [tracks]);
 
+  // ── WHAT THE ROOM SAYS IT IS ──────────────────────────────────
+  // The layout used to depend entirely on `performanceMode`, a single
+  // value arriving by TWO different routes — join-show's response for a
+  // performer, the show row for a viewer. If either drops it, the show
+  // renders wrong for that person and correctly for everybody else,
+  // which is exactly what a device test found: the owner saw a split and
+  // the guest and the viewer both fell through to the solo branch,
+  // rendering themselves full-bleed.
+  //
+  // So the room gets a vote. Two performer slots publishing IS a Versus,
+  // whatever the value says — this corrects a WRONG value, not just a
+  // missing one.
+  //
+  // ── HOW IT CANNOT FLAP ────────────────────────────────────────
+  // Two properties, and both are needed.
+  //
+  //   1. THE DECLARED VALUE IS TRUSTED FIRST. A Versus where only A has
+  //      joined yet is still a Versus, and it renders as a split with an
+  //      empty half from the first frame. The room's evidence is only
+  //      consulted when the declared value does NOT already say versus,
+  //      so the ordinary start of every Versus show never goes near this
+  //      code and cannot glitch.
+  //
+  //   2. IT LATCHES, and only ever upward. Once two slots have been seen
+  //      publishing, this session is a Versus for good. B dropping out
+  //      mid-show does not collapse the layout back to solo and then
+  //      expand again when they reconnect — which would be a visible
+  //      jump every time somebody's signal wobbled.
+  //
+  // The one correction that IS visible is a show whose declared value is
+  // wrong: it renders solo until B publishes, then becomes a split. That
+  // is a one-time repair of a broken state rather than a flap, and the
+  // telemetry below says it happened so it can be fixed at the source.
+  const versusLatchRef = useRef(false);
+  const [roomSaysVersus, setRoomSaysVersus] = useState(false);
+  useEffect(() => {
+    if (versusLatchRef.current) return;
+    if (presentSlots.includes('a') && presentSlots.includes('b')) {
+      versusLatchRef.current = true;
+      setRoomSaysVersus(true);
+      if (performanceMode !== 'versus') {
+        logHealthEvent('performance_mode_corrected', {
+          declared: performanceMode ?? null,
+          corrected: 'versus',
+          role,
+          presentSlots,
+        });
+      }
+    }
+  }, [presentSlots, performanceMode, role]);
+
+  const effectivePerformanceMode = performanceMode === 'versus' || roomSaysVersus
+    ? 'versus'
+    : (performanceMode || 'solo');
+
   // Which camera roles ('main' | camRole values like 'wide'/'close'/'side')
   // are actually publishing -- AND unmuted -- for a slot right now --
   // drives which shots the director panel and auto-director can legally
@@ -4496,7 +4595,7 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     blurFillCandidates[0];
 
   const stageProps = {
-    performanceMode,
+    performanceMode: effectivePerformanceMode,
     renderSlot,
     activePerformerSlot,
     presentSlots,
