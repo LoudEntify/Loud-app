@@ -1904,3 +1904,41 @@ One thing the mute was doing by accident had to be done on purpose:
 idle b-roll track from being offered as a source. It is now excluded
 explicitly, from the fact that actually decides it — whether a clip is on
 air.
+
+### Addendum — there was never a clean case
+
+The reconnect rows confirm the diagnosis outright rather than by
+inference. Three events, each matching a `broll_source_ended` to the
+second:
+
+    10:51:43.096  reconnecting          -> broll_source_ended 10:51:43.829
+    10:53:02-09   reconnecting (7s)     -> broll_source_ended 10:53:06, :07
+    10:55:30.915  DISCONNECTED, reason 1 -> broll_source_ended 10:55:30, :31
+
+The third is a full room disconnect, not a signal blip, and it is
+exactly where the silent `no_frames` failures give way to the loud
+`replaceTrack` TypeErrors — which is the two-phase mechanism this file
+predicted from the SDK source: sender detached but publication intact
+(silent), then publication replaced (loud).
+
+**The fact that inference did not produce:** there is an earlier
+connect/reconnect cycle at 10:49:41-42, roughly 33 seconds BEFORE the
+first clip attempt at 10:50:15. **Not one attempt in that session ran
+against a live publication.** There was never a clean case in the whole
+capture.
+
+That cuts two ways and both are worth writing down:
+
+  * The reconnect fix is, as of now, untested against a session that
+    does not reconnect. Its correctness in the clean case rests on
+    reading, not on a run.
+  * The PREVIOUS round, where the swap appeared to work, is no longer
+    evidence that the swap works. It is evidence that the swap works
+    when nothing interrupts it. Whether that session (show-xpl6ky7m)
+    reconnected is checkable and unchecked — the export route is
+    owner-only and the diagnostic account does not own that show.
+
+**Separately, and not chased here:** four reconnects including a full
+disconnect inside a six-minute window is not a normal connection. It
+affects every publication, not just b-roll, and it belongs on the
+round-3 list as its own item rather than as background to this one.
