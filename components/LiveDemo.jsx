@@ -3854,8 +3854,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       logHealthEvent('broll_stopped', { reason });
       await publisher.stop();
     }
-    autoRef.current?.resumeFor?.('broll');
-    logHealthEvent('auto_hold_released', { owner: 'broll', holders: autoRef.current?.holders ?? null });
+    // `changed` is the point. This row used to be logged unconditionally
+    // after calling resumeFor, so it recorded the INTENT to release
+    // rather than a release — a row that appears identically whether the
+    // hold existed or not, and therefore proves nothing about whether
+    // auto was ever held. The first device capture contained exactly
+    // that ambiguity and it could not be resolved from the rows.
+    const released = autoRef.current?.resumeFor?.('broll');
+    logHealthEvent('auto_hold_released', {
+      owner: 'broll',
+      changed: released?.changed ?? null,
+      holders: released?.holders ?? null,
+    });
   }, []);
 
   // THE RETURN CUT. Fired when the clip ends, BEFORE the track is
@@ -3920,8 +3930,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       // fired a few seconds later, the shot left the clip, and the
       // off-air effect took it down 500ms after that. Named by owner, so
       // releasing this hold cannot release cue mode's.
-      autoRef.current?.suspendFor?.('broll');
-      logHealthEvent('auto_hold_taken', { owner: 'broll', holders: autoRef.current?.holders ?? null });
+      const held = autoRef.current?.suspendFor?.('broll');
+      logHealthEvent('auto_hold_taken', {
+        owner: 'broll',
+        changed: held?.changed ?? null,
+        holders: held?.holders ?? null,
+      });
 
       // The camera keeps sending throughout. See the invariant above.
       // play() does not return until the b-roll sender has produced
