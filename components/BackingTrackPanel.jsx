@@ -65,6 +65,35 @@ function Waveform({ peaks, color }) {
 // (nothing uploaded, nothing stored), decodes it, and mixes it into the
 // same output bus the vocal chain feeds. Requires headphones -- see the
 // note in lib/audioProcessing.js for why.
+// ── CPU ATTRIBUTION A/B — OPT IN PER SESSION, VIA THE URL ─────
+// Enabled by loading the show with `?cpuab=1`, NOT by a constant.
+//
+// A deploy-time flag was the obvious shape and it is the wrong one
+// here. It needs a deploy to turn on, another to turn off, and in
+// between every artist on the build gets a freezing playhead — including
+// on a real show nobody meant to instrument. A URL parameter is opt-in
+// per session, per device, by the one person who wants the capture, and
+// it cannot be left switched on for anybody else.
+//
+// The trade-off, stated: a query parameter is not authenticated. Anyone
+// could add it. What they would get is a stuttering waveform on their
+// own screen and some extra telemetry rows — no state change, nothing
+// published, nothing another participant can see. That is an acceptable
+// blast radius for a diagnostic; it would not be for anything else.
+function deckLoopAbEnabled() {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).get('cpuab') === '1';
+  } catch {
+    return false;
+  }
+}
+
+// 60s phases. Long enough that the encoder's cpu accounting has several
+// 2-second pub_stats samples per phase to accumulate in, short enough
+// that a five-minute segment yields four or five paired periods.
+export const DECK_LOOP_AB_PHASE_MS = 60_000;
+
 export default function BackingTrackPanel({
   audioContext,
   outputBus,
@@ -129,6 +158,11 @@ export default function BackingTrackPanel({
   const loadSourceRef = useRef(null);
   const deckLoggedForRef = useRef(null);
   const rafRef = useRef(null);
+  // Holds the running tick so the A/B below can restart the loop after a
+  // suspension without rebuilding the effect (which would reset the
+  // stats window and the waveform's own baseline).
+  const tickRef = useRef(null);
+  const loopSuspendedRef = useRef(false);
   const playheadRef = useRef(null); // DOM ref -- width updated directly, not via React state, so 200 bars don't re-render every frame
   const elapsedLabelRef = useRef(null);
 
@@ -250,10 +284,21 @@ export default function BackingTrackPanel({
       }
 
       if (performance.now() - stats.since >= REPORT_EVERY_MS) report('interval');
+
+      // ── THE SUSPENSION IS A FULL STOP, NOT A SKIPPED WRITE ────
+      // Returning without rescheduling ends the rAF chain entirely.
+      // That is the point: the suspect is the WHOLE loop — the callback
+      // at 60fps, the getElapsed read, and the two DOM writes — so a
+      // version that kept requesting frames and merely skipped the
+      // writes would leave most of the cost under test still running
+      // and produce a null that means nothing.
+      if (loopSuspendedRef.current) { rafRef.current = null; return; }
       rafRef.current = requestAnimationFrame(tick);
     }
+    tickRef.current = tick;
     tick();
     return () => {
+      tickRef.current = null;
       cancelAnimationFrame(rafRef.current);
       // Flush on the way out so a short segment still reports rather
       // than silently discarding everything under 30 seconds.
@@ -275,6 +320,65 @@ export default function BackingTrackPanel({
       setPlaying(false);
     }
   }, [showEnded]);
+
+  // ── THE A/B THAT ACTUALLY SEPARATES THE TWO SUSPECTS ──────────
+  //
+  // The CPU investigation has two survivors and one problem: EVERY
+  // loaded segment contains BOTH of them. A loaded deck has a resident
+  // ~106MB AudioBuffer AND a running waveform loop, and local vs
+  // uploaded vs rehydrate differ only in how the bytes arrived, not in
+  // what is present afterwards. So anything that rises with time rises
+  // with both, and no comparison ACROSS segments can attribute.
+  //
+  // Nor is there a reachable state with one and not the other:
+  // collapsing the deck applies a CSS class, and SwipePages mounts every
+  // tab regardless of which is active, so the panel stays mounted and
+  // the loop keeps running.
+  //
+  // This is the missing condition. It alternates the loop off and on
+  // WITHIN one segment while the buffer stays resident and every other
+  // variable is held constant — same track, same graph, same camera,
+  // same encoder. If cpu follows the phases, it is the loop. If cpu is
+  // flat across them, the loop is not the cause and the buffer is the
+  // surviving candidate.
+  //
+  // ── WHY ALTERNATING RATHER THAN ONE SWITCH ────────────────────
+  // A single off-period could be confounded by anything else that drifts
+  // over a session — thermal state, another app, the encoder settling.
+  // Several paired periods make that far less likely: a coincidence has
+  // to repeat on cue, in phase, several times.
+  //
+  // ── WHAT THE ARTIST SEES ──────────────────────────────────────
+  // The waveform playhead freezes for the off phases. That is the whole
+  // visible effect, it is expected, and it is why this is OFF by default
+  // and switched on for one capture rather than shipped live.
+  useEffect(() => {
+    if (!deckLoopAbEnabled()) return undefined;
+    logHealthEvent('deck_loop_ab_started', { phaseMs: DECK_LOOP_AB_PHASE_MS });
+    const id = setInterval(() => {
+      const suspended = !loopSuspendedRef.current;
+      loopSuspendedRef.current = suspended;
+      // Logged BEFORE the restart so the row's timestamp is the moment
+      // the phase changed, not the moment a frame happened to fire.
+      logHealthEvent('deck_loop_suspended', { suspended, phaseMs: DECK_LOOP_AB_PHASE_MS });
+      if (!suspended) {
+        // Resuming: the chain ended when tick() returned without
+        // rescheduling, so it has to be kicked off again.
+        cancelAnimationFrame(rafRef.current);
+        tickRef.current?.();
+      }
+    }, DECK_LOOP_AB_PHASE_MS);
+    return () => {
+      clearInterval(id);
+      // Never leave the loop suspended behind this effect: a stopped
+      // playhead outliving the capture would look like a bug.
+      if (loopSuspendedRef.current) {
+        loopSuspendedRef.current = false;
+        cancelAnimationFrame(rafRef.current);
+        tickRef.current?.();
+      }
+    };
+  }, []);
 
   // ── ⚠️ THE UNMOUNT STOP IS GONE, AND ITS REMOVAL IS THE FIX ───
   //
