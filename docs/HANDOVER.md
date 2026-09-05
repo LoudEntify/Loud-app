@@ -12,6 +12,28 @@ and the two are distinguished throughout.
 
 ---
 
+> # ⚠️ THERE IS NO TEST DATABASE
+>
+> **Preview and production share one Supabase project.** The same
+> `NEXT_PUBLIC_SUPABASE_URL`, the same anon key, the same service-role
+> key, scoped to both environments. There is no staging copy of any
+> table.
+>
+> **Every migration you run is a production migration.**
+>
+> **Every test you run creates real rows.** A test show appears in
+> Discover's COMING UP where real people can see it. A test invite puts a
+> notification on somebody's real account. A test token purchase touches
+> the real ledger.
+>
+> This changes how you work from your first hour, and it is exactly the
+> kind of thing people discover by accident. Clean up after yourself, and
+> when you cannot, say so and hand over what needs removing — that has
+> already happened twice in this project and both times the rows were
+> left for the artist to clear.
+
+---
+
 # 1 · WHAT LOUDENTIFY IS
 
 ## The product
@@ -70,6 +92,76 @@ treated as a first-class problem rather than an optimisation.
   URLs. Nothing media-related.
 - **In Postgres:** everything durable. The rule the codebase follows is
   that **the client never holds important state as the only copy**.
+
+---
+
+# FIRST WEEK — WHERE TO START
+
+This document is long. Read it in this order rather than front to back.
+
+## Day one: read §5 before §2
+
+**§5 is the standing engineering rules and the mistakes behind them.**
+Read it first, even though it sits fifth. It explains *why the code looks
+the way it does* — why there are long comments naming specific failures,
+why the migration files carry a type check, why several places test
+whether a reference *works* rather than whether it exists.
+
+Read §2 (what is built) afterwards and it will make sense as a set of
+decisions rather than a pile of implementation. Read it in the other
+order and §5 reads as bureaucracy and §2 reads as over-engineering.
+
+Then read `DECISIONS.md` for whatever you are about to touch. It carries
+the long-form reasoning that the code comments compress.
+
+## Then: run the CPU attribution session (§4)
+
+**It is one show, and it unblocks the biggest open decision in the
+project.** The server-compute question in §6 cannot be answered
+sensibly until we know whether the observed stuttering is a
+device-capability limit or two specific inefficiencies in our own code.
+
+**Read the amendment in §4 first** — the session as originally designed
+cannot separate the two suspects, because every loaded segment contains
+both. It needs a small loop-suspend instrument built first. Do not run it
+before that or you will spend a device session confirming what is already
+known.
+
+`scripts/cpu-attribution.mjs` (branch `chore/cpu-attribution-tooling`)
+reads the capture and produces the attribution. It also tells you when a
+capture is a null and what a null does and does not mean.
+
+## Then: fix the three owner-column surfaces (§4)
+
+Small, well-understood, and one of them is a real user-facing defect:
+**a guest artist cannot access the recording of a show they performed
+in.** The fix shape already exists — `/api/performer/my-slots` resolves
+"shows I am in but did not create" behind the service role.
+
+Doing these third is deliberate: they are the cheapest way to get
+properly inside the Versus data model, and they are bounded enough that
+getting them wrong costs little.
+
+## Who to ask about what
+
+**Product decisions come to Korey.** Anything about what the app should
+do — whether a restored track resumes at the saved position or at the
+start, what happens when a Versus opponent never accepts, whether to move
+processing to a server — is a product call, not a technical one. Several
+of the open items in §4 are explicitly waiting on a ruling rather than on
+code.
+
+**`DECISIONS.md` is where settled questions live.** Before reopening
+something that looks wrong, search it. A surprising number of the odd
+-looking choices in this codebase are recorded there with the failure
+that produced them — the mute that was removed after causing three
+separate defects, the spotlight layout that was replaced because it
+editorialised in recordings, the b-roll discriminator that lives on the
+publication rather than the participant. Reopening a settled question is
+cheap; re-learning why it was settled is not.
+
+**If something here is wrong, correct it and say what changed.** This
+document and `DECISIONS.md` are both maintained records, not archives.
 
 ---
 
@@ -523,6 +615,46 @@ no symptom cannot name a cause. Check segment length, whether
 `activeFrames` was non-zero (did the waveform actually run), and median
 fps (was the encoder under any load at all) before concluding anything.
 
+## Three owner-column surfaces, unfixed — one is user-facing
+
+The general failure is described in §5; these are the specific unfixed
+instances, and they are outstanding work rather than illustrations.
+
+Every "my shows" query in the app was written as `shows.artist_id = me`
+— the OWNER column — which was correct while a show had one artist.
+Versus made it false. Three surfaces have been fixed (the profile, the
+diary, Kit Check); **these three have not.**
+
+**1 · `/api/recordings/sync` — a guest cannot access their own
+recording.** The query is `.eq('artist_id', auth.user.id)`, so
+recordings are listed only for shows the caller OWNS. An artist who
+performed in a Versus **cannot see or retrieve the recording of their own
+performance.** This is a user-facing defect, not a nicety: the recording
+is the artefact an artist would clip, post and be paid against.
+
+**2 · `/api/account/export` — the GDPR export is incomplete.** The
+"request my data" flow selects `shows` by `artist_id`, so **a guest
+artist's data export omits every Versus they performed in.** Their
+performance history is absent from their own subject-access response.
+Compliance-adjacent, and worth treating as more urgent than its size
+suggests.
+
+**3 · `/api/health-events/export` — a guest cannot pull telemetry for
+their own show.** The route refuses when `show.artist_id !==
+auth.user.id`. Lower user impact, but it is what blocked an
+investigation into `show-xpl6ky7m` during round 3, and it will block a
+guest-side diagnosis the first time one is needed.
+
+**The fix shape already exists.** `/api/performer/my-slots` resolves
+"shows I am in but did not create" behind the service role — necessary
+because `show_slots` is deliberately zero-policy and must stay that way:
+opening it to clients would expose every invite token in the table, and
+the token is the credential.
+
+**Whether a guest should be able to DELETE a recording, or only view it,
+is an open product question.** Ownership of the artefact in a two-artist
+show has not been decided.
+
 ## Connection instability — nobody has investigated this
 
 **Four reconnects, including one full `room_disconnected`, inside a
@@ -709,23 +841,16 @@ symptoms: an accepted show invisible on the guest's profile; a guest with
 no way back into the live room; a guest with no countdown in Kit Check.
 **Three fixes, one wrong idea.**
 
-**A fourth surface was requested and I searched. I found three more, all
-still unfixed:**
+**A fourth surface was requested. Searching found three more, all still
+unfixed — `/api/recordings/sync`, `/api/account/export` and
+`/api/health-events/export`. They are listed as outstanding work in §4
+with their user impact, rather than only here as evidence.**
 
-1. **`/api/recordings/sync`** — `.eq('artist_id', auth.user.id)`. **A
-   guest performer cannot see or access the recording of a show they
-   performed in.** The most user-visible of the three.
-2. **`/api/health-events/export`** — refuses when `show.artist_id !==
-   auth.user.id`. A guest cannot pull telemetry for their own show. (This
-   is what blocked an investigation into `show-xpl6ky7m`.)
-3. **`/api/account/export`** — the GDPR "request my data" export selects
-   `shows` by `artist_id`, so **a guest artist's data export omits every
-   Versus they performed in.** Compliance-adjacent, not just cosmetic.
-
-The general fix shape already exists: `/api/performer/my-slots` resolves
-"shows I am in but did not create" behind the service role, because
-`show_slots` is zero-policy and must stay that way — opening it would
-expose every invite token in the table.
+The lesson generalises beyond those three: when a model changes from
+"one owner" to "several participants", the wrong question does not appear
+in one place. It appears everywhere the old model was assumed, and each
+site produces a different symptom, so it is found several times over
+rather than once. **Grep for the assumption, not for the symptom.**
 
 ### Instruments that cannot write
 
@@ -858,10 +983,23 @@ and only one of them is solved by servers.
 
 ## ⚠️ Production and preview share ONE Supabase database
 
-There is no staging copy. **Every migration is a production migration**,
-and **every test creates real rows.** A scheduled test show appears in
-Discover's COMING UP; a test invite puts a notification on a real
-account. Clean up after yourself, and say so when you cannot.
+**See the warning at the top of this document.** Repeated here because it
+is the single fact most likely to catch someone out: there is no staging
+copy, every migration is a production migration, and every test creates
+real rows.
+
+The practical habits that follow from it:
+
+- Give test data an obvious name (`ZZ probe (delete me)`) so it is
+  identifiable if you cannot remove it immediately.
+- Remember that a row can be visible to somebody else — a test show
+  surfaces in Discover, a test invite lands on a real account's
+  notifications.
+- A notification is NOT removed by deleting the show it points at:
+  `notifications` has no foreign key to `shows`, so it lingers with a
+  dead link. Clean up both.
+- When you cannot clean up — the credentials are not always reachable
+  from a dev environment — say what you left behind and where.
 
 ## Pulling a capture
 
@@ -890,6 +1028,20 @@ Then: `node scripts/cpu-attribution.mjs capture.csv`.
 | `interruption_state_changed`, `suspended_return` | The capability classifier. |
 | `performance_mode_resolved` | Which path delivered `performanceMode` and what it carried — the fix for a Versus rendering solo for some participants. |
 | `audiocontext_statechange`, `mic_level_sample` | Audio graph health. `mic_silent` fires after sustained digital silence. |
+
+## Who decides what
+
+**Product decisions come to Korey** — anything about what the app should
+do rather than how it does it. Several items in §4 are explicitly waiting
+on a ruling rather than on code: whether a restored track resumes at the
+saved position or at the start, what happens when a Versus opponent never
+accepts, whether a guest can delete a shared recording, and the
+server-compute question in §6.
+
+**`DECISIONS.md` is where settled questions live.** Search it before
+reopening something that looks wrong — a surprising number of the
+odd-looking choices here are recorded with the failure that produced
+them.
 
 ## The PRD
 
