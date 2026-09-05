@@ -80,12 +80,44 @@ function Waveform({ peaks, color }) {
 // own screen and some extra telemetry rows — no state change, nothing
 // published, nothing another participant can see. That is an acceptable
 // blast radius for a diagnostic; it would not be for anything else.
-function deckLoopAbEnabled() {
+// ── ⚠️ WHY THIS IS NOT A URL PARAMETER ────────────────────────
+// It was, and it could not be turned on.
+//
+// The show is reached at /live?show=<uuid>. Adding &cpuab=1 means
+// EDITING THE ADDRESS BAR AND RELOADING — on a phone, mid-show. That is
+// a bad instruction for three separate reasons and the first one is
+// fatal on its own:
+//
+//   1. Editing a URL in a mobile address bar is error-prone in a way it
+//      is not on a desktop. An ampersand typed into a field that thinks
+//      you might be searching can arrive percent-encoded, which folds
+//      the whole tail into the show id and produces an invalid uuid.
+//   2. It forces a reload mid-show — tearing down the room, the audio
+//      graph and the decoded buffer, in the middle of the measurement.
+//   3. The capture then starts AFTER the reload, so the baseline
+//      (before any track is loaded) is lost.
+//
+// A control the artist taps has none of those problems. It is armed
+// before going live, it survives the Kit Check -> /live navigation
+// because that is a client-side route change and this is persisted, and
+// it never requires the address bar.
+const DECK_LOOP_AB_KEY = 'loudentify.cpuab';
+
+function readDeckLoopAb() {
   if (typeof window === 'undefined') return false;
   try {
-    return new URLSearchParams(window.location.search).get('cpuab') === '1';
+    return window.localStorage.getItem(DECK_LOOP_AB_KEY) === '1';
   } catch {
     return false;
+  }
+}
+
+function writeDeckLoopAb(on) {
+  try {
+    if (on) window.localStorage.setItem(DECK_LOOP_AB_KEY, '1');
+    else window.localStorage.removeItem(DECK_LOOP_AB_KEY);
+  } catch {
+    /* private browsing — the toggle still works for this page's lifetime */
   }
 }
 
@@ -163,6 +195,11 @@ export default function BackingTrackPanel({
   // stats window and the waveform's own baseline).
   const tickRef = useRef(null);
   const loopSuspendedRef = useRef(false);
+  // Read once on mount so the toggle's position survives the Kit Check
+  // -> /live navigation, and so a capture can be armed BEFORE going live
+  // rather than mid-show.
+  const [loopAb, setLoopAb] = useState(false);
+  useEffect(() => { setLoopAb(readDeckLoopAb()); }, []);
   const playheadRef = useRef(null); // DOM ref -- width updated directly, not via React state, so 200 bars don't re-render every frame
   const elapsedLabelRef = useRef(null);
 
@@ -353,7 +390,7 @@ export default function BackingTrackPanel({
   // visible effect, it is expected, and it is why this is OFF by default
   // and switched on for one capture rather than shipped live.
   useEffect(() => {
-    if (!deckLoopAbEnabled()) return undefined;
+    if (!loopAb) return undefined;
     logHealthEvent('deck_loop_ab_started', { phaseMs: DECK_LOOP_AB_PHASE_MS });
     const id = setInterval(() => {
       const suspended = !loopSuspendedRef.current;
@@ -378,7 +415,7 @@ export default function BackingTrackPanel({
         tickRef.current?.();
       }
     };
-  }, []);
+  }, [loopAb]);
 
   // ── ⚠️ THE UNMOUNT STOP IS GONE, AND ITS REMOVAL IS THE FIX ───
   //
@@ -625,6 +662,37 @@ export default function BackingTrackPanel({
             ? 'Backing track (from your device -- not uploaded)'
             : 'Backing track'}
       </span>
+
+      {/* ── CPU A/B TOGGLE — a diagnostic, deliberately visible ───
+          Armed here rather than by a URL because the alternative was
+          editing an address bar on a phone, mid-show, and reloading —
+          see the note on DECK_LOOP_AB_KEY.
+
+          Deliberately plain and unlabelled-looking rather than hidden
+          behind a gesture: a diagnostic somebody has to be TOLD how to
+          reach is one they cannot use in the moment they need it, and a
+          long-press or triple-tap is exactly the kind of thing that gets
+          triggered by accident on a phone mid-performance.
+
+          It shows what it does when it is on — the artist should never
+          be looking at a frozen playhead wondering whether the app has
+          broken. */}
+      <button
+        type="button"
+        onClick={() => { const next = !loopAb; writeDeckLoopAb(next); setLoopAb(next); }}
+        style={{
+          alignSelf: 'flex-start',
+          fontSize: 9,
+          letterSpacing: '0.08em',
+          padding: '3px 7px',
+          background: 'transparent',
+          border: `1px solid ${loopAb ? '#ff9f1c' : 'rgba(136,135,128,0.35)'}`,
+          color: loopAb ? '#ff9f1c' : '#888780',
+          cursor: 'pointer',
+        }}
+      >
+        {loopAb ? 'CPU A/B ON — WAVEFORM WILL PAUSE' : 'CPU A/B'}
+      </button>
 
       {!fileName ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
