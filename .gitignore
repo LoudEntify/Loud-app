@@ -46,10 +46,16 @@ smoke.env
 # interruption-ios-chrome.csv, committed as the evidence behind
 # docs/INTERRUPTION_FEASIBILITY.md §4.1 so the table in that document
 # can be re-derived rather than trusted.
-countdown*.csv
-freeze-run-*.csv
-task*.csv
-interruption-probe-*.csv
+# ⚠️ BROADENED. The first version listed capture names one by one
+# (countdown*, freeze-run-*, task*) and a capture called cpu-ab.csv
+# matched none of them, so `git add -A` committed it anyway — the exact
+# thing these rules were added to prevent, two commits earlier.
+#
+# Now: every CSV is ignored by default, and the ONE file that genuinely
+# belongs in the repo is re-included explicitly. A rule that has to
+# enumerate future filenames is not a rule.
+*.csv
+!interruption-ios-chrome.csv
 
 # ── macOS duplicate-file artefacts ────────────────────────────
 # "lib/useWakeLock 2.js" and friends: stale copies Finder leaves behind
