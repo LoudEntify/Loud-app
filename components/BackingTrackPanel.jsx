@@ -277,7 +277,11 @@ export default function BackingTrackPanel({
     const REPORT_EVERY_MS = 30_000;
     const stats = {
       idleFrames: 0, activeFrames: 0, changedWidth: 0, changedLabel: 0, playingFrames: 0,
-      lastWidth: null, lastLabel: null, since: performance.now(),
+      lastWidth: null, lastLabel: null,
+      // Separate from lastWidth/lastLabel, which count CHANGES for the
+      // report. These track what was actually written to the DOM.
+      lastWrittenWidth: null, lastWrittenLabel: null,
+      since: performance.now(),
     };
     rafStatsRef.current = stats;
 
@@ -312,10 +316,31 @@ export default function BackingTrackPanel({
         if (label !== stats.lastLabel) { stats.changedLabel += 1; stats.lastLabel = label; }
         if (player.isPlaying?.()) stats.playingFrames += 1;
 
-        // Unchanged. Written every frame, same as before — see the note
-        // above about measuring rather than fixing.
-        if (playheadRef.current) playheadRef.current.style.width = width;
-        if (elapsedLabelRef.current) elapsedLabelRef.current.textContent = label;
+        // ── WRITE ONLY WHAT CHANGED ───────────────────────────
+        // This used to write both every frame regardless. Measured on a
+        // moto g35: 8,624 writes across a session, 1 of which changed
+        // anything — because a PAUSED deck's playhead does not move, and
+        // the loop had no play-state gate.
+        //
+        // ⚠️ THIS IS NOT THE FREEZING FIX. The A/B that ran alongside
+        // this measurement exonerated the loop: cpu pressure appeared
+        // over five minutes AFTER the track loaded and was absent from
+        // every phase before that, running or suspended. This is
+        // hygiene — a loop that writes 8,623 times for nothing is worth
+        // removing on its own terms — and the freezing cause is still
+        // open. Do not read this commit as having solved it.
+        //
+        // The stats above still count every frame as `active`, so the
+        // instrument keeps measuring what the loop DOES rather than what
+        // it writes.
+        if (width !== stats.lastWrittenWidth && playheadRef.current) {
+          playheadRef.current.style.width = width;
+          stats.lastWrittenWidth = width;
+        }
+        if (label !== stats.lastWrittenLabel && elapsedLabelRef.current) {
+          elapsedLabelRef.current.textContent = label;
+          stats.lastWrittenLabel = label;
+        }
       } else {
         stats.idleFrames += 1;
       }

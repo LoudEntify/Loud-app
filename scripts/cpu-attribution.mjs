@@ -65,6 +65,13 @@ const rows = parseCsv(readFileSync(file, 'utf8'));
 const t = (r) => new Date(r.client_ts || r.created_at).getTime();
 const num = (v) => (v === '' || v == null ? null : Number(v));
 const extra = (r) => { try { return r.extra ? JSON.parse(r.extra) : {}; } catch { return {}; } };
+// ⚠️ THE EXPORT FLATTENS KNOWN FIELD NAMES INTO COLUMNS.
+// `source`, `reason`, `quality`, `sid`, `from`, `to` and the numeric
+// pub_stats fields become top-level CSV columns; everything else lands
+// in `extra`. Reading only `extra` reported a correctly-recorded source
+// as "unknown" and sent the last session looking for an instrument bug
+// that did not exist. Always check the column first.
+const field = (r, name) => (r[name] !== undefined && r[name] !== '' ? r[name] : extra(r)[name]);
 
 rows.sort((a, b) => t(a) - t(b));
 const first = rows.length ? t(rows[0]) : 0;
@@ -118,7 +125,7 @@ const anyCpu = samples.some((s) => s.cpuFlag || (s.cpuDelta ?? 0) > 0.05);
 // A segment starts at each backing_deck_loaded and runs to the next
 // load or the end. `source` distinguishes local / uploaded / rehydrate.
 const segs = loads.map((r, i) => ({
-  source: extra(r).source || 'unknown',
+  source: field(r, 'source') || 'unknown',
   durationSec: extra(r).durationSec ?? null,
   bufferMB: extra(r).approxBufferBytes ? (extra(r).approxBufferBytes / 1048576).toFixed(0) : null,
   from: t(r),
@@ -213,18 +220,64 @@ console.log(`  (b) cpu vs time-since-decode   r = ${rTime == null ? 'n/a' : rTim
 if (suspends.length) {
   console.log('\n── A/B: LOOP SUSPENDED WITH THE BUFFER STILL RESIDENT ────────');
   let on = 0, onCpu = 0, off = 0, offCpu = 0;
-  let state = 'on', mark = first;
+  // ⚠️ THE A/B STARTS AT THE FIRST LOAD, NOT AT THE CAPTURE START.
+  // Counting from `first` put the entire pre-load baseline — minutes of
+  // clean encoding with no deck and therefore no cpu — into the "loop
+  // running" bucket, which diluted its rate and made the suspended
+  // phases look ~3x worse than they were. The loop cannot be running
+  // over a track that is not loaded, and time before the load belongs to
+  // neither arm.
+  const abStart = loads.length ? t(loads[0]) : first;
+  let state = 'on', mark = abStart;
   const flip = (to, at) => {
     const cpu = within(samples, mark, at).reduce((n, s) => n + (s.cpuDelta || 0), 0);
     const dur = (at - mark) / 1000;
     if (state === 'on') { on += dur; onCpu += cpu; } else { off += dur; offCpu += cpu; }
     state = to; mark = at;
   };
-  for (const r of suspends) flip(extra(r).suspended ? 'off' : 'on', t(r));
+  for (const r of suspends) {
+    const at = t(r);
+    // A flip before the first load only sets the starting arm.
+    if (at < abStart) { state = field(r, 'suspended') === true || extra(r).suspended ? 'off' : 'on'; continue; }
+    flip(extra(r).suspended ? 'off' : 'on', at);
+  }
   flip(state, samples[samples.length - 1].at);
   const onRate = on ? onCpu / on : 0, offRate = off ? offCpu / off : 0;
   console.log(`  loop RUNNING   : ${on.toFixed(0)}s, ${onCpu.toFixed(2)}s cpu  (${(onRate * 100).toFixed(1)}% of wall)`);
   console.log(`  loop SUSPENDED : ${off.toFixed(0)}s, ${offCpu.toFixed(2)}s cpu  (${(offRate * 100).toFixed(1)}% of wall)`);
+  // ── PER-PHASE, IN ORDER — the check that makes or breaks the A/B ──
+  // A verdict from two totals hides everything about WHEN the pressure
+  // arrived. If it is absent from the first several phases and present
+  // only in the last, the phases are not comparable and the totals are
+  // not an attribution — they are a description of an onset that
+  // happens to straddle a phase boundary.
+  console.log('\n  per phase, in order:');
+  {
+    let st = 'on', m = abStart;
+    const phases = [];
+    for (const r of suspends) {
+      const at = t(r);
+      if (at < abStart) { st = extra(r).suspended ? 'off' : 'on'; continue; }
+      phases.push([m, at, st]); st = extra(r).suspended ? 'off' : 'on'; m = at;
+    }
+    phases.push([m, samples[samples.length - 1].at, st]);
+    let anyEmpty = 0, anyHot = 0;
+    for (const [a, bb, stt] of phases) {
+      const dur = (bb - a) / 1000;
+      if (dur < 2) continue;
+      const c = within(samples, a, bb).reduce((n, x) => n + (x.cpuDelta || 0), 0);
+      if (c <= 0.01) anyEmpty++; else anyHot++;
+      console.log(`    ${stt === 'on' ? 'RUNNING  ' : 'SUSPENDED'} t+${((a - first) / 1000).toFixed(0).padStart(4)}s  ${dur.toFixed(0).padStart(3)}s  ${c.toFixed(2).padStart(6)}s cpu  ${(c / dur * 100).toFixed(1).padStart(5)}%`);
+    }
+    if (anyHot > 0 && anyEmpty >= anyHot) {
+      console.log(`\n  ⚠️  ONSET, NOT A PHASE EFFECT. ${anyEmpty} phase(s) carried no cpu at all and`);
+      console.log('      only ' + anyHot + ' did. The A/B has too few phases WITH SIGNAL to');
+      console.log('      attribute anything — whatever caused this arrived partway');
+      console.log('      through and is time-dependent, not loop-dependent.');
+      console.log('      Treat the totals below as descriptive, NOT as a verdict.');
+    }
+  }
+
   console.log(`\n  VERDICT: ${
     offRate < onRate * 0.4 ? 'THE LOOP. CPU largely disappears when it is suspended.'
     : offRate > onRate * 0.7 ? 'NOT THE LOOP. CPU persists with the loop off and the buffer resident.'
