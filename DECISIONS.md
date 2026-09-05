@@ -1989,3 +1989,88 @@ capabilities, and neither finds out until they are live. Product gap.
 phone test so far has been a solo host. The guest path on a handset —
 portrait split, mic mute, camera, the accept flow on a small screen — is
 entirely unexercised.
+
+
+---
+
+# CPU ATTRIBUTION — FIRST REAL-DEVICE CAPTURE (2026-09-05)
+
+moto g35 5G, UNISOC T760, 4GB. **The first measurement of this problem on
+a device that can actually struggle** — every previous observation was on
+a MacBook.
+
+## What the capture showed
+
+**Baseline clean.** 359s, 146 samples, 0.00 cpu seconds. The phone
+encodes a live show with no deck loaded and shows no pressure at all.
+
+**With a track loaded**, 99MB buffer (`approxBufferBytes: 103778237`),
+paused and untouched: 75.38s cpu accrued, 37/219 samples flagged, median
+fps 26 → 23.
+
+**But the pressure is an ONSET, not a phase effect:**
+
+    RUNNING   t+361s   0.00s cpu     SUSPENDED t+385s   0.00s cpu
+    RUNNING   t+445s   0.00s cpu     SUSPENDED t+505s   0.00s cpu
+    RUNNING   t+565s   0.00s cpu     SUSPENDED t+625s   0.00s cpu
+    RUNNING   t+685s  23.41s cpu     SUSPENDED t+745s  50.03s cpu
+
+Six phases carried nothing; two carried everything. Pressure arrived
+~324s AFTER the track loaded and escalated hard.
+
+## The verdict was withdrawn
+
+The reported result — "NOT THE LOOP, suspended phases 3x the running
+ones" — **is not supported**, and two of its numbers came from bugs in
+the analyser rather than from the device.
+
+**The A/B counted the baseline as "loop running".** It walked from the
+capture start, so minutes of clean encoding with no deck loaded landed
+in the running arm and diluted its rate. That produced the 3x.
+
+**It read `source` from `extra` only.** The export flattens known field
+names into columns, so a correctly-recorded `source: uploaded` was
+reported as "unknown" and sent a session hunting an instrument bug that
+did not exist.
+
+**The honest reading of this capture:** the A/B has too few phases with
+signal to attribute anything. What IS supported is that the onset is
+time-dependent, which the loop cannot explain — it ran identically in
+three phases that carried zero cpu.
+
+The analyser now prints every phase in order and refuses to let two
+totals stand as a verdict when most phases carry no signal.
+
+## Added to the falsified list — this time the tool's own
+
+The three earlier entries (captureStream(0), audioHostActive, the
+AudioContext closing on background, the "implausible" search results)
+were all theories about the SYSTEM. This one is about the INSTRUMENT:
+
+> **An analyser producing a clean, quotable verdict is not evidence that
+> the analyser is right.** Two bugs in it produced a specific,
+> plausible, three-times-larger-than-expected result that survived being
+> read, quoted and acted upon until the raw phases were printed.
+
+The discipline that caught it is the same one applied everywhere else:
+when a number is surprising, check the instrument before believing the
+finding.
+
+## What the capture still cannot separate
+
+**Time-since-load and total-time-on-air are confounded.** Onset was at
+~11 minutes of continuous encoding. Thermal accumulation from sustained
+encoding predicts the same curve as buffer residency.
+
+**Next test, agreed and cheap: a 12–15 minute baseline with nothing
+loaded.** If cpu appears anyway, both suspects are wrong and the cause is
+duration. This runs before anything else because it can invalidate the
+whole line of investigation.
+
+## The loop: exonerated as cause, fixed as waste
+
+8,624 DOM writes across the session, **1 of which changed anything** — a
+paused deck's playhead does not move and the loop had no play-state
+gate. Now guarded on change. **This is explicitly not the freezing fix**
+and the commit says so, so that nobody later reads it as having solved
+the problem.

@@ -655,6 +655,37 @@ the token is the credential.
 is an open product question.** Ownership of the artefact in a two-artist
 show has not been decided.
 
+## Set lists decode a second ~100MB buffer before releasing the first
+
+**Shipped, real, and measured on a 4GB phone.** A five-minute stereo
+track decodes to roughly **99MB** of raw PCM (`approxBufferBytes:
+103778237`, observed).
+
+Buffers do **not** accumulate across a set list — every retainer was
+traced: `audioHost.setBackingPlayer` overwrites `host.player`,
+`AudioDeckPanel.backingPlayerRef` and `LiveDemo.backingTrackPlayerRef`
+are both overwritten on adopt, and the old player is stopped and
+disconnected. Nothing holds the previous buffer, so it is collectable.
+
+**But the new track is fully decoded BEFORE the old one is released**,
+so tapping through a set list momentarily holds **two ~100MB buffers**,
+and GC timing is not deterministic. On a budget Android that is the
+shape most likely to hurt, and set lists are already shipped.
+
+Related and unresolved: whether the resident buffer is the cause of the
+CPU pressure at all (see the item above). **Streaming the track through
+a `MediaElementAudioSourceNode` instead of decoding it whole would
+remove both the residency and the double-buffer** — memory becomes a
+small rolling window rather than the entire song. Not planned yet,
+deliberately: if the pressure turns out to be duration rather than
+memory, streaming fixes a real inefficiency and not the freezing, and
+the waveform would need its peaks from somewhere else (computing them at
+upload time is the obvious answer). Two things to verify before
+committing to it: CORS on signed URLs (`createMediaElementSource`
+requires `crossOrigin="anonymous"` and a permissive response), and
+whether cue sheets tolerate element-clock timing instead of
+sample-accurate scheduling.
+
 ## Connection instability — nobody has investigated this
 
 **Four reconnects, including one full `room_disconnected`, inside a
