@@ -113,7 +113,10 @@ notify pgrst, 'reload schema';
 --     select column_name, data_type, is_nullable, column_default
 --       from information_schema.columns
 --      where table_name = 'show_moderators' order by ordinal_position;
---     -- EXPECT 9 rows. can_direct/can_moderate default true;
+--     -- EXPECT 10 rows. can_direct/can_moderate default true;
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 9.)
 --     -- can_control_lifecycle DEFAULT FALSE — check this one
 --     -- specifically, it is the destructive capability.
 --

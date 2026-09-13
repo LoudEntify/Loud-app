@@ -103,7 +103,10 @@ notify pgrst, 'reload schema';
 -- V1. Table shape:
 --     select column_name, data_type, is_nullable from information_schema.columns
 --      where table_name = 'room_events' order by ordinal_position;
---     -- EXPECT 10 rows. livekit_event_id, event, room_name NOT NULL;
+--     -- EXPECT 11 rows. livekit_event_id, event, room_name NOT NULL;
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 10.)
 --     -- show_id, participant_*, occurred_at, raw nullable.
 --
 -- V2. FK:

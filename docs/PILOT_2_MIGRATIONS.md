@@ -38,6 +38,13 @@ which Postgres will not infer as a conflict target and supabase-js cannot qualif
 every upsert against those two tables failed with `42P10`. Both files are now fixed
 in place, so a fresh database needs nothing extra; an already-migrated one needs this.
 
+**Run before item 4 (Sun 14):** `pilot2_env_stamp.sql`. Adds one column, `env`, to the
+six pilot tables so a device test on a preview URL can be excluded from the 21st's
+analysis — production and preview share one Supabase project on purpose, so
+attribution replaces separation. Additive and defaulted to `'production'`: no existing
+row changes value and no un-updated write path is excluded. It changes the V1 column
+counts in 02/03/05/06/07/08 by one; each of those files notes the new and old number.
+
 **Deferred to the window between the two pilots (21–26 September), not written yet:**
 `pilot2_09_shot_commands_show_uuid.sql` and `pilot2_10_shot_commands_select_policy.sql`.
 Both are additive, neither affects either show night, and the 21st's analysis runs

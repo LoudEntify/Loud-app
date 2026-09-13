@@ -139,7 +139,10 @@ notify pgrst, 'reload schema';
 --     select column_name, data_type, is_nullable
 --       from information_schema.columns
 --      where table_name = 'viewer_sessions' order by ordinal_position;
---     -- EXPECT 14 rows. show_id uuid NOT NULL; viewer_id text NOT NULL;
+--     -- EXPECT 15 rows. show_id uuid NOT NULL; viewer_id text NOT NULL;
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 14.)
 --     -- everything else nullable except joined_at/created_at.
 --
 -- V2. FKs resolved to the right types (this is the check that catches a

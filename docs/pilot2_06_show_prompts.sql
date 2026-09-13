@@ -136,7 +136,10 @@ notify pgrst, 'reload schema';
 --     select column_name, data_type, is_nullable, column_default
 --       from information_schema.columns
 --      where table_name = 'show_prompts' order by ordinal_position;
---     -- EXPECT 13 rows. id uuid with a gen_random_uuid() default;
+--     -- EXPECT 14 rows. id uuid with a gen_random_uuid() default;
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 13.)
 --     -- show_id, kind, body, options, source, pinned NOT NULL.
 --
 -- V2. The options CHECK bites in both directions — this is the one that

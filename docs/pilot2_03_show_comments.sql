@@ -108,7 +108,10 @@ notify pgrst, 'reload schema';
 -- V1. Table shape:
 --     select column_name, data_type, is_nullable from information_schema.columns
 --      where table_name = 'show_comments' order by ordinal_position;
---     -- EXPECT 13 rows. show_id uuid NOT NULL, body text NOT NULL,
+--     -- EXPECT 14 rows. show_id uuid NOT NULL, body text NOT NULL,
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 13.)
 --     -- everything else nullable except created_at.
 --
 -- V2. FKs:

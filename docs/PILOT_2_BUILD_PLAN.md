@@ -565,21 +565,45 @@ select id as show_uuid, room_name, actual_started_at, actual_ended_at
 A query filtering `health_events.show_id = '<uuid>'` returns zero rows against a
 table containing thousands. It looks exactly like a write path that never ran.
 
+### ⚠️ READ THIS TOO — production and preview share one database
+
+Deliberately: two Supabase projects means every migration runs twice, and they drift
+the first time one run is skipped. So a device test on a preview URL writes **real
+rows into these same tables**, and every query below has to exclude them or the
+pilot's numbers include the week's rehearsals.
+
+`docs/pilot2_env_stamp.sql` adds one column, `env`, to the six pilot tables, written
+by `rowEnv()` (`lib/rowEnv.js`) from `VERCEL_ENV`. **It defaults to `'production'`,
+so no existing row changed and no un-updated write path is excluded** — a row has to
+explicitly say it is not production to be filtered out. Inflated numbers are
+recoverable; lost ones are not.
+
+**Every query below filters `env = 'production'` by default.** To see what a device
+test wrote instead, swap the filter to `env <> 'production'` — the same query answers
+both questions.
+
+Three tables predate this and have **no `env` column**: `health_events`,
+`reaction_events`, `shot_commands` (V4, V6, V7, V10 below). They are keyed by **room
+name**, so a test show is a different room and separates naturally — as long as
+device tests use their own show, never the pilot's show row. That is a runbook rule,
+not a constraint the schema enforces.
+
 | # | Write path | Query |
 |---|---|---|
 | V1 | `shows` timings | `select id, room_name, slated_at, actual_started_at, actual_ended_at, ended_by from shows where id = :show;` — expect all three non-null, `ended_by = 'artist'` |
-| V2 | `viewer_sessions` join | `select count(*), count(distinct viewer_id) from viewer_sessions where show_id = :show;` |
-| V3 | `viewer_sessions` leave | `select left_source, count(*) from viewer_sessions where show_id = :show group by 1;` — expect rows under `beacon` and `webhook`, and few under `sweep` |
-| V4 | `reaction_events` | `select count(*), count(viewer_id) from reaction_events where show_id = :room;` — **note `show_id` is the room name here** |
-| V5 | `show_comments` | `select count(*), count(distinct viewer_id) from show_comments where show_id = :show;` |
-| V6 | `health_events` re-selects | `select event_type, reason, count(*) from health_events where show_id = :room and event_type in ('shot_reselect','stale_command_suspended','local_devices_released') group by 1,2;` |
-| V7 | `health_events` presence | `select count(*), max((extra->>'viewers')::int) from health_events where show_id = :room and event_type = 'presence_sample';` — expect ≈ 2/minute |
-| V8 | `room_events` | `select event, count(*) from room_events where room_name = :room group by 1;` — expect all four types, and `participant_joined` ≈ distinct viewers + performers + egress |
+| V2 | `viewer_sessions` join | `select count(*), count(distinct viewer_id) from viewer_sessions where show_id = :show and env = 'production';` |
+| V3 | `viewer_sessions` leave | `select left_source, count(*) from viewer_sessions where show_id = :show and env = 'production' group by 1;` — expect rows under `beacon` and `webhook`, and few under `sweep` |
+| V4 | `reaction_events` | `select count(*), count(viewer_id) from reaction_events where show_id = :room;` — **note `show_id` is the room name here**, and no `env` column: separated by room |
+| V5 | `show_comments` | `select count(*), count(distinct viewer_id) from show_comments where show_id = :show and env = 'production';` |
+| V6 | `health_events` re-selects | `select event_type, detail->>'reason' as reason, count(*) from health_events where show_id = :room and event_type in ('shot_reselect','stale_command_suspended','stale_command_resumed','stale_command_downgraded','local_devices_released') group by 1,2;` — **`reason` is a jsonb field, not a column**; the bare `reason` this previously read errors with 42703 |
+| V7 | `health_events` presence | `select count(*), max((detail->>'viewers')::int) from health_events where show_id = :room and event_type = 'presence_sample';` — expect ≈ 2/minute. **The column is `detail`, not `extra`** |
+| V8 | `room_events` | `select event, count(*) from room_events where room_name = :room and env = 'production' group by 1;` — expect all four types, and `participant_joined` ≈ distinct viewers + performers + egress |
 | V9 | `recordings` + object | `select id, storage_path, bytes, duration_seconds, verified from recordings where show_id = :show;` plus a storage listing of that path |
-| V10 | `shot_commands` | `select count(*), count(artist_id), count(show_uuid) from shot_commands where show_id = :room;` |
-| V11 | `show_prompts` / `prompt_responses` | `select p.id, p.body, count(r.id) from show_prompts p left join prompt_responses r on r.prompt_id = p.id where p.show_id = :show group by 1,2;` |
+| V10 | `shot_commands` | `select count(*), count(artist_id), count(show_uuid) from shot_commands where show_id = :room;` — no `env` column: separated by room |
+| V11 | `show_prompts` / `prompt_responses` | `select p.id, p.body, count(r.id) from show_prompts p left join prompt_responses r on r.prompt_id = p.id and r.env = 'production' where p.show_id = :show and p.env = 'production' group by 1,2;` — the response filter is in the **JOIN**, not the WHERE, so a prompt nobody answered still reports zero rather than disappearing |
 | V12 | `camfeed_pairings` liveness | `select id, role, used_at, last_seen_at, generation from camfeed_pairings where created_by = :artist order by created_at;` — `last_seen_at` proves the follow-loop poll ran |
-| V13 | Room actually closed | `select room_name, actual_ended_at, ended_by from shows where id = :show;` cross-checked against `room_events` `room_finished` — the gap is the cost |
+| V13 | Room actually closed | `select room_name, actual_ended_at, ended_by from shows where id = :show;` cross-checked against `room_events` `room_finished` (`and env = 'production'`) — the gap is the cost |
+| V14 | **Stray env values** | `select env, count(*) from viewer_sessions group by 1;` repeated per table, or the union in `docs/pilot2_env_stamp.sql` V3. Expect only `production` / `preview` / `development`. Anything else means a write path built the string by hand instead of calling `rowEnv()`, and its rows are being silently excluded |
 
 Pre-flight versions of V1, V4, V5, V6 and V10 run as a **two-minute canary before
 doors open on the 20th**: one reaction, one comment, one cut, one prompt, then the
@@ -589,23 +613,54 @@ four queries. If any returns zero, there is time to fix it.
 
 ## 14. Schedule
 
-Seven build days. Today is day one.
+### How each day ships
+
+The original schedule gated every day on a device test but contained exactly **one
+deploy, on Friday**. None of those device tests were reachable as written: there was
+no URL to test against until day seven, and the Friday merge would have been the
+largest change of the week landing the day before the dress rehearsal.
+
+Every day now runs the same four steps:
+
+1. **Branch** off `main` — `pilot2-item<n>`.
+2. **Push.** Vercel builds a preview at
+   `loud-app-git-<branch>-korey-alashe.vercel.app`.
+3. **Device test the preview URL.** This is the gate. Nothing merges without it.
+4. **Merge to `main` the same day**, which deploys to production.
+
+`main` therefore stays deployable and always equals "everything that has passed a
+real-hardware test". Friday becomes a formality — freeze and verify — rather than a
+merge.
+
+Two standing rules this creates:
+
+- **Preview deployments require a Vercel login** unless SSO protection is off for the
+  project. A paired camera phone cannot sign in to Vercel mid-pairing, so this has to
+  be settled before the first device test, not during one.
+- **Device tests use their own show row, never the pilot's.** `env` separates the six
+  stamped tables; `health_events`, `reaction_events` and `shot_commands` are keyed by
+  room name and rely on this rule instead. See §13.
 
 | Day | Work | Gate |
 |---|---|---|
 | **Fri 11 (done)** | All eight migrations written. `EGRESS_TEMPLATE_BASE_URL` investigated (§0.7). Your six answers folded in | Files in `docs/`, run sheet at `docs/PILOT_2_MIGRATIONS.md` |
-| **Sat 12** | **You run migrations 01–08.** **Item 1** (§1.2, all four steps) + **item 2** + **items 11a/10** | Device test: two devices + a paired phone |
-| **Sun 13** | **Item 3** (timings + `showOriginMs`) + **item 11d verify query** + `vercel.json` written but inert | Device test |
-| **Mon 14** | **Item 4** (viewer sessions + beacon, no sampler) + **item 11f** (entry on the holding screen) | Device test, second viewer device |
-| **Tue 15** | **Item 7** — the `isMainPerformer` split, `show_moderators` resolve at entry, `can_control_lifecycle`, §0.8 sender validation | Device test from a **non-owner** account. Highest-risk day of the week |
-| **Wed 16** | **Item 8** (§4.3 first, then Layers A–C) + **item 5** (comments) | Device test: kill a tab, pull a cable, End Show. **Go/no-go call on Layer B by evening** |
-| **Thu 17** | **Item 6** (compose + saved prompts + pinning) + **item 9** (webhook ingestion, idempotent) | Device test: push a typed question, answer from two devices |
-| **Fri 18** | Overwrite `EGRESS_TEMPLATE_BASE_URL`. Merge, deploy, grep the served bundle, run `verify-write-paths.mjs` against a smoke show. **FREEZE EOD** | Deploy verification |
-| **Sat 19** | **Dress rehearsal** — full-length, real hardware, two locations, paired camera, second viewer device, recording start to finish. Then the whole §13 pack | **Pilot-ready gate** |
+| **Sat 12 (done)** | Migrations 01–08 run and verified. Conflict-target fix (`pilot2_fix_conflict_targets.sql`) | Both unique indexes confirmed; upsert returns one row |
+| **Sat 13** | **Item 1** (§1.2, all four steps) + **item 2** + **items 11a/10**. Branch `pilot2-item1` | Device test on preview: two devices + a paired phone → merge |
+| **Sun 14** | **Item 3** (timings + `showOriginMs`) + **item 11d verify query** + `vercel.json` written but inert. **Run `pilot2_env_stamp.sql`** — before item 4 writes anything | Device test on preview → merge |
+| **Mon 15** | **Item 4** (viewer sessions + beacon, no sampler) + **item 11f** (entry on the holding screen). First write path to call `rowEnv()` | Device test, second viewer device. Confirm the test's rows land as `env = 'preview'` → merge |
+| **Tue 16** | **Item 7** — the `isMainPerformer` split, `show_moderators` resolve at entry, `can_control_lifecycle`, §0.8 sender validation | Device test from a **non-owner** account. Highest-risk day of the week → merge |
+| **Wed 17** | **Item 8** (§4.3 first, then Layers A–C) + **item 5** (comments) | Device test: kill a tab, pull a cable, End Show. **Go/no-go call on Layer B by evening** → merge |
+| **Thu 18** | **Item 6** (compose + saved prompts + pinning) + **item 9** (webhook ingestion, idempotent) | Device test: push a typed question, answer from two devices → merge |
+| **Fri 18 EOD** | Overwrite `EGRESS_TEMPLATE_BASE_URL`. Redeploy `main`, grep the served bundle, run `verify-write-paths.mjs` against a smoke show. **FREEZE** | Deploy verification. No merges — everything already landed |
+| **Sat 19** | **Dress rehearsal** — full-length, real hardware, two locations, paired camera, second viewer device, recording start to finish. **On production, not a preview** (`EGRESS_TEMPLATE_BASE_URL` is Production-only, so recording cannot be proven on a preview). Then the whole §13 pack | **Pilot-ready gate** |
 | **Sun 20** | Pre-show canary (§13). Pilot 2 | — |
-| Mon 21 | §13 in full, written up | — |
+| Mon 21 | §13 in full, written up. Every query filters `env = 'production'` | — |
 | 22–26 | `pilot2_09`, `pilot2_10`, soft-delete if it slipped, Layer D if Pro has landed | — |
 | Sun 27 | Third-party event | — |
+
+One day was absorbed: items 1/2/11a/10 slipped from Sat 12 to Sat 13 because Saturday
+went on the migrations and the conflict-target fix. Items 3–9 each keep their full
+day; the week ends on Thursday as before, with Friday reduced to freeze and verify.
 
 ### What came out, to pay for the two corrections
 

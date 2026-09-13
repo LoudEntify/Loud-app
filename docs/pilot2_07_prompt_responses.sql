@@ -119,7 +119,10 @@ notify pgrst, 'reload schema';
 -- V1. Table shape:
 --     select column_name, data_type, is_nullable from information_schema.columns
 --      where table_name = 'prompt_responses' order by ordinal_position;
---     -- EXPECT 14 rows. prompt_id, show_id, prompt_body NOT NULL.
+--     -- EXPECT 15 rows. prompt_id, show_id, prompt_body NOT NULL.
+--     -- (1 of those is `env`, added by docs/pilot2_env_stamp.sql,
+--     -- which runs before item 4. Against a database where that has
+--     -- not run yet, expect 14.)
 --
 -- V2. FKs:
 --     select conname, pg_get_constraintdef(oid) from pg_constraint
