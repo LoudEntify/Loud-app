@@ -10,6 +10,7 @@ import {
   handoverState, canHandOverNow,
 } from '../lib/showWindow.js';
 import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
+import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -111,6 +112,113 @@ eq('★ 40 expired codes count as 0 live cameras',
   deadRig.filter((p) => isLivePairing(p, N)).length, 0);
 eq('★ and therefore do not fill the cap of 6',
   deadRig.filter((p) => isLivePairing(p, N)).length >= MAX, false);
+
+
+// ── item 1: the stale-target state machine ──────────────────────
+// Every one of these is a case the first device test either exercised or
+// could not distinguish. The two that matter most are the ones that
+// failed on hardware: a downgrade must EMIT, and a camera that comes
+// back after a downgrade must still resume -- the first version could
+// never do the second, so manual mode required a re-pin after any blip
+// long enough to trip the TTL.
+console.log('\n── stale shot plan (item 1) ──');
+
+const S = 3_000_000_000_000;
+const CLOSE = 'camfeed-a-close-51d6390e';
+const pinned = (extra = {}) => ({
+  a: { slot: 'a', shot: 'closeUp', targetIdentity: CLOSE, targetSourceKey: `${CLOSE}#camera`, ...extra },
+});
+const plan = (activeShot, present, now) =>
+  planStaleShots({ activeShot, now, isTargetPresent: () => present });
+const types = (r) => r.events.map((e) => e.type);
+
+// target present, nothing to do
+let r = plan(pinned(), true, S);
+eq('healthy shot emits nothing', [types(r), r.changed], [[], false]);
+eq('healthy shot keeps the same object', r.next === r.next && types(r).length, 0);
+
+// the camera dies
+r = plan(pinned(), false, S);
+eq('★ target gone -> suspended', types(r), ['stale_command_suspended']);
+eq('suspend sets the flag and a timestamp', [r.next.a.framingSuspended, r.next.a.framingSuspendedAt], [true, S]);
+eq('suspend keeps the command and its target', [r.next.a.shot, r.next.a.targetIdentity], ['closeUp', CLOSE]);
+
+// still gone, but inside the TTL
+const suspendedAt = pinned({ framingSuspended: true, framingSuspendedAt: S });
+r = plan(suspendedAt, false, S + STALE_TARGET_DOWNGRADE_MS - 1000);
+eq('inside the TTL emits nothing', [types(r), r.changed], [[], false]);
+
+// the TTL elapses -- THE EVENT THAT NEVER FIRED ON HARDWARE
+r = plan(suspendedAt, false, S + STALE_TARGET_DOWNGRADE_MS);
+eq('★ TTL reached -> downgraded', types(r), ['stale_command_downgraded']);
+eq('★ downgrade EMITS an event, not just a state change', r.events.length, 1);
+eq('downgrade goes to wide and records what it left', [r.next.a.shot, r.next.a.downgradedFrom], ['wide', 'closeUp']);
+eq('downgrade keeps the dead target so a return re-acquires', r.next.a.targetIdentity, CLOSE);
+eq('downgrade reports how long it waited', r.events[0].detail.awayMs, STALE_TARGET_DOWNGRADE_MS);
+
+// downgraded and still gone -- must not re-fire forever
+const downgraded = pinned({ shot: 'wide', downgradedFrom: 'closeUp' });
+r = plan(downgraded, false, S + 10 * 60000);
+eq('★ a downgraded slot does not re-suspend or re-log', [types(r), r.changed], [[], false]);
+
+// the camera comes back inside the TTL -- THE OTHER EVENT THAT NEVER FIRED
+r = plan(suspendedAt, true, S + 9000);
+eq('★ target returns -> resumed', types(r), ['stale_command_resumed']);
+eq('resume restores the original framing', r.next.a.shot, 'closeUp');
+eq('resume clears the suspension flags', [r.next.a.framingSuspended, r.next.a.framingSuspendedAt], [undefined, undefined]);
+eq('resume reports how long it was away', r.events[0].detail.awayMs, 9000);
+eq('resume records it was not a downgrade', r.events[0].detail.wasDowngraded, false);
+
+// the camera comes back AFTER a downgrade -- the manual-mode fix
+r = plan(pinned({ shot: 'wide', downgradedFrom: 'closeUp', framingSuspendedAt: S }), true, S + 5 * 60000);
+eq('★ returns after a downgrade -> still resumes', types(r), ['stale_command_resumed']);
+eq('★ and restores the framing the director chose', r.next.a.shot, 'closeUp');
+eq('resume after downgrade clears downgradedFrom', r.next.a.downgradedFrom, undefined);
+eq('resume after downgrade says so', r.events[0].detail.wasDowngraded, true);
+
+// a wide shot has no framing to downgrade to
+r = plan(pinned({ shot: 'wide', framingSuspended: true, framingSuspendedAt: S }), false, S + 10 * 60000);
+eq('a suspended WIDE shot never downgrades', [types(r), r.changed], [[], false]);
+
+// commands with no explicit target are not this machine's business
+r = plan({ a: { slot: 'a', shot: 'wide', targetIdentity: null } }, false, S);
+eq('no targetIdentity -> untouched', [types(r), r.changed], [[], false]);
+
+// two slots, independent
+r = planStaleShots({
+  activeShot: { a: { slot: 'a', shot: 'closeUp', targetIdentity: 'cam-a' },
+                b: { slot: 'b', shot: 'closeUp', targetIdentity: 'cam-b' } },
+  now: S,
+  isTargetPresent: (slot) => slot === 'b',
+});
+eq('★ only the dead slot is suspended', [types(r), r.next.b.framingSuspended], [['stale_command_suspended'], undefined]);
+eq('the live slot is untouched by reference', r.next.b === r.next.b && r.next.a.framingSuspended, true);
+
+// full sequence, driven like the real clock: 1s ticks across a 30s outage
+let state = pinned();
+const emitted = [];
+for (let t = 0; t <= 30000; t += 1000) {
+  const step = planStaleShots({ activeShot: state, now: S + t, isTargetPresent: () => false });
+  step.events.forEach((e) => emitted.push([t, e.type]));
+  state = step.next;
+}
+eq('★ a 30s outage ticked at 1Hz emits exactly suspend then downgrade',
+  emitted, [[0, 'stale_command_suspended'], [20000, 'stale_command_downgraded']]);
+
+// and the 10s outage the operator actually ran: gone at 8s (LiveKit's
+// eviction), back at 15s.
+state = pinned();
+const emitted2 = [];
+for (let t = 0; t <= 40000; t += 1000) {
+  const here = t >= 8000 && t < 15000 ? false : true;
+  const step = planStaleShots({ activeShot: state, now: S + t, isTargetPresent: () => here });
+  step.events.forEach((e) => emitted2.push([t, e.type]));
+  state = step.next;
+}
+eq('★ an 8s-to-15s outage emits suspend then resume, and nothing else',
+  emitted2, [[8000, 'stale_command_suspended'], [15000, 'stale_command_resumed']]);
+eq('★ and the shot is back to the pinned framing', state.a.shot, 'closeUp');
+
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
 process.exit(fail === 0 ? 0 : 1);

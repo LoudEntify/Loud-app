@@ -56,6 +56,7 @@ import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { planStaleShots } from '../lib/staleShotPlan';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -1541,18 +1542,6 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
   </div>
 );
 
-// How long a command's target may stay out of the pool before the slot
-// gives up on it and downgrades to a plain live shot (item 10).
-//
-// 20s is chosen against the thing it has to outlast: a camfeed that
-// drops and returns comes back under the SAME identity
-// (app/api/camfeed/session/route.js:130), so the command re-matches and
-// the shot re-acquires by itself. That self-healing is worth protecting,
-// and a LiveKit reconnect is seconds, not tens of seconds. Below ~10s we
-// would start cutting away from cameras that were about to come back;
-// far above 20s a director who has stopped leaves the audience on a dead
-// target for most of a song.
-const STALE_TARGET_DOWNGRADE_MS = 20000;
 
 // The slot resolution formula -- WHICH TRACK IS ON AIR for a slot.
 //
@@ -3384,121 +3373,55 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     [tracks]
   );
 
-  // Steps 1-3: suspend the framing while the target is away, and restore
-  // it the moment the same target comes back.
+  // ── ONE effect, one pure decision ─────────────────────────────
+  // Suspend, resume and downgrade are three transitions of ONE state
+  // machine, so they are decided together by planStaleShots
+  // (lib/staleShotPlan.js) and applied here.
+  //
+  // The first version split them across two effects with different
+  // dependency arrays and called logHealthEvent from INSIDE the
+  // setActiveShot updater. A React state updater must be pure: React
+  // runs it during render, may run it more than once, and throws the
+  // result away when it bails out — so an event emitted in there has no
+  // guaranteed relationship to the state change it describes. The first
+  // device test found exactly that: suspensions logged, resumes and
+  // downgrades did not, while the screen looked right.
+  //
+  // Now the effect body does the two side effects in order — emit, then
+  // set — which is what an effect body is for.
+  //
+  // `now` is a dependency because the downgrade TTL is a clock
+  // transition, not a pool transition; the 1s tick is what makes it fire
+  // without any timer bookkeeping. Re-entry is safe: applying the plan
+  // changes activeShot, the next pass finds nothing left to do and
+  // returns the same reference, so it converges in one extra pass.
   useEffect(() => {
-    setActiveShot((prev) => {
-      let changed = false;
-      const next = {};
-      Object.entries(prev).forEach(([slot, cmd]) => {
-        next[slot] = cmd;
-        if (!cmd?.targetIdentity) return;
-        // Already given up on by the downgrade below. Its target is
-        // still absent by definition, so without this it would be
-        // re-suspended and re-logged once per pool change forever.
-        if (cmd.downgradedFrom) return;
+    const { next, events, changed } = planStaleShots({
+      activeShot,
+      now,
+      // The SAME predicate renderSlot resolves `matched` with. sourceKey,
+      // not identity: a b-roll clip and the artist's camera share one
+      // identity, so an identity-only test would miss a clip ending under
+      // a bRoll command.
+      isTargetPresent: (slot, cmd) => tracksForSlot(slot).some((t) => matchesTarget(t, cmd)),
+      // Resolved through resolveSlotTrack so `fallback` is the track
+      // renderSlot actually puts on air, and the two cannot drift.
+      describeSlot: (slot, cmd) => {
         const candidates = tracksForSlot(slot);
-        const present = candidates.some((t) => matchesTarget(t, cmd));
-
-        if (!present && !cmd.framingSuspended) {
-          // The live-side twin of egress_stale_command_dropped, and the
-          // missing half of item 1c. `fallback` is the track renderSlot
-          // will actually put on air -- same function, so this cannot
-          // drift from what the audience saw.
-          const { chosen } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
-          logHealthEvent('stale_command_suspended', {
-            slot,
-            shot: cmd.shot,
-            targetIdentity: cmd.targetIdentity,
-            targetSourceKey: cmd.targetSourceKey || null,
-            fallback: sourceKey(chosen) || null,
-            fallbackRole: chosen ? roleOfTrack(chosen) : null,
-            candidateCount: candidates.length,
-          });
-          next[slot] = { ...cmd, framingSuspended: true, framingSuspendedAt: now };
-          changed = true;
-          return;
-        }
-
-        if (present && cmd.framingSuspended) {
-          // The target came back under the same identity within the TTL.
-          // This is the self-healing path step 1 exists to protect, and
-          // it is worth a log line of its own: "suspended, then resumed"
-          // is a transient blip, "suspended, then downgraded" is a
-          // camera that did not come back.
-          logHealthEvent('stale_command_resumed', {
-            slot,
-            shot: cmd.shot,
-            targetIdentity: cmd.targetIdentity,
-            awayMs: cmd.framingSuspendedAt ? now - cmd.framingSuspendedAt : null,
-          });
-          const { framingSuspended, framingSuspendedAt, ...restored } = cmd;
-          next[slot] = restored;
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+        const { chosen } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
+        return {
+          fallback: sourceKey(chosen) || null,
+          fallbackRole: chosen ? roleOfTrack(chosen) : null,
+          candidateCount: candidates.length,
+        };
+      },
     });
+    events.forEach((e) => logHealthEvent(e.type, e.detail));
+    if (changed) setActiveShot(next);
     // poolSignature, not `tracks` -- `tracks` is a fresh array every
-    // render, so depending on it would re-run this on every render
-    // rather than on every real change.
-    //
-    // activeShot IS a dependency, and that is not just tidiness: a
-    // SHOT_COMMAND can arrive naming a target this client does not have
-    // yet (the data channel routinely beats track subscription). On a
-    // pool-change-only dependency that command would sit unsuspended
-    // with its crop on the fallback until the pool happened to change
-    // again -- which, for a viewer who never receives that track, is
-    // never. Re-entry is safe: the second pass finds nothing left to
-    // change and returns `prev`, so React bails out and the effect does
-    // not re-fire.
-    //
-    // `now` is read for a timestamp only and must not re-trigger it.
+    // render, so depending on it would re-run this on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poolSignature, activeShot]);
-
-  // Step 4 (item 10): the target has been gone for the whole TTL. Give
-  // up on it and land on a plain, live, unzoomed shot.
-  //
-  // Driven by the existing 1s `now` tick rather than a per-slot
-  // setTimeout: there is no timer bookkeeping to leak, cancellation is
-  // just the flag clearing above, and the fire time cannot be stale
-  // because the condition is re-read from current state every tick.
-  //
-  // NOT broadcast. Every client decides this independently and lands in
-  // the same place, which is the point -- if the director's device is
-  // what stopped, a broadcast-based recovery would never arrive.
-  //
-  // targetIdentity is deliberately KEPT. It no longer matches anything,
-  // so the fallback picks the best live camera exactly as item 10 asks;
-  // and if the camera does return later it re-acquires its own slot
-  // rather than the audience being left on a substitute forever. What it
-  // does not do is restore the old framing -- that decision expired.
-  useEffect(() => {
-    setActiveShot((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      Object.entries(prev).forEach(([slot, cmd]) => {
-        if (!cmd?.framingSuspended) return;
-        if (cmd.shot === 'wide') return; // already neutral, nothing to downgrade to
-        if (!cmd.framingSuspendedAt || now - cmd.framingSuspendedAt < STALE_TARGET_DOWNGRADE_MS) return;
-        logHealthEvent('stale_command_downgraded', {
-          slot,
-          fromShot: cmd.shot,
-          targetIdentity: cmd.targetIdentity,
-          awayMs: now - cmd.framingSuspendedAt,
-        });
-        // SHOT_TYPES.wide.transform is null (lib/shotTypes.js), so this
-        // is the neutral frame by construction rather than by a magic
-        // number -- framingSuspended comes off because there is now
-        // nothing left to suspend.
-        const { framingSuspended, framingSuspendedAt, ...rest } = cmd;
-        next[slot] = { ...rest, shot: 'wide', downgradedFrom: cmd.shot };
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [now]);
+  }, [poolSignature, activeShot, now]);
 
   // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
   // performer slots CURRENTLY PRESENT (a published camera track exists
