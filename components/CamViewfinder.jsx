@@ -139,6 +139,42 @@ export default function CamViewfinder({ conn, wake }) {
   // missing exactly the cameras most likely to be freezing.
   usePublisherStats(room, { enabled: true, label: `camfeed:${conn?.role || 'wide'}` });
 
+  // ── Item 1c — camfeed room lifecycle ──────────────────────────
+  // The same three anchors LiveDemo.jsx already logs for the artist's
+  // own room, now for the paired phone. Log-only: nothing here changes
+  // behaviour.
+  //
+  // This is the half of item 1 that makes the other half diagnosable.
+  // When a slot logs stale_command_suspended, the only question that
+  // matters is WHY the camera left — and the answer lives on this
+  // device, not the artist's. `reason` is the whole point: LiveKit's
+  // DisconnectReason distinguishes a phone that lost its uplink from one
+  // whose token expired from one the server closed, and without it the
+  // 27th gets diagnosed from LiveKit's console again rather than from
+  // our own data.
+  //
+  // room_reconnecting is what proves the 20s downgrade TTL is set
+  // correctly: it brackets exactly the gap the shot has to survive.
+  useEffect(() => {
+    if (!room) return undefined;
+    function onConnected() { logHealthEvent('room_connected', { state: room.state }); }
+    function onReconnecting() { logHealthEvent('room_reconnecting', { state: room.state }); }
+    function onReconnected() { logHealthEvent('room_reconnected', { state: room.state }); }
+    function onDisconnected(reason) {
+      logHealthEvent('room_disconnected', { state: room.state, reason: reason != null ? String(reason) : null });
+    }
+    room.on(RoomEvent.Connected, onConnected);
+    room.on(RoomEvent.Reconnecting, onReconnecting);
+    room.on(RoomEvent.Reconnected, onReconnected);
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    return () => {
+      room.off(RoomEvent.Connected, onConnected);
+      room.off(RoomEvent.Reconnecting, onReconnecting);
+      room.off(RoomEvent.Reconnected, onReconnected);
+      room.off(RoomEvent.Disconnected, onDisconnected);
+    };
+  }, [room]);
+
   // ── AM I ON AIR? ──────────────────────────────────────────────
   // The director broadcasts SHOT_COMMAND over the LiveKit data channel
   // (lib/shotCommands.js) and every command names the identity it cut

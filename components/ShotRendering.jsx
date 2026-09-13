@@ -261,6 +261,24 @@ function ShotTransformFrame({ trackRef, command, placeholder, videoRef, aspect, 
       return undefined;
     }
 
+    // Items 1a/11a -- this command's target has left the pool and the
+    // slot's fallback is rendering a DIFFERENT camera. The command is
+    // kept on purpose (a same-identity return re-acquires the shot by
+    // itself, which is the live stage's self-healing), so the wrong part
+    // has to be neutralised HERE rather than by deleting it there: a
+    // replacement camera must never wear a crop composed for a camera
+    // that no longer exists.
+    //
+    // Checked before resolveTransform, not folded into the `!t` branch
+    // below, so the reason is visible in the log line. "Suspended" and
+    // "this shot has no transform" produce the same picture and mean
+    // completely different things to anyone reading a cut trace.
+    if (command.framingSuspended) {
+      logCutDebug(`[${shortLayerTag(trackRef)}] transform effect: SUSPENDED scale(1) shot=${command.shot} (target left the pool)`);
+      setStyle({ transform: 'scale(1)', transition: 'none' });
+      return undefined;
+    }
+
     const t = resolveTransform(shot.transform, isPortrait);
 
     if (!t || (t.optional && !command.params?.vertigo)) {

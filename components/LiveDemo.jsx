@@ -1541,6 +1541,64 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
   </div>
 );
 
+// How long a command's target may stay out of the pool before the slot
+// gives up on it and downgrades to a plain live shot (item 10).
+//
+// 20s is chosen against the thing it has to outlast: a camfeed that
+// drops and returns comes back under the SAME identity
+// (app/api/camfeed/session/route.js:130), so the command re-matches and
+// the shot re-acquires by itself. That self-healing is worth protecting,
+// and a LiveKit reconnect is seconds, not tens of seconds. Below ~10s we
+// would start cutting away from cameras that were about to come back;
+// far above 20s a director who has stopped leaves the audience on a dead
+// target for most of a song.
+const STALE_TARGET_DOWNGRADE_MS = 20000;
+
+// The slot resolution formula -- WHICH TRACK IS ON AIR for a slot.
+//
+// Extracted from renderSlot rather than duplicated into the staleness
+// effect below, and that is the whole point: the effect logs "the
+// fallback actually chosen", and a second copy of this chain would make
+// that claim true only until someone edited one copy. renderSlot and the
+// health event now cannot disagree by construction.
+//
+// BroadcastStage's blur-fill (PARSE SITE 6) deliberately keeps its own
+// chain -- it prefers isPerformerCameraTrack where this prefers
+// roleOfTrack === 'main'. Those are different rules, not a duplicate, so
+// it is left alone.
+function resolveSlotTrack(candidates, cmd, ineligibleTracks) {
+  const eligible = filterEligible(candidates, ineligibleTracks);
+  // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
+  // that feed is impaired. The artist cut there on purpose; the answer
+  // is a stable frozen frame with the holding treatment until they
+  // cut away or it revives, not a silent re-pick. Searched against the
+  // unfiltered pool for exactly that reason.
+  // PARSE SITE 5 of 6, and the one that actually decides what is on
+  // screen. matchesTarget compares identity AND what the track IS --
+  // identity alone would match the artist's camera for a command that
+  // meant their b-roll clip, because a clip is published by the
+  // artist's own participant.
+  const matched = cmd?.targetIdentity
+    ? candidates.find((t) => matchesTarget(t, cmd))
+    : undefined;
+  // Every non-explicit path prefers LIVE feeds -- this is what stops
+  // auto/fallback from ever landing on a dead camera by itself. The
+  // final fallback is a last resort for when nothing is live at all,
+  // where a frozen frame beats an empty stage.
+  //
+  // Every fallback resolves against CAMERAS ONLY. A shot whose target
+  // has gone must never land on a playing clip by accident -- the
+  // return from b-roll is a deliberate broadcast cut, not a fallback.
+  const eligibleCameras = cameraTracksOnly(eligible);
+  const chosen =
+    matched ||
+    eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
+    eligibleCameras[0] ||
+    cameraTracksOnly(candidates)[0] ||
+    candidates[0];
+  return { eligible, matched, chosen, activeImpaired: !!chosen && !eligible.includes(chosen) };
+}
+
 // --- Connected room UI -------------------------------------------------
 
 function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, artistId, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
@@ -3296,6 +3354,152 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     filterEligible(tracksForSlot(letter), ineligibleTracks),
     [tracksForSlot, ineligibleTracks]);
 
+  // ── Items 1a / 11a / 10 — a command whose target has left ──────
+  //
+  // EgressPage.jsx:252-271 solves this by DROPPING the command. A
+  // recorder can afford that; the live stage cannot. A camfeed that
+  // drops and returns comes back under the same identity
+  // (app/api/camfeed/session/route.js:130), so the command still in
+  // activeShot re-matches and the shot re-acquires by itself. Dropping
+  // the command deletes that self-healing and makes the director re-cut
+  // manually for every transient camera blip.
+  //
+  // So: keep the command and its target, and neutralise only the part
+  // that is actually wrong -- the framing. A replacement camera must
+  // never wear a crop composed for a camera that no longer exists.
+  //
+  // Muted counts as gone, because tracksForSlot already excludes muted
+  // tracks: if renderSlot cannot pick it, the fallback IS on screen and
+  // its crop is exactly as wrong as it would be after a disconnect.
+  //
+  // sourceKey, not identity, because that is what matchesTarget uses. A
+  // b-roll clip and the artist's camera share one identity, so an
+  // identity-keyed signature would miss a clip ending under a bRoll
+  // command -- the stale-crop case the source-key work exists to stop.
+  const poolSignature = useMemo(
+    () => tracks
+      .map((t) => `${sourceKey(t) || 'unknown'}:${t.publication?.isMuted ? 'muted' : 'live'}`)
+      .sort()
+      .join('|'),
+    [tracks]
+  );
+
+  // Steps 1-3: suspend the framing while the target is away, and restore
+  // it the moment the same target comes back.
+  useEffect(() => {
+    setActiveShot((prev) => {
+      let changed = false;
+      const next = {};
+      Object.entries(prev).forEach(([slot, cmd]) => {
+        next[slot] = cmd;
+        if (!cmd?.targetIdentity) return;
+        // Already given up on by the downgrade below. Its target is
+        // still absent by definition, so without this it would be
+        // re-suspended and re-logged once per pool change forever.
+        if (cmd.downgradedFrom) return;
+        const candidates = tracksForSlot(slot);
+        const present = candidates.some((t) => matchesTarget(t, cmd));
+
+        if (!present && !cmd.framingSuspended) {
+          // The live-side twin of egress_stale_command_dropped, and the
+          // missing half of item 1c. `fallback` is the track renderSlot
+          // will actually put on air -- same function, so this cannot
+          // drift from what the audience saw.
+          const { chosen } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
+          logHealthEvent('stale_command_suspended', {
+            slot,
+            shot: cmd.shot,
+            targetIdentity: cmd.targetIdentity,
+            targetSourceKey: cmd.targetSourceKey || null,
+            fallback: sourceKey(chosen) || null,
+            fallbackRole: chosen ? roleOfTrack(chosen) : null,
+            candidateCount: candidates.length,
+          });
+          next[slot] = { ...cmd, framingSuspended: true, framingSuspendedAt: now };
+          changed = true;
+          return;
+        }
+
+        if (present && cmd.framingSuspended) {
+          // The target came back under the same identity within the TTL.
+          // This is the self-healing path step 1 exists to protect, and
+          // it is worth a log line of its own: "suspended, then resumed"
+          // is a transient blip, "suspended, then downgraded" is a
+          // camera that did not come back.
+          logHealthEvent('stale_command_resumed', {
+            slot,
+            shot: cmd.shot,
+            targetIdentity: cmd.targetIdentity,
+            awayMs: cmd.framingSuspendedAt ? now - cmd.framingSuspendedAt : null,
+          });
+          const { framingSuspended, framingSuspendedAt, ...restored } = cmd;
+          next[slot] = restored;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    // poolSignature, not `tracks` -- `tracks` is a fresh array every
+    // render, so depending on it would re-run this on every render
+    // rather than on every real change.
+    //
+    // activeShot IS a dependency, and that is not just tidiness: a
+    // SHOT_COMMAND can arrive naming a target this client does not have
+    // yet (the data channel routinely beats track subscription). On a
+    // pool-change-only dependency that command would sit unsuspended
+    // with its crop on the fallback until the pool happened to change
+    // again -- which, for a viewer who never receives that track, is
+    // never. Re-entry is safe: the second pass finds nothing left to
+    // change and returns `prev`, so React bails out and the effect does
+    // not re-fire.
+    //
+    // `now` is read for a timestamp only and must not re-trigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolSignature, activeShot]);
+
+  // Step 4 (item 10): the target has been gone for the whole TTL. Give
+  // up on it and land on a plain, live, unzoomed shot.
+  //
+  // Driven by the existing 1s `now` tick rather than a per-slot
+  // setTimeout: there is no timer bookkeeping to leak, cancellation is
+  // just the flag clearing above, and the fire time cannot be stale
+  // because the condition is re-read from current state every tick.
+  //
+  // NOT broadcast. Every client decides this independently and lands in
+  // the same place, which is the point -- if the director's device is
+  // what stopped, a broadcast-based recovery would never arrive.
+  //
+  // targetIdentity is deliberately KEPT. It no longer matches anything,
+  // so the fallback picks the best live camera exactly as item 10 asks;
+  // and if the camera does return later it re-acquires its own slot
+  // rather than the audience being left on a substitute forever. What it
+  // does not do is restore the old framing -- that decision expired.
+  useEffect(() => {
+    setActiveShot((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      Object.entries(prev).forEach(([slot, cmd]) => {
+        if (!cmd?.framingSuspended) return;
+        if (cmd.shot === 'wide') return; // already neutral, nothing to downgrade to
+        if (!cmd.framingSuspendedAt || now - cmd.framingSuspendedAt < STALE_TARGET_DOWNGRADE_MS) return;
+        logHealthEvent('stale_command_downgraded', {
+          slot,
+          fromShot: cmd.shot,
+          targetIdentity: cmd.targetIdentity,
+          awayMs: now - cmd.framingSuspendedAt,
+        });
+        // SHOT_TYPES.wide.transform is null (lib/shotTypes.js), so this
+        // is the neutral frame by construction rather than by a magic
+        // number -- framingSuspended comes off because there is now
+        // nothing left to suspend.
+        const { framingSuspended, framingSuspendedAt, ...rest } = cmd;
+        next[slot] = { ...rest, shot: 'wide', downgradedFrom: cmd.shot };
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [now]);
+
   // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
   // performer slots CURRENTLY PRESENT (a published camera track exists
   // for them right now), derived live from `tracks`, not from
@@ -3533,39 +3737,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(letter);
-    const eligible = filterEligible(candidates, ineligibleTracks);
     const cmd = activeShot[letter];
-    // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
-    // that feed is impaired. The artist cut there on purpose; the answer
-    // is a stable frozen frame with the holding treatment until they
-    // cut away or it revives, not a silent re-pick. Searched against the
-    // unfiltered pool for exactly that reason.
     // PARSE SITE 5 of 6, and the one that actually decides what is on
-    // screen. matchesTarget compares identity AND what the track IS --
-    // identity alone would match the artist's camera for a command that
-    // meant their b-roll clip, because a clip is published by the
-    // artist's own participant. That is the failure this whole round
-    // exists to remove, and this is the line where it would have
-    // happened.
-    const matched = cmd?.targetIdentity
-      ? candidates.find((t) => matchesTarget(t, cmd))
-      : undefined;
-    // Every non-explicit path prefers LIVE feeds -- this is what stops
-    // auto/fallback from ever landing on a dead camera by itself. The
-    // final fallback is a last resort for when nothing is live at all,
-    // where a frozen frame beats an empty stage.
-    //
-    // Every fallback resolves against CAMERAS ONLY. A shot whose target
-    // has gone must never land on a playing clip by accident -- the
-    // return from b-roll is a deliberate broadcast cut, not a fallback.
-    const eligibleCameras = cameraTracksOnly(eligible);
-    const chosen =
-      matched ||
-      eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
-      eligibleCameras[0] ||
-      cameraTracksOnly(candidates)[0] ||
-      candidates[0];
-    const activeImpaired = !!chosen && !eligible.includes(chosen);
+    // screen. The chain itself now lives in resolveSlotTrack (module
+    // scope) so the staleness effect above logs the same `chosen` this
+    // renders -- see that function's comment for why it was extracted.
+    const { matched, chosen, activeImpaired } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
 
     // DEBUG (bug 2 investigation) -- viewer-side only (role === 'viewer';
     // the director already has other debug coverage). Shows exactly what
