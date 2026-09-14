@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { effectiveState } from '../../../../lib/showState';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import {
   REHEARSAL_TOKEN_TTL,
@@ -104,13 +105,27 @@ export async function POST(request) {
     // failed lookup falls through and mints the token — an unreachable
     // shows table must not take a live camera off air mid-performance,
     // and SHOW_ENDED over the data channel is still the primary path.
+    // ITEM 8 LAYER A -- the cheapest half of the cost bug, and on its own
+    // it would have stopped pilot 1's 5h39m camera within one poll of the
+    // window closing.
+    //
+    // This asked `show.state === 'ended'`, the STORED state. But 'ended'
+    // is DERIVED here as it is everywhere else: a show whose window has
+    // closed is over whether or not anyone pressed End Show
+    // (lib/showState.js effectiveState). The stored row for an
+    // unattended show stays 'soundcheck' forever, so this check never
+    // fired for exactly the case that ran the bill up -- the artist who
+    // closed their laptop without pressing the button.
+    //
+    // effectiveState needs the window columns, so the select widens from
+    // 'state' to the four it reads. That is the whole change.
     if (isShow) {
       const { data: show } = await admin
         .from('shows')
-        .select('state')
+        .select('state, slated_at, ends_at, duration_minutes')
         .eq('room_name', room)
         .maybeSingle();
-      if (show?.state === 'ended') {
+      if (show && effectiveState(show) === 'ended') {
         return NextResponse.json({
           supported: true,
           revoked: false,

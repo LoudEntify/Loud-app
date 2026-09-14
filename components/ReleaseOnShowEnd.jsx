@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
 import { logHealthEvent } from '../lib/healthLog';
+import { describeDisconnect, isIntentionalDisconnect } from '../lib/disconnectIntent';
 
 // WHEN THE SHOW ENDS, THIS DEVICE'S CAMERA LIGHT GOES OUT.
 //
@@ -31,14 +32,28 @@ import { logHealthEvent } from '../lib/healthLog';
 //
 // ── TWO TRIGGERS, BECAUSE ONE IS NOT ENOUGH ─────────────────────
 //   SHOW_ENDED   the artist pressed End Show. The normal path.
-//   Disconnected the room went away underneath us — token expiry, the
-//                room being closed, the network giving up. A device that
-//                is no longer in a room is definitively not filming for
-//                one, so it releases then too.
+//   Disconnected but ONLY when somebody meant it. See below.
 //
 // Deliberately NOT triggered by Reconnecting: a blip is not an ending,
 // and releasing the camera on one would turn a two-second wobble into a
 // dead camera for the rest of the show.
+//
+// ── §4.3: NOT EVERY DISCONNECT IS AN ENDING ─────────────────────
+// This used to be `function onDisconnected() { release(...) }` — all
+// eight DisconnectReasons treated identically. That was survivable only
+// because nothing in this system had ever produced a DELIBERATE
+// teardown, so in practice a disconnect really did mean the room had
+// gone for good.
+//
+// Item 8's Layer B introduces ROOM_DELETED, the first disconnect anyone
+// ever meant. The moment that exists, "the show ended" and "wifi
+// blipped" arrive through the same handler, and the comment directly
+// above — a blip must not kill a camera for the rest of the show —
+// stops being true for the one case it matters most in.
+//
+// lib/disconnectIntent.js is the split, and its default is the point: an
+// unrecognised reason is a transport failure, not intent. Releasing on a
+// blip is on-air; holding a few seconds too long is tidiness.
 
 export default function ReleaseOnShowEnd({ onEnded, label = 'device' }) {
   const room = useRoomContext();
@@ -102,7 +117,17 @@ export default function ReleaseOnShowEnd({ onEnded, label = 'device' }) {
       }
     }
 
-    function onDisconnected() { release('room_disconnected'); }
+    function onDisconnected(reason) {
+      const d = describeDisconnect(reason);
+      if (!isIntentionalDisconnect(reason)) {
+        // Held, not released — and logged, because a hold that turns out
+        // to be wrong is otherwise invisible. This is the line that says
+        // "the camera stayed on and here is why".
+        logHealthEvent('release_held_on_disconnect', { ...d, label });
+        return;
+      }
+      release(`disconnect_${(d.reason || 'unknown').toLowerCase()}`);
+    }
 
     room.on(RoomEvent.DataReceived, onData);
     room.on(RoomEvent.Disconnected, onDisconnected);

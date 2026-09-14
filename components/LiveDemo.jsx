@@ -55,6 +55,7 @@ import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlaybac
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState';
+import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { describeTransport } from '../lib/transportDiagnostics';
@@ -350,6 +351,48 @@ async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfN
 // supabase-js refreshes the session in the background, so asking for it
 // now always gets a current one. It also removes the whole class of bug
 // where a stale token is captured in a useCallback dependency array.
+// ── ITEM 8 LAYER B: tear the room down ────────────────────────
+// Fire-and-forget in the same spirit as triggerEgress: a failure to
+// close costs money and tidiness, never the show. The show is already
+// over by the time this runs.
+//
+// EGRESS STOP MUST COMPLETE FIRST, and that ordering is not obvious.
+// Deleting the room evicts every participant instantly, and the recorder
+// is a participant -- close first and the recording is cut off mid-file
+// by the very action meant to end it cleanly. So the caller awaits the
+// stop with a bounded timeout and then closes REGARDLESS: losing the
+// last two seconds of a recording beats a six-hour room, which is the
+// bill this item exists to stop.
+const EGRESS_STOP_GRACE_MS = 5000;
+
+async function closeRoom(room, reason) {
+  if (!room) return;
+  let accessToken = null;
+  try {
+    accessToken = (await getSession())?.access_token || null;
+  } catch {
+    // Attempted anyway -- see triggerEgress for why a real 401 in the
+    // network log beats a request that was never sent.
+  }
+  try {
+    const res = await fetch('/api/room/close', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ room, reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    logHealthEvent('room_close_requested', {
+      room, reason, ok: res.ok, status: res.status,
+      deleted: data?.deleted ?? null, detail: data?.detail ?? null,
+    });
+  } catch (e) {
+    logHealthEvent('room_close_failed', { room, reason, detail: String(e?.message || e) });
+  }
+}
+
 async function triggerEgress(action, room, performanceMode) {
   const failed = (stage, detail) => {
     console.warn(`[egress] ${action} ${stage}:`, detail);
@@ -1641,7 +1684,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -1715,6 +1758,42 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
           })}
         </tbody>
       </table>
+      {/* ITEM 8 -- the end-of-show countdown, and a button to force the
+          teardown without waiting for it. Layer C fires at window close
+          + 10 minutes, so watching it happen naturally means sitting
+          through a whole show window. `layerC` counts down to the real
+          firing time; `close room` runs the exact Layer B path (stop
+          egress, wait, delete the room) so the teardown -- and the
+          ROOM_DELETED release on every paired device -- is observable in
+          seconds. */}
+      {(() => {
+        const closes = showWindowClosesAt(show);
+        if (closes === null) return null;
+        const derived = effectiveState(show);
+        const untilC = Math.round((closes + 10 * 60 * 1000 - now) / 1000);
+        return (
+          <div style={{ color: '#fdfffc', marginTop: 3 }}>
+            state {derived}
+            {show?.state === 'ended' ? ' (stored ended)' : ''}
+            {' · layerC '}
+            <span style={{ color: untilC <= 0 ? '#FF9F4A' : '#888' }}>
+              {untilC <= 0 ? 'due' : `in ${Math.floor(untilC / 60)}m${String(untilC % 60).padStart(2, '0')}s`}
+            </span>
+            {' '}
+            <button
+              type="button"
+              onClick={onCloseRoom}
+              style={{
+                pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+                background: 'transparent', color: '#FF6B6B',
+                border: '1px solid #FF6B6B', borderRadius: 3, padding: '0 5px',
+              }}
+            >
+              close room
+            </button>
+          </div>
+        );
+      })()}
       <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
     </div>
   );
@@ -3392,7 +3471,35 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       onShowWriteErrorChange?.(ok ? null : 'ended');
     });
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
-    triggerEgress('stop', roomName); // Stage 3: stop the recording started at the live transition -- this show's room, so End Show stops THIS show's recorder
+
+    // ITEM 8 LAYER B -- SHOW_ENDED only ends the show for devices that
+    // are LISTENING. A propped phone whose page was closed, a camera
+    // that stopped receiving, a tab left open in another room: all of
+    // them kept publishing after pilot 1's End Show, which is where
+    // 2.54GB up / 12.8GB down went. Deleting the room is the only
+    // teardown that does not depend on the thing being torn down
+    // cooperating.
+    //
+    // The ordering is the part that is easy to get wrong. The recorder
+    // is a participant, so deleting the room evicts it -- stop egress
+    // FIRST, wait up to EGRESS_STOP_GRACE_MS, then close regardless.
+    // Losing the last two seconds of a recording beats a six-hour room.
+    //
+    // Not awaited by endShow itself: the artist's button must not hang
+    // on a network call, and every branch below is already fire-and-
+    // forget with health logging.
+    (async () => {
+      const stopped = triggerEgress('stop', roomName); // Stage 3: stop the recording started at the live transition
+      let timedOut = false;
+      await Promise.race([
+        Promise.resolve(stopped).catch(() => {}),
+        new Promise((resolve) => setTimeout(() => { timedOut = true; resolve(); }, EGRESS_STOP_GRACE_MS)),
+      ]);
+      if (timedOut) {
+        logHealthEvent('egress_stop_timeout_before_close', { room: roomName, graceMs: EGRESS_STOP_GRACE_MS });
+      }
+      await closeRoom(roomName, 'end_show');
+    })();
   }, [onShowUpdate, onShowWriteErrorChange, send, roomName, showId]);
 
   // ── Tap-to-react (PRD row 54) ────────────────────────────────
@@ -4832,6 +4939,62 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     // SHOW_LIVE/egress would never fire at all.
   }, [isMainPerformer, showState, send, performanceMode, roomConnectionState, roomName, showId]);
 
+  // ── ITEM 8 LAYER C: the unattended end ────────────────────────
+  // Covers "the artist closed the laptop without pressing End Show" as
+  // long as ONE artist browser somewhere noticed. The endpoint is
+  // artist-authenticated, so only a performer client can do this; a
+  // viewer deriving 'ended' cannot close anybody's room.
+  //
+  // ── THE MARGIN, AND WHY IT IS NOT ZERO ────────────────────────
+  // effectiveState returns 'ended' the instant slated + duration + 15m
+  // grace passes. Firing Layer C there would mean an artist whose show
+  // overruns its own stated duration by more than the grace has the
+  // LIVE ROOM DELETED OUT FROM UNDER THEM, mid-performance, by their own
+  // browser. Set duration_minutes to 30, play for 50, and the room dies
+  // at 45.
+  //
+  // Sweeping the stored state (lib/scheduling.js) is recoverable -- a row
+  // says 'ended' and the show carries on. Deleting the LiveKit room
+  // evicts everyone instantly and is not.
+  //
+  // The margin is affordable because Layer A is already doing the
+  // expensive half of this item: the camfeed session route takes paired
+  // cameras off air at window close, server-side, with no browser
+  // involved. That is what stops the bleeding. Layer C only tidies up
+  // the room afterwards, so it can afford to be the conservative one.
+  const LAYER_C_MARGIN_MS = 10 * 60 * 1000;
+  const layerCFiredRef = useRef(false);
+  useEffect(() => {
+    if (!isMainPerformer) return;
+    if (layerCFiredRef.current) return;
+    // The button was pressed -- Layer B owns that path and has already
+    // stopped egress in the right order. Racing it here would delete the
+    // room while that stop is still in flight.
+    if (show?.state === 'ended') return;
+    if (effectiveState(show) !== 'ended') return;
+    const closes = showWindowClosesAt(show);
+    if (closes === null || now < closes + LAYER_C_MARGIN_MS) return;
+
+    layerCFiredRef.current = true;
+    logHealthEvent('room_close_unattended', {
+      room: roomName,
+      overdueMs: now - closes,
+      marginMs: LAYER_C_MARGIN_MS,
+      storedState: show?.state ?? null,
+    });
+    // Same ordering as Layer B: stop the recorder before evicting it.
+    // An unattended end stops NOTHING today, which is what produced the
+    // 5h39m publish -- Layer C has to stop egress, not only close.
+    (async () => {
+      const stopped = triggerEgress('stop', roomName);
+      await Promise.race([
+        Promise.resolve(stopped).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, EGRESS_STOP_GRACE_MS)),
+      ]);
+      await closeRoom(roomName, 'window_closed');
+    })();
+  }, [isMainPerformer, show, now, roomName]);
+
   // Forced failover (SHOW_LIFECYCLE_SPEC.md L6-2): if the track behind
   // the slot's currently-shown targetIdentity mutes or drops mid-live,
   // fire an immediate auto cut to the best available shot (wide first)
@@ -4987,6 +5150,18 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         isTargetPresent={(slot, cmd) =>
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
         show={show}
+        onCloseRoom={() => {
+          // The exact Layer B sequence, on demand: stop egress, wait for
+          // it up to the grace, then delete the room regardless.
+          (async () => {
+            const stopped = triggerEgress('stop', roomName);
+            await Promise.race([
+              Promise.resolve(stopped).catch(() => {}),
+              new Promise((resolve) => setTimeout(resolve, EGRESS_STOP_GRACE_MS)),
+            ]);
+            await closeRoom(roomName, 'manual');
+          })();
+        }}
         simDropped={simDropped}
         onToggleDrop={(key) => setSimDropped((prev) => {
           const nextSet = new Set(prev);

@@ -12,6 +12,7 @@ import {
 import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
+import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -282,6 +283,43 @@ eq('★ a show that never started still expires',
   isExpired({ ...lateShow, state: 'soundcheck' }, T + 80 * 60000), true);
 eq('★ the door still opens before the artist goes live',
   isWindowOpen(lateShow, T - 20 * 60000), true);
+
+
+
+// ── item 8 §4.3: intent vs transport failure ────────────────────
+// The asymmetry is the whole design. Releasing on a blip kills a camera
+// mid-show with no way back except walking over to it; failing to
+// release on a real ending holds a light on for a few extra seconds.
+console.log('\n── disconnect intent (item 8 §4.3) ──');
+
+eq('★ ROOM_DELETED is intent -> release', isIntentionalDisconnect('ROOM_DELETED'), true);
+eq('CLIENT_INITIATED is intent -> release', isIntentionalDisconnect('CLIENT_INITIATED'), true);
+eq('PARTICIPANT_REMOVED is intent -> release', isIntentionalDisconnect('PARTICIPANT_REMOVED'), true);
+
+// Every one of these used to release the camera. That is the bug.
+for (const r of ['SIGNAL_CLOSE', 'DUPLICATE_IDENTITY', 'STATE_MISMATCH', 'JOIN_FAILURE',
+                 'MIGRATION', 'SERVER_SHUTDOWN', 'UNKNOWN_REASON']) {
+  eq(`★ ${r} is transport -> HOLD`, isIntentionalDisconnect(r), false);
+}
+
+// The default. LiveKit may add reasons; each will arrive unrecognised,
+// and the safe reading of an unknown reason is "nobody told me this was
+// deliberate".
+eq('★ an unrecognised reason HOLDS', isIntentionalDisconnect('SOME_FUTURE_REASON'), false);
+eq('★ no reason at all HOLDS', isIntentionalDisconnect(undefined), false);
+eq('null HOLDS', isIntentionalDisconnect(null), false);
+eq('empty string HOLDS', isIntentionalDisconnect('   '), false);
+// A numeric enum must not coerce into a match -- 0 is falsy and some SDK
+// versions pass numbers.
+eq('★ a numeric reason HOLDS rather than coercing', isIntentionalDisconnect(0), false);
+eq('a numeric reason 3 HOLDS', isIntentionalDisconnect(3), false);
+eq('an object HOLDS', isIntentionalDisconnect({ reason: 'ROOM_DELETED' }), false);
+
+eq('case and padding are normalised', isIntentionalDisconnect('  room_deleted  '), true);
+eq('describeDisconnect names the action',
+  describeDisconnect('SIGNAL_CLOSE'), { reason: 'SIGNAL_CLOSE', intentional: false, action: 'hold' });
+eq('and for a real ending',
+  describeDisconnect('ROOM_DELETED'), { reason: 'ROOM_DELETED', intentional: true, action: 'release' });
 
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
