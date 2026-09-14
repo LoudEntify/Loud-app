@@ -63,3 +63,7 @@ interruption-probe-*.csv
 
 # Throwaway verification scripts written against a deployment.
 *.tmp.mjs
+
+# macOS drag-to-Finder artifacts. One of these was swept in by a
+# `git add -A` on 14 Sep; commit 05cf6b4 is a previous instance.
+*.textClipping
