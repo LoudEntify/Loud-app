@@ -643,24 +643,65 @@ Two standing rules this creates:
 
 | Day | Work | Gate |
 |---|---|---|
-| **Fri 11 (done)** | All eight migrations written. `EGRESS_TEMPLATE_BASE_URL` investigated (§0.7). Your six answers folded in | Files in `docs/`, run sheet at `docs/PILOT_2_MIGRATIONS.md` |
-| **Sat 12 (done)** | Migrations 01–08 run and verified. Conflict-target fix (`pilot2_fix_conflict_targets.sql`) | Both unique indexes confirmed; upsert returns one row |
-| **Sat 13** | **Item 1** (§1.2, all four steps) + **item 2** + **items 11a/10**. Branch `pilot2-item1` | Device test on preview: two devices + a paired phone → merge |
-| **Sun 14** | **Item 3** (timings + `showOriginMs`) + **item 11d verify query** + `vercel.json` written but inert. **Run `pilot2_env_stamp.sql`** — before item 4 writes anything | Device test on preview → merge |
-| **Mon 15** | **Item 4** (viewer sessions + beacon, no sampler) + **item 11f** (entry on the holding screen). First write path to call `rowEnv()` | Device test, second viewer device. Confirm the test's rows land as `env = 'preview'` → merge |
-| **Tue 16** | **Item 7** — the `isMainPerformer` split, `show_moderators` resolve at entry, `can_control_lifecycle`, §0.8 sender validation | Device test from a **non-owner** account. Highest-risk day of the week → merge |
-| **Wed 17** | **Item 8** (§4.3 first, then Layers A–C) + **item 5** (comments) | Device test: kill a tab, pull a cable, End Show. **Go/no-go call on Layer B by evening** → merge |
-| **Thu 18** | **Item 6** (compose + saved prompts + pinning) + **item 9** (webhook ingestion, idempotent) | Device test: push a typed question, answer from two devices → merge |
-| **Fri 18 EOD** | Overwrite `EGRESS_TEMPLATE_BASE_URL`. Redeploy `main`, grep the served bundle, run `verify-write-paths.mjs` against a smoke show. **FREEZE** | Deploy verification. No merges — everything already landed |
-| **Sat 19** | **Dress rehearsal** — full-length, real hardware, two locations, paired camera, second viewer device, recording start to finish. **On production, not a preview** (`EGRESS_TEMPLATE_BASE_URL` is Production-only, so recording cannot be proven on a preview). Then the whole §13 pack | **Pilot-ready gate** |
+| **Fri 11 (done)** | All eight migrations written; `EGRESS_TEMPLATE_BASE_URL` investigated (§0.7) | Files in `docs/` |
+| **Sat 12 (done)** | Migrations 01–08 run and verified. Conflict-target fix | Both unique indexes confirmed |
+| **Sat 13 (done)** | **Item 1** built, **item 2** built | — |
+| **Sun 14 (done)** | Item 1 device tested and **PASSED** on `20d1362` — suspended → downgraded (awayMs 20997) → resumed. Items 1 + 2 merged to `main`. **Run `pilot2_env_stamp.sql`** | Three events verified by query and on screen |
+| **Sun 14** | **Item 3** (timings + `showOriginMs`) + **item 11d verify query** + `vercel.json` written but inert | Device test on preview → merge |
+| **Mon 15** | **Item 4** (viewer sessions + beacon, no sampler) + **item 11f** (entry on the holding screen) | Device test, second viewer device. Confirm rows land as `env = 'preview'` → merge |
+| **Tue 16** | **Item 8** (§4.3 first, then Layers A–C) | Device test: kill a tab, pull a cable, End Show. **Go/no-go on Layer B by evening** → merge |
+| **Wed 17** | **Item 6, FIXED-CHOICE PROMPTS ONLY** — no free-form compose, no saved prompts, no pinning | Device test: push a prompt, answer from two devices → merge |
+| **Thu 18** | **Item 5** (comments) IF Wednesday was clean. Otherwise slack | Device test → merge |
+| **Fri 18 EOD** | Overwrite `EGRESS_TEMPLATE_BASE_URL`. Redeploy `main`, grep the served bundle, run `verify-write-paths.mjs`. **FREEZE** | Deploy verification. No merges |
+| **Sat 19** | **Dress rehearsal** — full length, real hardware, two locations, paired camera, second viewer device, recording start to finish, **on production**. Then the whole §13 pack | **Pilot-ready gate** |
 | **Sun 20** | Pre-show canary (§13). Pilot 2 | — |
 | Mon 21 | §13 in full, written up. Every query filters `env = 'production'` | — |
-| 22–26 | `pilot2_09`, `pilot2_10`, soft-delete if it slipped, Layer D if Pro has landed | — |
+| 22–26 | **Item 7**, **item 9**, item 6's compose/saved/pinning, faster stale detection (§1.5), `pilot2_09`, `pilot2_10` | — |
 | Sun 27 | Third-party event | — |
 
-One day was absorbed: items 1/2/11a/10 slipped from Sat 12 to Sat 13 because Saturday
-went on the migrations and the conflict-target fix. Items 3–9 each keep their full
-day; the week ends on Thursday as before, with Friday reduced to freeze and verify.
+### What was cut on Sun 14, and why
+
+Item 1 took three days against one planned. Seven items in four days was not
+recoverable, so three cuts were taken deliberately rather than discovered on Wednesday
+night. **None of them changes what the audience sees on the 20th.**
+
+- **Item 7 (moderator role) — dropped.** You own the show on the 20th, so the role has
+  no user on pilot night. `pilot2_08_show_moderators.sql` is already migrated, so
+  nothing is lost by not writing the code yet. This was flagged as the highest-risk day
+  of the week. It also removes §0.8's sender validation from the critical path, since
+  that only became a *requirement* because item 7 adds a second legitimate sender —
+  `SHOT_COMMAND` still applies from any sender, and with one operator that stays
+  theoretical. **Re-opens as the first job on the 22nd, and sender validation goes with
+  it.** ~1.25 days.
+- **Item 9 (webhook ingestion) — dropped.** `room_events` is analysis, not show
+  behaviour. Item 4's beacon covers leave and the sweep covers the rest. Cost: no
+  authoritative join/leave cross-check on the 21st, so §13 V8 does not run and
+  `participant_joined ≈ distinct viewers` cannot be verified independently. ~0.5 days.
+- **Item 6 — cut to fixed-choice prompts only.** Versus voting is a headline feature and
+  both tables are already migrated. A fixed-options prompt is most of the value; the
+  free-form compose typed live during a show is the expensive part. Cost: the operator
+  picks from prepared options rather than typing a question on the night. ~0.75 days.
+
+**Kept, non-negotiable:** item 3 (every offset in the product depends on it), item 4 +
+11f (this *is* the pilot's evidence base), item 8 §4.3 + Layers A–C (a room that never
+closes is a cost and a correctness problem on the night).
+
+**Item 5 (comments) is the designated late cut.** Chat still works live without it; only
+persistence is lost. Decided Wednesday evening, not Friday.
+
+### The rule that came out of item 1
+
+**Every item from here ships with a way to trigger its failure condition in seconds,
+without hardware.** Item 1 cost eleven device tests and two days because its three
+states were invisible on screen and only distinguishable by a query afterwards — and
+because a hardware cycle could not even begin until LiveKit's ~8s eviction had run.
+
+The `?stale=1` overlay and its `drop` button are the pattern: a live readout of the
+state machine, and a control that forces the transition locally. Both are gated on a
+query-string flag, so neither exists on a normal show load. **This is a gate on each
+item, not a nice-to-have** — an item whose failure mode can only be reproduced by
+holding a phone is an item that will cost a day.
+
 
 ### What came out, to pay for the two corrections
 

@@ -175,6 +175,29 @@ eq('★ returns after a downgrade -> still resumes', types(r), ['stale_command_r
 eq('★ and restores the framing the director chose', r.next.a.shot, 'closeUp');
 eq('resume after downgrade clears downgradedFrom', r.next.a.downgradedFrom, undefined);
 eq('resume after downgrade says so', r.events[0].detail.wasDowngraded, true);
+// Device test 20d1362: awayMs was null here and 20997 on the downgrade.
+// The downgrade branch was stripping framingSuspendedAt, so the one event
+// describing the LONGEST outages was the one that could not say how long.
+eq('★ resume after downgrade reports the FULL time away',
+  r.events[0].detail.awayMs, 5 * 60000);
+
+// And the timestamp has to survive the downgrade for that to work, while
+// the suspended FLAG must not.
+let dg = plan(pinned({ framingSuspended: true, framingSuspendedAt: S }), false, S + STALE_TARGET_DOWNGRADE_MS);
+eq('★ downgrade keeps framingSuspendedAt, drops framingSuspended',
+  [dg.next.a.framingSuspendedAt, dg.next.a.framingSuspended], [S, undefined]);
+eq('and a kept timestamp cannot re-trigger the downgrade',
+  plan(dg.next, false, S + 10 * 60000).events.length, 0);
+// End to end: 30s dead, then back. The resume must report the whole 45s.
+let seq = pinned();
+let lastResume = null;
+for (let t = 0; t <= 45000; t += 1000) {
+  const step = planStaleShots({ activeShot: seq, now: S + t, isTargetPresent: () => t >= 45000 });
+  step.events.forEach((e) => { if (e.type === 'stale_command_resumed') lastResume = e.detail; });
+  seq = step.next;
+}
+eq('★ a 45s outage resumes reporting awayMs 45000, not null',
+  [lastResume.awayMs, lastResume.wasDowngraded], [45000, true]);
 
 // a wide shot has no framing to downgrade to
 r = plan(pinned({ shot: 'wide', framingSuspended: true, framingSuspendedAt: S }), false, S + 10 * 60000);
