@@ -11,6 +11,7 @@ import {
 } from '../lib/showWindow.js';
 import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
+import { showOriginMs, showOriginSource } from '../lib/showState.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -241,6 +242,46 @@ for (let t = 0; t <= 40000; t += 1000) {
 eq('★ an 8s-to-15s outage emits suspend then resume, and nothing else',
   emitted2, [[8000, 'stale_command_suspended'], [15000, 'stale_command_resumed']]);
 eq('★ and the shot is back to the pinned framing', state.a.shot, 'closeUp');
+
+
+
+// ── item 3: the offset origin ───────────────────────────────────
+// The failure this guards is silent in both directions. An offset site
+// that skips actual_started_at records times that look plausible and are
+// wrong by however late the artist went live; a SCHEDULING site that
+// adopts it leaves shows unexpirable. Hence one helper, and these cases.
+console.log('\n── offset origin (item 3) ──');
+const SLATED = '2026-09-20T19:00:00Z';
+const ACTUAL = '2026-09-20T19:08:00Z';
+
+eq('no actual start -> slated', showOriginMs({ slated_at: SLATED }), Date.parse(SLATED));
+eq('and says which it used', showOriginSource({ slated_at: SLATED }), 'slated');
+eq('★ actual start WINS over slated',
+  showOriginMs({ slated_at: SLATED, actual_started_at: ACTUAL }), Date.parse(ACTUAL));
+eq('and says so', showOriginSource({ slated_at: SLATED, actual_started_at: ACTUAL }), 'actual');
+eq('★ eight minutes late is eight minutes of offset error avoided',
+  showOriginMs({ slated_at: SLATED, actual_started_at: ACTUAL }) - Date.parse(SLATED), 8 * 60000);
+
+// Junk must fall back, never produce NaN: a NaN origin makes every
+// offset in the show NaN, and the reaction write does not check.
+eq('unparseable actual falls back to slated',
+  showOriginMs({ slated_at: SLATED, actual_started_at: 'not a date' }), Date.parse(SLATED));
+eq('null actual falls back to slated',
+  showOriginMs({ slated_at: SLATED, actual_started_at: null }), Date.parse(SLATED));
+eq('no show at all -> null, not NaN', showOriginMs(null), null);
+eq('no dates at all -> null, not NaN', showOriginMs({}), null);
+eq('★ never returns NaN', [showOriginMs({ slated_at: 'x', actual_started_at: 'y' })], [null]);
+
+// THE BOUNDARY. Scheduling must not move: a show that never starts still
+// has to expire, and the door must open before the artist goes live.
+const lateShow = { id: 's', state: 'scheduled', slated_at: new Date(T).toISOString(), duration_minutes: 60 };
+eq('★ scheduling still answers from slated_at, not actual',
+  showWindowClosesAt({ ...lateShow, actual_started_at: new Date(T + 30 * 60000).toISOString() }),
+  showWindowClosesAt(lateShow));
+eq('★ a show that never started still expires',
+  isExpired({ ...lateShow, state: 'soundcheck' }, T + 80 * 60000), true);
+eq('★ the door still opens before the artist goes live',
+  isWindowOpen(lateShow, T - 20 * 60000), true);
 
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
