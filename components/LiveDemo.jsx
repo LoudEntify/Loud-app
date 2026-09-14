@@ -1588,6 +1588,88 @@ function resolveSlotTrack(candidates, cmd, ineligibleTracks) {
   return { eligible, matched, chosen, activeImpaired: !!chosen && !eligible.includes(chosen) };
 }
 
+// ── STALE-STATE OVERLAY (?stale=1) ────────────────────────────
+// Item 1's transitions are invisible on screen: suspended and downgraded
+// produce the SAME picture whenever the fallback is the same camera, so
+// "it looked right" and "it never fired" are indistinguishable by eye.
+// Eleven device tests were spent on that ambiguity.
+//
+// This is a DIAGNOSTIC LADDER, not a status light. Each row answers the
+// next question down, so one glance says WHERE the chain breaks rather
+// than only that it broke:
+//
+//   clock    the `now` prop, as a wall clock. FROZEN => the 1s tick is
+//            not reaching RoomInner, and no clock-driven transition can
+//            ever fire. This is the first thing to check.
+//   runs     how many times the planStaleShots effect has executed. Not
+//            advancing while the clock ticks => the effect's deps are
+//            not changing, i.e. `now` is not in the dep array it thinks
+//            it is.
+//   present  what isTargetPresent() answers right now. Stuck false after
+//            the camera returns => matchesTarget is failing, most likely
+//            because the camera came back under a different identity.
+//   state    what the command actually holds. Stuck ACTIVE after a
+//            suspension logged => the state is not persisting, and
+//            something else is overwriting activeShot.
+//   +Ns      seconds since framingSuspendedAt. Passing 20 without the
+//            state going DOWNGRADED is the planner failing on data that
+//            should have tripped it.
+//
+// Also renders the deployment's git sha, because a device test against a
+// branch alias that has silently moved is not a test of the commit the
+// tester believes they are running.
+const STALE_DEBUG_ENABLED =
+  typeof window !== 'undefined' &&
+  (window.location.search.includes('stale=1') || window.location.search.includes('debug=1'));
+
+const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
+
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent }) {
+  if (!STALE_DEBUG_ENABLED) return null;
+  const clock = new Date(now || 0).toISOString().slice(11, 19);
+  const rows = Object.entries(activeShot || {});
+  const cell = { padding: '1px 6px 1px 0', whiteSpace: 'nowrap' };
+  return (
+    <div
+      style={{
+        position: 'fixed', top: 8, left: 8, zIndex: 99999, pointerEvents: 'none',
+        background: 'rgba(0,0,0,0.82)', color: '#7CFFB2', font: '11px/1.35 ui-monospace, Menlo, monospace',
+        padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(124,255,178,0.35)', maxWidth: '92vw',
+      }}
+    >
+      <div style={{ color: '#fdfffc', marginBottom: 3 }}>
+        STALE {BUILD_SHA} · clock {clock} · runs {runs}
+      </div>
+      {rows.length === 0 && <div style={{ color: '#888' }}>no active shot</div>}
+      <table style={{ borderCollapse: 'collapse' }}>
+        <tbody>
+          {rows.map(([slot, cmd]) => {
+            const suspended = !!cmd?.framingSuspended;
+            const downgraded = !!cmd?.downgradedFrom;
+            const state = downgraded ? 'DOWNGRADED' : suspended ? 'SUSPENDED' : 'ACTIVE';
+            const colour = downgraded ? '#FF9F4A' : suspended ? '#FFD54A' : '#7CFFB2';
+            const secs = cmd?.framingSuspendedAt ? Math.floor((now - cmd.framingSuspendedAt) / 1000) : null;
+            const present = isTargetPresent(slot, cmd);
+            return (
+              <tr key={slot}>
+                <td style={{ ...cell, color: '#fdfffc' }}>{slot}</td>
+                <td style={{ ...cell, color: colour, fontWeight: 700 }}>{state}</td>
+                <td style={{ ...cell, color: '#fdfffc' }}>{secs === null ? '—' : `+${secs}s`}</td>
+                <td style={{ ...cell, color: present ? '#7CFFB2' : '#FF6B6B' }}>
+                  {present ? 'present' : 'ABSENT'}
+                </td>
+                <td style={{ ...cell }}>{cmd?.downgradedFrom ? `${cmd.downgradedFrom}->wide` : cmd?.shot}</td>
+                <td style={{ ...cell, color: '#9ad' }}>{(cmd?.targetIdentity || 'none').slice(0, 22)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
+    </div>
+  );
+}
+
 // --- Connected room UI -------------------------------------------------
 
 function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, artistId, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
@@ -3373,6 +3455,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     [tracks]
   );
 
+  const staleDebugRef = useRef({ runs: 0, last: null });
+
   // ── ONE effect, one pure decision ─────────────────────────────
   // Suspend, resume and downgrade are three transitions of ONE state
   // machine, so they are decided together by planStaleShots
@@ -3416,6 +3500,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         };
       },
     });
+    // Diagnostic counters for the ?stale=1 overlay. A ref, not state:
+    // this must not itself cause a render, and `now` already re-renders
+    // this component every second so the overlay reads a fresh value.
+    staleDebugRef.current.runs += 1;
+    if (events.length) {
+      staleDebugRef.current.last =
+        `${new Date(now).toISOString().slice(11, 19)} ${events.map((e) => e.type.replace('stale_command_', '')).join(', ')}`;
+    }
     events.forEach((e) => logHealthEvent(e.type, e.detail));
     if (changed) setActiveShot(next);
     // poolSignature, not `tracks` -- `tracks` is a fresh array every
@@ -4763,6 +4855,14 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
+      <StaleShotDebugOverlay
+        activeShot={activeShot}
+        now={now}
+        runs={staleDebugRef.current.runs}
+        lastEvent={staleDebugRef.current.last}
+        isTargetPresent={(slot, cmd) =>
+          !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
+      />
       {notice && <div className="stage-notice">{notice}</div>}
 
       {/* Soundcheck/live banner (SHOW_LIFECYCLE_SPEC.md 3b/3e) -- artist
