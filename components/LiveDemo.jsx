@@ -1624,7 +1624,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -1660,6 +1660,20 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
                 </td>
                 <td style={{ ...cell }}>{cmd?.downgradedFrom ? `${cmd.downgradedFrom}->wide` : cmd?.shot}</td>
                 <td style={{ ...cell, color: '#9ad' }}>{(cmd?.targetIdentity || 'none').slice(0, 22)}</td>
+                <td style={{ ...cell }}>
+                  <button
+                    type="button"
+                    onClick={() => onToggleDrop(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`)}
+                    style={{
+                      pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+                      background: simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? '#7CFFB2' : 'transparent',
+                      color: simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? '#000' : '#7CFFB2',
+                      border: '1px solid #7CFFB2', borderRadius: 3, padding: '0 5px',
+                    }}
+                  >
+                    {simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? 'restore' : 'drop'}
+                  </button>
+                </td>
               </tr>
             );
           })}
@@ -3417,9 +3431,32 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // be in the rendering pool or ShotVideo has no layer to cut to. What
   // stops it being mistaken for a camera is roleOfTrack, everywhere a
   // role is asked for.
+  // ── SIMULATED TARGET LOSS (?stale=1) ──────────────────────────
+  // A hardware cycle for this is ~2 minutes and depends on LiveKit's ~8s
+  // eviction before anything can even begin. That is what made eleven
+  // tests cost two days. This drops the target out of the slot's pool
+  // locally and instantly, so the whole state machine -- suspend, the
+  // 20s TTL, downgrade, resume -- can be exercised in seconds, by anyone,
+  // with no phone and no wifi to kill.
+  //
+  // It is also the honest separation of concerns: this tests OUR
+  // reaction to a camera leaving. Killing a phone tests LiveKit's
+  // detection AND our reaction at once, and when that fails you cannot
+  // tell which half broke.
+  //
+  // Gated on STALE_DEBUG_ENABLED, which is a query-string flag, so it
+  // cannot exist on a normal show load.
+  const [simDropped, setSimDropped] = useState(() => new Set());
+
   const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) => belongsToSlot(t, letter) && !t.publication?.isMuted),
-    [tracks]);
+    tracks.filter((t) => {
+      if (!belongsToSlot(t, letter) || t.publication?.isMuted) return false;
+      // Debug-only, and dead code on any normal load: STALE_DEBUG_ENABLED
+      // is false unless ?stale=1 / ?debug=1 is in the URL.
+      if (STALE_DEBUG_ENABLED && simDropped.size && simDropped.has(sourceKey(t))) return false;
+      return true;
+    }),
+    [tracks, simDropped]);
 
   const eligibleForSlot = useCallback((letter) =>
     filterEligible(tracksForSlot(letter), ineligibleTracks),
@@ -4862,6 +4899,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         lastEvent={staleDebugRef.current.last}
         isTargetPresent={(slot, cmd) =>
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
+        simDropped={simDropped}
+        onToggleDrop={(key) => setSimDropped((prev) => {
+          const nextSet = new Set(prev);
+          if (nextSet.has(key)) nextSet.delete(key); else nextSet.add(key);
+          return nextSet;
+        })}
       />
       {notice && <div className="stage-notice">{notice}</div>}
 
