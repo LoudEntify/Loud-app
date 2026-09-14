@@ -9,6 +9,7 @@ import {
   SHOW_TOKEN_TTL,
   camfeedIdentity,
   hashDeviceSecret,
+  isLivePairing,
   mintCameraToken,
   newDeviceSecret,
   pairingCapabilities,
@@ -79,6 +80,14 @@ function publicPairing(row) {
     lastSeenAt: row.last_seen_at || null,
     generation: row.generation ?? 1,
     targetRoom: row.target_room || null,
+    // ITEM 2 — the same predicate the cap uses, surfaced so the list and
+    // the cap can agree. ADDITIVE: `list` still returns every non-revoked
+    // row and nothing reading this payload today changes behaviour. It is
+    // here because the cap now counts live cameras while Kit Check still
+    // renders every row, so an artist can be shown six entries and still
+    // be allowed to pair — and the field is what lets the UI stop showing
+    // codes nobody redeemed, whenever that is picked up.
+    live: isLivePairing(row),
   };
 }
 
@@ -207,12 +216,26 @@ async function createInvite({ admin, caps, body, userId, raw = false }) {
   if (caps.multiCamera) {
     // A rig, not a farm. Six is more cameras than any artist in this
     // pilot will prop, and it stops a stuck loop minting codes forever.
-    const { count } = await admin
+    //
+    // ITEM 2 — the cap counts CAMERAS, not rows. This previously ran as
+    // a `head: true` count of every non-revoked row, with no filter on
+    // used_at or expires_at and nothing anywhere pruning: every code ever
+    // minted counted against the cap forever. An artist who had rehearsed
+    // a handful of times was locked out of pairing a camera, and the
+    // error told them to remove one of six cameras that did not exist.
+    //
+    // Counted in JS rather than as an .or() chain in PostgREST, which is
+    // why this fetches rows instead of a count. The result set is bounded
+    // by how many codes one artist has ever minted — a few dozen at
+    // worst — and isLivePairing is one readable definition of "live"
+    // instead of a filter expression split across a query string.
+    const { data: existing } = await admin
       .from('camfeed_pairings')
-      .select('id', { count: 'exact', head: true })
+      .select('id, used_at, expires_at, last_seen_at, revoked_at')
       .eq('created_by', userId)
       .is('revoked_at', null);
-    if ((count ?? 0) >= MAX_LIVE_PAIRINGS) {
+    const liveCount = (existing || []).filter((p) => isLivePairing(p)).length;
+    if (liveCount >= MAX_LIVE_PAIRINGS) {
       const err = { error: `You already have ${MAX_LIVE_PAIRINGS} cameras paired. Remove one first.`, status: 409 };
       return raw ? err : NextResponse.json({ error: err.error }, { status: err.status });
     }

@@ -56,6 +56,7 @@ import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState } from '../lib/showState';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { planStaleShots } from '../lib/staleShotPlan';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -1540,6 +1541,148 @@ const BE_RIGHT_BACK_PLACEHOLDER = (
     <div style={{ fontSize: 13 }}>The performance will resume in a moment</div>
   </div>
 );
+
+
+// The slot resolution formula -- WHICH TRACK IS ON AIR for a slot.
+//
+// Extracted from renderSlot rather than duplicated into the staleness
+// effect below, and that is the whole point: the effect logs "the
+// fallback actually chosen", and a second copy of this chain would make
+// that claim true only until someone edited one copy. renderSlot and the
+// health event now cannot disagree by construction.
+//
+// BroadcastStage's blur-fill (PARSE SITE 6) deliberately keeps its own
+// chain -- it prefers isPerformerCameraTrack where this prefers
+// roleOfTrack === 'main'. Those are different rules, not a duplicate, so
+// it is left alone.
+function resolveSlotTrack(candidates, cmd, ineligibleTracks) {
+  const eligible = filterEligible(candidates, ineligibleTracks);
+  // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
+  // that feed is impaired. The artist cut there on purpose; the answer
+  // is a stable frozen frame with the holding treatment until they
+  // cut away or it revives, not a silent re-pick. Searched against the
+  // unfiltered pool for exactly that reason.
+  // PARSE SITE 5 of 6, and the one that actually decides what is on
+  // screen. matchesTarget compares identity AND what the track IS --
+  // identity alone would match the artist's camera for a command that
+  // meant their b-roll clip, because a clip is published by the
+  // artist's own participant.
+  const matched = cmd?.targetIdentity
+    ? candidates.find((t) => matchesTarget(t, cmd))
+    : undefined;
+  // Every non-explicit path prefers LIVE feeds -- this is what stops
+  // auto/fallback from ever landing on a dead camera by itself. The
+  // final fallback is a last resort for when nothing is live at all,
+  // where a frozen frame beats an empty stage.
+  //
+  // Every fallback resolves against CAMERAS ONLY. A shot whose target
+  // has gone must never land on a playing clip by accident -- the
+  // return from b-roll is a deliberate broadcast cut, not a fallback.
+  const eligibleCameras = cameraTracksOnly(eligible);
+  const chosen =
+    matched ||
+    eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
+    eligibleCameras[0] ||
+    cameraTracksOnly(candidates)[0] ||
+    candidates[0];
+  return { eligible, matched, chosen, activeImpaired: !!chosen && !eligible.includes(chosen) };
+}
+
+// ── STALE-STATE OVERLAY (?stale=1) ────────────────────────────
+// Item 1's transitions are invisible on screen: suspended and downgraded
+// produce the SAME picture whenever the fallback is the same camera, so
+// "it looked right" and "it never fired" are indistinguishable by eye.
+// Eleven device tests were spent on that ambiguity.
+//
+// This is a DIAGNOSTIC LADDER, not a status light. Each row answers the
+// next question down, so one glance says WHERE the chain breaks rather
+// than only that it broke:
+//
+//   clock    the `now` prop, as a wall clock. FROZEN => the 1s tick is
+//            not reaching RoomInner, and no clock-driven transition can
+//            ever fire. This is the first thing to check.
+//   runs     how many times the planStaleShots effect has executed. Not
+//            advancing while the clock ticks => the effect's deps are
+//            not changing, i.e. `now` is not in the dep array it thinks
+//            it is.
+//   present  what isTargetPresent() answers right now. Stuck false after
+//            the camera returns => matchesTarget is failing, most likely
+//            because the camera came back under a different identity.
+//   state    what the command actually holds. Stuck ACTIVE after a
+//            suspension logged => the state is not persisting, and
+//            something else is overwriting activeShot.
+//   +Ns      seconds since framingSuspendedAt. Passing 20 without the
+//            state going DOWNGRADED is the planner failing on data that
+//            should have tripped it.
+//
+// Also renders the deployment's git sha, because a device test against a
+// branch alias that has silently moved is not a test of the commit the
+// tester believes they are running.
+const STALE_DEBUG_ENABLED =
+  typeof window !== 'undefined' &&
+  (window.location.search.includes('stale=1') || window.location.search.includes('debug=1'));
+
+const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
+
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop }) {
+  if (!STALE_DEBUG_ENABLED) return null;
+  const clock = new Date(now || 0).toISOString().slice(11, 19);
+  const rows = Object.entries(activeShot || {});
+  const cell = { padding: '1px 6px 1px 0', whiteSpace: 'nowrap' };
+  return (
+    <div
+      style={{
+        position: 'fixed', top: 8, left: 8, zIndex: 99999, pointerEvents: 'none',
+        background: 'rgba(0,0,0,0.82)', color: '#7CFFB2', font: '11px/1.35 ui-monospace, Menlo, monospace',
+        padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(124,255,178,0.35)', maxWidth: '92vw',
+      }}
+    >
+      <div style={{ color: '#fdfffc', marginBottom: 3 }}>
+        STALE {BUILD_SHA} · clock {clock} · runs {runs}
+      </div>
+      {rows.length === 0 && <div style={{ color: '#888' }}>no active shot</div>}
+      <table style={{ borderCollapse: 'collapse' }}>
+        <tbody>
+          {rows.map(([slot, cmd]) => {
+            const suspended = !!cmd?.framingSuspended;
+            const downgraded = !!cmd?.downgradedFrom;
+            const state = downgraded ? 'DOWNGRADED' : suspended ? 'SUSPENDED' : 'ACTIVE';
+            const colour = downgraded ? '#FF9F4A' : suspended ? '#FFD54A' : '#7CFFB2';
+            const secs = cmd?.framingSuspendedAt ? Math.floor((now - cmd.framingSuspendedAt) / 1000) : null;
+            const present = isTargetPresent(slot, cmd);
+            return (
+              <tr key={slot}>
+                <td style={{ ...cell, color: '#fdfffc' }}>{slot}</td>
+                <td style={{ ...cell, color: colour, fontWeight: 700 }}>{state}</td>
+                <td style={{ ...cell, color: '#fdfffc' }}>{secs === null ? '—' : `+${secs}s`}</td>
+                <td style={{ ...cell, color: present ? '#7CFFB2' : '#FF6B6B' }}>
+                  {present ? 'present' : 'ABSENT'}
+                </td>
+                <td style={{ ...cell }}>{cmd?.downgradedFrom ? `${cmd.downgradedFrom}->wide` : cmd?.shot}</td>
+                <td style={{ ...cell, color: '#9ad' }}>{(cmd?.targetIdentity || 'none').slice(0, 22)}</td>
+                <td style={{ ...cell }}>
+                  <button
+                    type="button"
+                    onClick={() => onToggleDrop(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`)}
+                    style={{
+                      pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+                      background: simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? '#7CFFB2' : 'transparent',
+                      color: simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? '#000' : '#7CFFB2',
+                      border: '1px solid #7CFFB2', borderRadius: 3, padding: '0 5px',
+                    }}
+                  >
+                    {simDropped.has(cmd?.targetSourceKey || `${cmd?.targetIdentity}#camera`) ? 'restore' : 'drop'}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
+    </div>
+  );
+}
 
 // --- Connected room UI -------------------------------------------------
 
@@ -3288,13 +3431,126 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
   // be in the rendering pool or ShotVideo has no layer to cut to. What
   // stops it being mistaken for a camera is roleOfTrack, everywhere a
   // role is asked for.
+  // ── SIMULATED TARGET LOSS (?stale=1) ──────────────────────────
+  // A hardware cycle for this is ~2 minutes and depends on LiveKit's ~8s
+  // eviction before anything can even begin. That is what made eleven
+  // tests cost two days. This drops the target out of the slot's pool
+  // locally and instantly, so the whole state machine -- suspend, the
+  // 20s TTL, downgrade, resume -- can be exercised in seconds, by anyone,
+  // with no phone and no wifi to kill.
+  //
+  // It is also the honest separation of concerns: this tests OUR
+  // reaction to a camera leaving. Killing a phone tests LiveKit's
+  // detection AND our reaction at once, and when that fails you cannot
+  // tell which half broke.
+  //
+  // Gated on STALE_DEBUG_ENABLED, which is a query-string flag, so it
+  // cannot exist on a normal show load.
+  const [simDropped, setSimDropped] = useState(() => new Set());
+
   const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) => belongsToSlot(t, letter) && !t.publication?.isMuted),
-    [tracks]);
+    tracks.filter((t) => {
+      if (!belongsToSlot(t, letter) || t.publication?.isMuted) return false;
+      // Debug-only, and dead code on any normal load: STALE_DEBUG_ENABLED
+      // is false unless ?stale=1 / ?debug=1 is in the URL.
+      if (STALE_DEBUG_ENABLED && simDropped.size && simDropped.has(sourceKey(t))) return false;
+      return true;
+    }),
+    [tracks, simDropped]);
 
   const eligibleForSlot = useCallback((letter) =>
     filterEligible(tracksForSlot(letter), ineligibleTracks),
     [tracksForSlot, ineligibleTracks]);
+
+  // ── Items 1a / 11a / 10 — a command whose target has left ──────
+  //
+  // EgressPage.jsx:252-271 solves this by DROPPING the command. A
+  // recorder can afford that; the live stage cannot. A camfeed that
+  // drops and returns comes back under the same identity
+  // (app/api/camfeed/session/route.js:130), so the command still in
+  // activeShot re-matches and the shot re-acquires by itself. Dropping
+  // the command deletes that self-healing and makes the director re-cut
+  // manually for every transient camera blip.
+  //
+  // So: keep the command and its target, and neutralise only the part
+  // that is actually wrong -- the framing. A replacement camera must
+  // never wear a crop composed for a camera that no longer exists.
+  //
+  // Muted counts as gone, because tracksForSlot already excludes muted
+  // tracks: if renderSlot cannot pick it, the fallback IS on screen and
+  // its crop is exactly as wrong as it would be after a disconnect.
+  //
+  // sourceKey, not identity, because that is what matchesTarget uses. A
+  // b-roll clip and the artist's camera share one identity, so an
+  // identity-keyed signature would miss a clip ending under a bRoll
+  // command -- the stale-crop case the source-key work exists to stop.
+  const poolSignature = useMemo(
+    () => tracks
+      .map((t) => `${sourceKey(t) || 'unknown'}:${t.publication?.isMuted ? 'muted' : 'live'}`)
+      .sort()
+      .join('|'),
+    [tracks]
+  );
+
+  const staleDebugRef = useRef({ runs: 0, last: null });
+
+  // ── ONE effect, one pure decision ─────────────────────────────
+  // Suspend, resume and downgrade are three transitions of ONE state
+  // machine, so they are decided together by planStaleShots
+  // (lib/staleShotPlan.js) and applied here.
+  //
+  // The first version split them across two effects with different
+  // dependency arrays and called logHealthEvent from INSIDE the
+  // setActiveShot updater. A React state updater must be pure: React
+  // runs it during render, may run it more than once, and throws the
+  // result away when it bails out — so an event emitted in there has no
+  // guaranteed relationship to the state change it describes. The first
+  // device test found exactly that: suspensions logged, resumes and
+  // downgrades did not, while the screen looked right.
+  //
+  // Now the effect body does the two side effects in order — emit, then
+  // set — which is what an effect body is for.
+  //
+  // `now` is a dependency because the downgrade TTL is a clock
+  // transition, not a pool transition; the 1s tick is what makes it fire
+  // without any timer bookkeeping. Re-entry is safe: applying the plan
+  // changes activeShot, the next pass finds nothing left to do and
+  // returns the same reference, so it converges in one extra pass.
+  useEffect(() => {
+    const { next, events, changed } = planStaleShots({
+      activeShot,
+      now,
+      // The SAME predicate renderSlot resolves `matched` with. sourceKey,
+      // not identity: a b-roll clip and the artist's camera share one
+      // identity, so an identity-only test would miss a clip ending under
+      // a bRoll command.
+      isTargetPresent: (slot, cmd) => tracksForSlot(slot).some((t) => matchesTarget(t, cmd)),
+      // Resolved through resolveSlotTrack so `fallback` is the track
+      // renderSlot actually puts on air, and the two cannot drift.
+      describeSlot: (slot, cmd) => {
+        const candidates = tracksForSlot(slot);
+        const { chosen } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
+        return {
+          fallback: sourceKey(chosen) || null,
+          fallbackRole: chosen ? roleOfTrack(chosen) : null,
+          candidateCount: candidates.length,
+        };
+      },
+    });
+    // Diagnostic counters for the ?stale=1 overlay. A ref, not state:
+    // this must not itself cause a render, and `now` already re-renders
+    // this component every second so the overlay reads a fresh value.
+    staleDebugRef.current.runs += 1;
+    if (events.length) {
+      staleDebugRef.current.last =
+        `${new Date(now).toISOString().slice(11, 19)} ${events.map((e) => e.type.replace('stale_command_', '')).join(', ')}`;
+    }
+    events.forEach((e) => logHealthEvent(e.type, e.detail));
+    if (changed) setActiveShot(next);
+    // poolSignature, not `tracks` -- `tracks` is a fresh array every
+    // render, so depending on it would re-run this on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poolSignature, activeShot, now]);
 
   // MULTI_PERFORMER_SPEC.md's generalization pass -- the set of
   // performer slots CURRENTLY PRESENT (a published camera track exists
@@ -3533,39 +3789,12 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
 
   const renderSlot = (letter) => () => {
     const candidates = tracksForSlot(letter);
-    const eligible = filterEligible(candidates, ineligibleTracks);
     const cmd = activeShot[letter];
-    // Test 4 ruling -- an explicit targetIdentity is HONOURED even when
-    // that feed is impaired. The artist cut there on purpose; the answer
-    // is a stable frozen frame with the holding treatment until they
-    // cut away or it revives, not a silent re-pick. Searched against the
-    // unfiltered pool for exactly that reason.
     // PARSE SITE 5 of 6, and the one that actually decides what is on
-    // screen. matchesTarget compares identity AND what the track IS --
-    // identity alone would match the artist's camera for a command that
-    // meant their b-roll clip, because a clip is published by the
-    // artist's own participant. That is the failure this whole round
-    // exists to remove, and this is the line where it would have
-    // happened.
-    const matched = cmd?.targetIdentity
-      ? candidates.find((t) => matchesTarget(t, cmd))
-      : undefined;
-    // Every non-explicit path prefers LIVE feeds -- this is what stops
-    // auto/fallback from ever landing on a dead camera by itself. The
-    // final fallback is a last resort for when nothing is live at all,
-    // where a frozen frame beats an empty stage.
-    //
-    // Every fallback resolves against CAMERAS ONLY. A shot whose target
-    // has gone must never land on a playing clip by accident -- the
-    // return from b-roll is a deliberate broadcast cut, not a fallback.
-    const eligibleCameras = cameraTracksOnly(eligible);
-    const chosen =
-      matched ||
-      eligibleCameras.find((t) => roleOfTrack(t) === 'main') ||
-      eligibleCameras[0] ||
-      cameraTracksOnly(candidates)[0] ||
-      candidates[0];
-    const activeImpaired = !!chosen && !eligible.includes(chosen);
+    // screen. The chain itself now lives in resolveSlotTrack (module
+    // scope) so the staleness effect above logs the same `chosen` this
+    // renders -- see that function's comment for why it was extracted.
+    const { matched, chosen, activeImpaired } = resolveSlotTrack(candidates, cmd, ineligibleTracks);
 
     // DEBUG (bug 2 investigation) -- viewer-side only (role === 'viewer';
     // the director already has other debug coverage). Shows exactly what
@@ -4663,6 +4892,20 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
       <CutTimingDebugOverlay />
+      <StaleShotDebugOverlay
+        activeShot={activeShot}
+        now={now}
+        runs={staleDebugRef.current.runs}
+        lastEvent={staleDebugRef.current.last}
+        isTargetPresent={(slot, cmd) =>
+          !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
+        simDropped={simDropped}
+        onToggleDrop={(key) => setSimDropped((prev) => {
+          const nextSet = new Set(prev);
+          if (nextSet.has(key)) nextSet.delete(key); else nextSet.add(key);
+          return nextSet;
+        })}
+      />
       {notice && <div className="stage-notice">{notice}</div>}
 
       {/* Soundcheck/live banner (SHOW_LIFECYCLE_SPEC.md 3b/3e) -- artist

@@ -72,6 +72,17 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  'build-info/route.js': {
+    status: 'settled',
+    reason:
+      'Public, read-only, and returns exactly one class of fact: which git commit this ' +
+      'deployment was built from (sha, branch, commit message, VERCEL_ENV, deployment host). ' +
+      'All of it is already visible to anyone who can see the Vercel deployment, it is the ' +
+      "team's own repository, and there is no write path and no user data. It exists because a " +
+      'device test against a branch alias is not a test of a known commit — the alias follows the ' +
+      'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
+      'Requiring a session here would put the check behind the thing being checked.',
+  },
   'token/route.js': {
     status: 'settled',
     reason:
