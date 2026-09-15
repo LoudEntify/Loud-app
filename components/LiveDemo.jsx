@@ -57,9 +57,10 @@ import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState';
 import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
-import { viewerIdOrSession, getSavedEntry, saveEntry } from '../lib/viewerIdentity';
+import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, markPromptAnswered } from '../lib/viewerIdentity';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
+import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup } from '../lib/promptCatchup';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -2163,7 +2164,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -2297,6 +2298,30 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
           leave beacon
         </button>
       </div>
+      {/* ITEM 6 -- the catch-up schedule. Checking this on a device
+          otherwise means waiting five minutes and then three more, which
+          is how item 1 turned eleven tests into two days. */}
+      {catchup && (
+        <div style={{ color: '#fdfffc', marginTop: 3 }}>
+          catchup {catchup.shown}/3 · outstanding {catchup.outstanding}
+          {' · '}
+          <span style={{ color: catchup.dueInMs === null ? '#888' : catchup.dueInMs <= 0 ? '#FF9F4A' : '#888' }}>
+            {catchup.dueInMs === null ? 'done' : catchup.dueInMs <= 0 ? 'due' : `in ${Math.ceil(catchup.dueInMs / 1000)}s`}
+          </span>
+          {' '}
+          <button
+            type="button"
+            onClick={catchup.onForce}
+            style={{
+              pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+              background: 'transparent', color: '#FFD54A',
+              border: '1px solid #FFD54A', borderRadius: 3, padding: '0 5px',
+            }}
+          >
+            force
+          </button>
+        </div>
+      )}
       <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
     </div>
   );
@@ -2662,6 +2687,25 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // (answering twice overwrites, which is the intended behaviour).
   const [activePrompt, setActivePrompt] = useState(null);
   const [promptAnswered, setPromptAnswered] = useState(false);
+  // ── CATCH-UP FOR LATE JOINERS ─────────────────────────────────
+  // Everything this show has asked (fetched, because a prompt broadcast
+  // before this client joined can never reach it over the data channel),
+  // what this DEVICE has already answered (persisted, so a reload does
+  // not re-offer it), and what has been put in front of them this
+  // session (so a dismissed card is not re-offered in a loop).
+  const [pushedPrompts, setPushedPrompts] = useState([]);
+  const [answeredIds, setAnsweredIds] = useState(() =>
+    (typeof window === 'undefined' ? [] : getAnsweredPromptIds()));
+  const [seenPromptIds, setSeenPromptIds] = useState([]);
+  const [lastCatchupAt, setLastCatchupAt] = useState(null);
+  // Counted separately from seenPromptIds, which also holds prompts seen
+  // LIVE. The cap is on how many catch-up cards this viewer has been
+  // handed, not on how many questions they have seen.
+  const [catchupShownCount, setCatchupShownCount] = useState(0);
+  // When THIS client joined -- the 5-minute threshold is measured from
+  // arrival, not from the start of the show. A late joiner has watched
+  // five minutes when they have watched five minutes.
+  const joinedAtRef = useRef(Date.now());
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
 
   // ── Cameras, on stage ────────────────────────────────────────
@@ -3706,6 +3750,10 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     if (payload.type === 'PROMPT' && payload.prompt?.id) {
       setActivePrompt(payload.prompt);
       setPromptAnswered(false);
+      // A prompt seen LIVE is not a missed prompt. Without this, a
+      // viewer who dismisses a live question would be offered it again
+      // by the catch-up three minutes later, which reads as nagging.
+      setSeenPromptIds((prev) => (prev.includes(payload.prompt.id) ? prev : [...prev, payload.prompt.id]));
     }
     if (payload.type === 'PROMPT_CLOSED') {
       setActivePrompt((prev) => (prev && prev.id === payload.promptId ? null : prev));
@@ -5553,6 +5601,66 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     return () => { cancelled = true; clearInterval(t); };
   }, [isMainPerformer, pushedPromptKeys, roomName]);
 
+  // Fetch what this show has already asked. Once on mount, then on a
+  // slow poll: a viewer who is here for an hour should pick up prompts
+  // pushed while they were watching but momentarily disconnected, and
+  // 60s is far below the 3-minute catch-up spacing so it can never be
+  // the reason a card is late.
+  //
+  // Viewers only. The operator already knows what they pushed, and their
+  // panel reads the artist-only results route instead.
+  useEffect(() => {
+    if (isMainPerformer) return undefined;
+    if (!roomName) return undefined;
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const res = await fetch(`/api/show-prompts/list?room=${encodeURIComponent(roomName)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data.prompts)) setPushedPrompts(data.prompts);
+      } catch {
+        // A failed read means catch-up is quiet, never that the show breaks.
+      }
+    };
+    read();
+    const t = setInterval(read, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isMainPerformer, roomName]);
+
+  // ── THE CATCH-UP SCHEDULER ────────────────────────────────────
+  // Driven by the same 1s `now` tick everything else uses -- no timers to
+  // leak, and the condition is re-read from current state every second
+  // rather than captured in a closure. Same lesson as item 1.
+  //
+  // A LIVE PROMPT ALWAYS WINS: if something is already on screen this
+  // does nothing, so a catch-up card can never sit in front of the
+  // question the artist is talking about right now.
+  useEffect(() => {
+    if (isMainPerformer) return;
+    if (activePrompt) return;
+    const next = nextCatchupPrompt({
+      pushed: pushedPrompts,
+      answeredIds,
+      seenIds: seenPromptIds,
+      joinedAt: joinedAtRef.current,
+      lastShownAt: lastCatchupAt,
+      now,
+      shownCount: catchupShownCount,
+    });
+    if (!next) return;
+    setActivePrompt(next);
+    setPromptAnswered(false);
+    setSeenPromptIds((prev) => [...prev, next.id]);
+    setLastCatchupAt(now);
+    setCatchupShownCount((n) => n + 1);
+    logHealthEvent('prompt_catchup_shown', {
+      promptId: next.id,
+      watchedMs: now - joinedAtRef.current,
+      outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds }).length,
+    });
+  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, seenPromptIds, lastCatchupAt, catchupShownCount, now]);
+
   const answerPrompt = useCallback(async (payload) => {
     if (!activePrompt?.id) return 'That question is no longer open.';
     try {
@@ -5572,6 +5680,10 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         return data?.error || 'That did not send. Try once more.';
       }
       setPromptAnswered(true);
+      // Persisted, not just React state. This is what stops the catch-up
+      // re-offering it and what makes the acknowledgement survive a
+      // reload -- the gap a device test found on 15 Sept.
+      setAnsweredIds(markPromptAnswered(activePrompt.id));
       return null;
     } catch {
       return 'That did not send. Try once more.';
@@ -5825,6 +5937,19 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         show={show}
         viewerId={viewerId}
         onLeaveBeacon={onLeaveBeacon}
+        catchup={{
+          shown: catchupShownCount,
+          outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds }).length,
+          dueInMs: msUntilNextCatchup({
+            pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds,
+            joinedAt: joinedAtRef.current, lastShownAt: lastCatchupAt, now,
+            shownCount: catchupShownCount,
+          }),
+          // Rewinds the two gates rather than bypassing the scheduler, so
+          // the button exercises the REAL path instead of a parallel one
+          // that could pass while the real one is broken.
+          onForce: () => { joinedAtRef.current = 0; setLastCatchupAt(null); },
+        }}
         onCloseRoom={() => {
           // The exact Layer B sequence, on demand: stop egress, wait for
           // it up to the grace, then delete the room regardless.

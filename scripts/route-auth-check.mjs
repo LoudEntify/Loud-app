@@ -83,6 +83,20 @@ const ALLOWLIST = {
       'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
       'Requiring a session here would put the check behind the thing being checked.',
   },
+  'show-prompts/list/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, pairing with prompt-responses. A late joiner was not ' +
+      'in the room when a prompt was broadcast, so the data channel can never reach them with ' +
+      'it; this is the only way they can answer what they missed, and one that required signing ' +
+      'in would simply not be used. ⚠️ It is a SEPARATE route from the sibling GET on purpose: ' +
+      'that one returns RESULTS and is artist-only, because a visible tally changes the answers ' +
+      'and prompt_responses is per-person opinion. This returns the QUESTION ONLY (id, kind, ' +
+      'body, options, pushed_at) and does not touch prompt_responses at all. Adding a viewer ' +
+      'mode to the artist route would have left those two behaviours one boolean apart in one ' +
+      'function. Scoped by room name resolved server-side, not by a show id from the caller, ' +
+      'and capped at 50 so it cannot become a bulk export.',
+  },
   'prompt-responses/route.js': {
     status: 'settled',
     reason:
