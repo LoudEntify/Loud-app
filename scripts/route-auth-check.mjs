@@ -83,6 +83,48 @@ const ALLOWLIST = {
       'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
       'Requiring a session here would put the check behind the thing being checked.',
   },
+  'show-comments/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, the same posture as reactions/route.js which it is ' +
+      'modelled on, and for the same reason: the audience has no account, so requiring one would ' +
+      'make the stored chat log contain only signed-in users — a worse record and a misleading ' +
+      'one. There is no GET, so a caller can add their own comments and never read anybody ' +
+      "else's; show_comments has RLS on with zero policies and the live chat everyone reads comes " +
+      'over the LiveKit data channel, never through this table. Honest cost: a determined caller ' +
+      'can write comments nobody in the room saw — bounded by rate limit, batch cap and length ' +
+      'cap, but not prevented — so the stored log is a record of what was said, not evidence that ' +
+      'only those things were said.',
+  },
+  'show-prompts/list/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, pairing with prompt-responses. A late joiner was not ' +
+      'in the room when a prompt was broadcast, so the data channel can never reach them with ' +
+      'it; this is the only way they can answer what they missed, and one that required signing ' +
+      'in would simply not be used. ⚠️ It is a SEPARATE route from the sibling GET on purpose: ' +
+      'that one returns RESULTS and is artist-only, because a visible tally changes the answers ' +
+      'and prompt_responses is per-person opinion. This returns the QUESTION ONLY (id, kind, ' +
+      'body, options, pushed_at) and does not touch prompt_responses at all. Adding a viewer ' +
+      'mode to the artist route would have left those two behaviours one boolean apart in one ' +
+      'function. Scoped by room name resolved server-side, not by a show id from the caller, ' +
+      'and capped at 50 so it cannot become a bulk export.',
+  },
+  'prompt-responses/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, same posture as viewer-session and health-events. ' +
+      'The audience has no account, and requiring one would make the questionnaire measure ' +
+      'signed-in users rather than the room. Note the ASYMMETRY with show-prompts, which is the ' +
+      'design: ASKING a question puts text on every screen in a live broadcast and READING the ' +
+      'results exposes what people said — both are artist-only. ANSWERING is anonymous and open. ' +
+      'There is no GET here, so a caller can add their own answer and can never read anyone ' +
+      "else's. Everything descriptive on the stored row (prompt_body, choice_label) is read from " +
+      'the prompt in the database, never taken from the request, so a client cannot rewrite what ' +
+      'question it answered. Honest cost: a scripted caller can stuff a vote; the unique index ' +
+      'stops one person tapping four times, not a determined one, and the number should not be ' +
+      'quoted as adversarial.',
+  },
   'viewer-session/route.js': {
     status: 'settled',
     reason:

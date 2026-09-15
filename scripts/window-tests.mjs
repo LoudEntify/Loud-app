@@ -13,6 +13,8 @@ import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
+import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
+import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -321,6 +323,166 @@ eq('describeDisconnect names the action',
 eq('and for a real ending',
   describeDisconnect('ROOM_DELETED'), { reason: 'ROOM_DELETED', intentional: true, action: 'release' });
 
+
+
+// ── item 6: the prompts, and the four that must not change ──────
+// The July-survey strings are the only evidence in this pilot that
+// measures a CHANGE of mind rather than an opinion. Editing one is
+// silent -- rows still write, the tally still renders -- so the exact
+// bytes are asserted here.
+//
+// ⚠️ TWO OF THESE WERE SHIPPED WRONG ONCE, and the old test asserted the
+// WRONG values byte-exact, which made the error look verified. These are
+// the values actually present in `Potential viewers survey.csv`.
+console.log('\n── show prompts (item 6) ──');
+
+eq('eight prepared prompts', SHOW_PROMPTS.length, 8);
+eq('all validate against the DB CHECK', SHOW_PROMPTS.map(validatePrompt).filter(Boolean), []);
+eq('seven choice, one text at the end',
+  SHOW_PROMPTS.map((p) => p.kind).join(','), 'choice,choice,choice,choice,choice,choice,choice,text');
+eq('four are verbatim', SHOW_PROMPTS.filter((p) => p.verbatim).map((p) => p.key),
+  ['versus_interest', 'originals_or_covers', 'would_buy_tokens', 'first_purchase']);
+
+// CSV col 6
+eq('★ VERBATIM versus body (CSV col 6)', promptByKey('versus_interest').body,
+  'Imagine two unsigned artists going head-to-head in a live show, where your votes help decide the winner. How interesting does that sound?');
+eq('★ VERBATIM versus options', promptByKey('versus_interest').options,
+  ['Very interesting', 'Somewhat interesting', 'Not really']);
+
+// CSV col 4 -- note the STRAIGHT apostrophe in "don't"
+eq('★ VERBATIM covers body (CSV col 4)', promptByKey('originals_or_covers').body,
+  'Would you rather watch a new artist perform their own songs, or covers of songs you know?');
+eq('★ VERBATIM covers options', promptByKey('originals_or_covers').options,
+  ['Their own original songs', 'Covers of songs I already know', 'A mix of both', "I don't mind either way"]);
+eq('★ covers uses a STRAIGHT apostrophe (U+0027), as the survey did',
+  promptByKey('originals_or_covers').options[3].codePointAt(5), 0x27);
+
+// CSV col 7 -- `Never`, NOT `No, never`. Shipped wrong once.
+eq('★ VERBATIM tokens body (CSV col 7)', promptByKey('would_buy_tokens').body,
+  'Watching would be free. Would you ever buy tokens to power-vote or tip an artist you loved?');
+eq('★ VERBATIM tokens options -- `Never`, not `No, never`',
+  promptByKey('would_buy_tokens').options, ['Definitely', 'Only for an artist I really love', 'Never']);
+
+// CSV col 8 -- curly apostrophe, and NOT `Free votes only`. Shipped wrong once.
+eq('★ VERBATIM first-purchase body (CSV col 8)', promptByKey('first_purchase').body,
+  'Which would you most likely try first?');
+eq('★ VERBATIM first-purchase options', promptByKey('first_purchase').options,
+  ['I’d only ever use free votes', '£10 token pack', '£20 token pack']);
+eq('★ first-purchase uses a CURLY apostrophe (U+2019), as the survey did',
+  promptByKey('first_purchase').options[0].charCodeAt(1), 0x2019);
+
+// Order is load-bearing. Versus at 20 sits before covers at 22.
+eq('★ suggested order ascends, text last',
+  SHOW_PROMPTS.map((p) => p.suggestedAtMs),
+  [480000, 900000, 1200000, 1320000, 1800000, 2280000, 2700000, null]);
+eq('the versus question is flagged versus-only',
+  SHOW_PROMPTS.filter((p) => p.versusOnly).map((p) => p.key), ['versus_interest']);
+
+// validatePrompt mirrors show_prompts_options_check.
+eq('choice with 1 option rejected', !!validatePrompt({ kind: 'choice', body: 'q', options: ['a'] }), true);
+eq('choice with 5 options rejected', !!validatePrompt({ kind: 'choice', body: 'q', options: ['a','b','c','d','e'] }), true);
+eq('choice with 4 accepted', validatePrompt({ kind: 'choice', body: 'q', options: ['a','b','c','d'] }), null);
+eq('★ blank option rejected', !!validatePrompt({ kind: 'choice', body: 'q', options: ['a', '  '] }), true);
+eq('text with options rejected', !!validatePrompt({ kind: 'text', body: 'q', options: ['a'] }), true);
+eq('★ 281 chars rejected', !!validatePrompt({ kind: 'text', body: 'x'.repeat(281), options: [] }), true);
+eq('null rejected', !!validatePrompt(null), true);
+
+// ── item 6: catch-up for late joiners ───────────────────────────
+// Timing logic, which is what cost two days on item 1 -- so it is a pure
+// function and every rule is asserted rather than watched on a device.
+console.log('\n── prompt catch-up (item 6) ──');
+
+const J = 5_000_000_000_000;                       // joined at
+const pAt = (n) => ({ id: `p${n}`, pushed_at: new Date(J - n * 60000).toISOString() });
+const five = [pAt(1), pAt(2), pAt(3), pAt(4), pAt(5)]; // p1 newest
+const call = (o) => nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J, lastShownAt: null, now: J, ...o });
+
+eq('nothing before 5 minutes', call({ now: J + CATCHUP_AFTER_JOIN_MS - 1000 }), null);
+eq('★ at exactly 5 minutes, the most recent missed prompt',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS })?.id, 'p1');
+eq('★ at most 3 outstanding, most recent first',
+  outstandingPrompts({ pushed: five, answeredIds: [], seenIds: [] }).map((p) => p.id), ['p1', 'p2', 'p3']);
+eq('the cap is 3', CATCHUP_MAX_OUTSTANDING, 3);
+// Pinned so changing either is a visible diff in review rather than a
+// silent shift in how much of the show a late joiner spends answering.
+eq('★ threshold is 5 minutes', CATCHUP_AFTER_JOIN_MS, 5 * 60000);
+eq('★ spacing is 2 minutes', CATCHUP_SPACING_MS, 2 * 60000);
+
+// Spacing.
+eq('nothing within the spacing window of the last card',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS + CATCHUP_SPACING_MS - 1000, lastShownAt: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] }), null);
+eq('★ the next one exactly one spacing later',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS + CATCHUP_SPACING_MS, lastShownAt: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] })?.id, 'p2');
+
+// Never re-show an answered prompt -- the rule that was explicitly asked for.
+eq('★ an answered prompt is never offered',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS, answeredIds: ['p1'] })?.id, 'p2');
+eq('★ answered prompts drop out of the cap, so the 4th becomes eligible',
+  outstandingPrompts({ pushed: five, answeredIds: ['p1', 'p2'], seenIds: [] }).map((p) => p.id), ['p3', 'p4', 'p5']);
+eq('all answered -> nothing to catch up on',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS, answeredIds: ['p1','p2','p3','p4','p5'] }), null);
+
+// A dismissed card is not re-offered in a loop.
+eq('★ a prompt the catch-up already offered is not re-offered',
+  call({ now: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] })?.id, 'p2');
+
+// THE 911da9e REGRESSION. A viewer present for four pushes who answers
+// one must still be offered the other three. Excluding live-seen prompts
+// reported `outstanding 0` and offered nothing.
+eq('★ present for all four, answered one -> three still outstanding',
+  outstandingPrompts({ pushed: [pAt(1), pAt(2), pAt(3), pAt(4)], answeredIds: ['p2'], seenIds: [] })
+    .map((p) => p.id), ['p1', 'p3', 'p4']);
+eq('★ and the catch-up offers the most recent of them',
+  nextCatchupPrompt({ pushed: [pAt(1), pAt(2), pAt(3), pAt(4)], answeredIds: ['p2'], seenIds: [],
+    joinedAt: J, lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0 })?.id, 'p1');
+eq('★ answering ONE does not clear the rest',
+  outstandingPrompts({ pushed: five, answeredIds: ['p1'], seenIds: [] }).length, 3);
+
+// Nothing is asked after the end, and the queue is DROPPED rather than
+// deferred. A prompt over the ended card in front of fifty people is the
+// most visible way to look broken.
+eq('★ show ended -> no catch-up, however much is outstanding',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: true }), null);
+eq('★ show ended -> the countdown reports nothing due, not a time',
+  msUntilNextCatchup({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: true }), null);
+eq('and while the show is live it still delivers',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: false })?.id, 'p1');
+
+// Nothing pushed at all.
+eq('no prompts -> nothing', nextCatchupPrompt({ pushed: [], answeredIds: [], seenIds: [], joinedAt: J, lastShownAt: null, now: J + 1e7 }), null);
+eq('junk clock -> nothing, not a throw',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: NaN, lastShownAt: null, now: J }), null);
+
+// The full late-joiner sequence, ticked at 1Hz for 20 minutes: someone
+// arriving with five prompts behind them should be shown exactly three,
+// three minutes apart, starting five minutes after they arrived.
+{
+  const shown = [];
+  let seen = [];
+  let last = null;
+  for (let t = 0; t <= 40 * 60000; t += 1000) {
+    const n = nextCatchupPrompt({
+      pushed: five, answeredIds: [], seenIds: seen, joinedAt: J,
+      lastShownAt: last, now: J + t, shownCount: shown.length,
+    });
+    if (n) { shown.push([t / 60000, n.id]); seen = [...seen, n.id]; last = J + t; }
+  }
+  eq('★ a late joiner sees exactly 3, at 5, 7 and 9 minutes -- and then STOPS',
+    shown, [[5, 'p1'], [7, 'p2'], [9, 'p3']]);
+}
+
+// The cap directly. Without it a viewer with five missed prompts was
+// shown three, then the remaining two became 'outstanding' and were
+// shown too -- all five, just more slowly.
+eq('★ nothing once 3 have been shown, however long it has been',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: ['p1','p2','p3'], joinedAt: J,
+    lastShownAt: null, now: J + 60 * 60000, shownCount: 3 }), null);
+eq('the 3rd is still allowed',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: ['p1','p2'], joinedAt: J,
+    lastShownAt: null, now: J + 60 * 60000, shownCount: 2 })?.id, 'p3');
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
 process.exit(fail === 0 ? 0 : 1);

@@ -57,8 +57,11 @@ import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState';
 import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
-import { viewerIdOrSession, getSavedEntry, saveEntry } from '../lib/viewerIdentity';
+import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, markPromptAnswered } from '../lib/viewerIdentity';
+import { logComment } from '../lib/comments';
 import { planStaleShots } from '../lib/staleShotPlan';
+import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
+import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS } from '../lib/promptCatchup';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -304,26 +307,40 @@ function formatCountdown(ms) {
 // PostgREST reports a filtered-out update as a successful zero-row
 // update, which is exactly right here: the timestamp is already set, the
 // desired state already holds, and there is nothing to warn about.
+// ⚠️ RETURNS ROWS AFFECTED, NOT JUST ok/!ok, AND THAT IS THE POINT.
+//
+// PostgREST reports an update that matched NOTHING as a SUCCESS with no
+// error: an RLS policy that excludes the row, a `.is()` filter that was
+// already false, or a mistyped id all come back looking exactly like a
+// write that worked. This function used to return a bare boolean, so
+// "wrote the timestamp" and "silently matched no rows" were the same
+// answer -- which is why item 3 could be merged as passing and write
+// nothing on the deployment.
+//
+// `.select('id')` makes the difference visible. Callers that care check
+// `rows`; callers that do not still get `ok`.
 async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfNull = null) {
+  let rows = null;
   const write = async () => {
     if (!showId) throw new Error('no show id');
     const supabase = getSupabase();
     let q = supabase.from('shows').update({ state: nextState, ...(patch || {}) }).eq('id', showId);
     if (onlyIfNull) q = q.is(onlyIfNull, null);
-    const { error } = await q;
+    const { data, error } = await q.select('id');
     if (error) throw error;
+    rows = Array.isArray(data) ? data.length : null;
   };
   try {
     await write();
-    return true;
+    return { ok: true, rows };
   } catch (e) {
     console.warn(`[show-lifecycle] ${nextState} write failed, retrying once`, e);
     try {
       await write();
-      return true;
+      return { ok: true, rows };
     } catch (e2) {
       console.warn(`[show-lifecycle] ${nextState} write failed again, giving up`, e2);
-      return false;
+      return { ok: false, rows: null, error: String(e2?.message || e2) };
     }
   }
 }
@@ -352,6 +369,25 @@ async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfN
 // supabase-js refreshes the session in the background, so asking for it
 // now always gets a current one. It also removes the whole class of bug
 // where a stale token is captured in a useCallback dependency array.
+// ── ITEM 6: put the question on every screen ──────────────────
+// The whole prompt travels, so the card renders the instant it arrives
+// with no round-trip. The row is already stored by the time this is
+// called -- see pushPrompt for why that order is not optional.
+//
+// Best-effort, like every other broadcast here: a publish landing inside
+// a reconnect window throws, and an unhandled rejection during a live
+// show is noise in exactly the console someone is reading to find out
+// what went wrong. A viewer who misses the broadcast simply does not see
+// the question; nothing is corrupted.
+function broadcastPrompt(room, prompt) {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify({ type: 'PROMPT', prompt }));
+    room?.localParticipant?.publishData?.(bytes, {});
+  } catch (e) {
+    console.warn('[prompt] broadcast failed (likely a transient reconnect)', e);
+  }
+}
+
 // ── ITEM 4: the viewer-session writes ─────────────────────────
 // Fire-and-forget, and that is a rule rather than a shortcut. This is
 // measurement: a viewer must never fail to reach a show, or be held up
@@ -1278,7 +1314,7 @@ export default function LiveDemo() {
           if (show.state === 'scheduled') {
             setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
             setShowWriteError(null);
-            updateShowStateWithRetry('soundcheck', show.id).then((ok) => {
+            updateShowStateWithRetry('soundcheck', show.id).then(({ ok }) => {
               setShowWriteError(ok ? null : 'soundcheck');
             });
           } else {
@@ -1718,6 +1754,176 @@ export default function LiveDemo() {
 // as well as the in-room one, so a viewer who follows a show link hours
 // early sees the same screen with the same countdown, just without a
 // LiveKit connection behind it.
+// ── ITEM 6: THE ANSWER CARD (viewer side) ─────────────────────
+// Sits over the stage, bottom-centre, and is dismissable. It must never
+// be modal: a question is not worth covering a performance with, and a
+// viewer who does not want to answer should be able to keep watching
+// without tapping anything.
+//
+// Pin persistence is CUT this week -- pilot2_06 has a `pinned` column
+// and nothing reads it yet, so a viewer who reloads mid-question loses
+// the card until the next one. Stated rather than hidden: the deferred
+// half is a re-fetch on mount, not a schema change.
+function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (!prompt) return null;
+
+  const wrap = {
+    position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)',
+    zIndex: 40, width: 'min(92vw, 420px)', boxSizing: 'border-box',
+    background: 'rgba(1,22,39,0.94)', color: '#fdfffc',
+    border: '1px solid rgba(253,255,252,0.18)', borderRadius: 12,
+    padding: '12px 14px', backdropFilter: 'blur(8px)',
+  };
+
+  if (answered) {
+    return (
+      <div style={wrap}>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Thanks — your answer is in.</div>
+      </div>
+    );
+  }
+
+  const send = async (payload) => {
+    setBusy(true); setError(null);
+    const err = await onAnswer(payload);
+    setBusy(false);
+    if (err) setError(err);
+  };
+
+  return (
+    <div style={wrap}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.35 }}>{prompt.body}</div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss question"
+          style={{ background: 'none', border: 'none', color: '#fdfffc', opacity: 0.5, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
+        >
+          ×
+        </button>
+      </div>
+
+      {prompt.kind === 'choice' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          {(prompt.options || []).map((label, i) => (
+            <button
+              key={label}
+              type="button"
+              disabled={busy}
+              onClick={() => send({ choiceIndex: i })}
+              style={{
+                padding: '9px 12px', borderRadius: 8, fontSize: 14, textAlign: 'left',
+                border: '1px solid rgba(253,255,252,0.3)', background: 'rgba(253,255,252,0.08)',
+                color: '#fdfffc', cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => { e.preventDefault(); if (text.trim()) send({ textBody: text.trim() }); }}
+          style={{ display: 'flex', gap: 6, marginTop: 10 }}
+        >
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={1000}
+            placeholder="Your answer"
+            style={{
+              flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 14, minWidth: 0,
+              border: '1px solid rgba(253,255,252,0.3)', background: 'rgba(253,255,252,0.08)', color: '#fdfffc',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={busy || !text.trim()}
+            style={{
+              padding: '9px 14px', borderRadius: 8, fontSize: 14, fontWeight: 700, border: 'none',
+              background: text.trim() ? '#fdfffc' : 'rgba(253,255,252,0.2)',
+              color: text.trim() ? '#011627' : 'rgba(253,255,252,0.5)',
+              cursor: busy ? 'wait' : 'pointer',
+            }}
+          >
+            Send
+          </button>
+        </form>
+      )}
+      {error && <div style={{ fontSize: 12, color: '#FF6B6B', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+// ── ITEM 6: THE PUSH PANEL (operator side) ────────────────────
+// Four prepared questions, one tap each. Compose is cut this week; when
+// it lands it uses the same route with source:'composed'.
+//
+// `suggestedAtMs` is shown as guidance and nothing fires automatically.
+// A question landing in the middle of a song is an editorial mistake no
+// timer can avoid, and the order is load-bearing (see lib/showPrompts.js)
+// so the operator needs to see where they are in it.
+function PromptPushPanel({ prompts, pushedKeys, onPush, results, originMs, now, busyKey }) {
+  const intoShow = originMs ? Math.max(0, now - originMs) : null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: '0.08em' }}>
+        QUESTIONS{intoShow !== null && ` · ${Math.floor(intoShow / 60000)} min in`}
+      </div>
+      {prompts.map((p) => {
+        const pushed = pushedKeys[p.key];
+        const r = pushed ? results[pushed] : null;
+        const due = p.suggestedAtMs !== null && intoShow !== null && intoShow >= p.suggestedAtMs;
+        return (
+          <div
+            key={p.key}
+            style={{
+              border: '1px solid rgba(253,255,252,0.15)', borderRadius: 8, padding: '8px 10px',
+              background: due && !pushed ? 'rgba(124,255,178,0.08)' : 'transparent',
+            }}
+          >
+            <div style={{ fontSize: 12, lineHeight: 1.35, marginBottom: 6 }}>{p.body}</div>
+            {p.verbatim && (
+              <div style={{ fontSize: 10, color: '#FFD54A', marginBottom: 6 }}>
+                July survey, verbatim — comparable only if unedited
+              </div>
+            )}
+            {!pushed ? (
+              <button
+                type="button"
+                disabled={busyKey === p.key}
+                onClick={() => onPush(p)}
+                style={{
+                  padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700, border: 'none',
+                  background: '#fdfffc', color: '#011627', cursor: busyKey === p.key ? 'wait' : 'pointer',
+                }}
+              >
+                {busyKey === p.key ? 'Sending…' : p.suggestedAtMs === null ? 'Ask at the end' : `Ask${due ? ' now' : ''}`}
+              </button>
+            ) : (
+              <div style={{ fontSize: 11, opacity: 0.85 }}>
+                {!r ? 'Asked — waiting for answers…' : r.kind === 'text' ? (
+                  <span>{r.total} answer{r.total === 1 ? '' : 's'}</span>
+                ) : (
+                  <span>
+                    {r.total} vote{r.total === 1 ? '' : 's'}
+                    {r.counts?.length ? ' · ' : ''}
+                    {(r.counts || []).map((c) => `${c.label} ${c.count}`).join(' · ')}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── ITEM 11f: THE ENTRY FORM ──────────────────────────────────
 // On the holding screen, above the countdown, so it is filled in while
 // the viewer is already waiting rather than as a gate in front of a show
@@ -1973,7 +2179,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup, startWrite }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -2004,7 +2210,21 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
         return (
           <div style={{ color: src === 'actual' ? '#7CFFB2' : '#FFD54A', marginBottom: 3 }}>
             origin {src} · T+{String(Math.floor(into / 60)).padStart(2, '0')}:{String(into % 60).padStart(2, '0')}
-            {src === 'slated' && ' (actual_started_at not written)'}
+            {src === 'slated' && (
+              // Two very different faults produce this same amber line,
+              // and telling them apart used to require a database.
+              // `startWrite` is what the write actually reported.
+              <span>
+                {' — '}
+                {!startWrite
+                  ? 'not attempted yet (fires at the live transition)'
+                  : startWrite.outcome === 'written'
+                    ? 'WROTE but not read back — this is a client bug'
+                    : startWrite.outcome === 'no_row_matched'
+                      ? 'no row matched — already set, or RLS blocked it'
+                      : `write failed: ${startWrite.error || 'unknown'}`}
+              </span>
+            )}
           </div>
         );
       })()}
@@ -2107,6 +2327,77 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
           leave beacon
         </button>
       </div>
+      {/* ITEM 6 -- the catch-up schedule. Checking this on a device
+          otherwise means waiting five minutes and then three more, which
+          is how item 1 turned eleven tests into two days. */}
+      {catchup && (
+        // ── THE WORKING, NOT THE CONCLUSION ──────────────────────
+        // This used to print `outstanding 0 · done` and nothing else, so
+        // four different faults -- a performer client that never fetches,
+        // a fetch that failed, an empty list, and an over-broad exclusion
+        // set -- were indistinguishable from the outside. Every INPUT is
+        // shown, then the output, so the wrong one is readable at a
+        // glance instead of inferred.
+        <div style={{ color: '#fdfffc', marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.15)', paddingTop: 3 }}>
+          <div>
+            role <span style={{ color: catchup.isPerformer ? '#FF6B6B' : '#7CFFB2' }}>{catchup.role}</span>
+            {catchup.isPerformer && (
+              <span style={{ color: '#FF6B6B' }}> — CATCH-UP DISABLED for performers</span>
+            )}
+          </div>
+          <div>
+            fetch{' '}
+            {!catchup.fetch ? (
+              <span style={{ color: '#FFD54A' }}>not run yet</span>
+            ) : catchup.fetch.skipped ? (
+              <span style={{ color: '#FF6B6B' }}>SKIPPED — {catchup.fetch.skipped}</span>
+            ) : catchup.fetch.error ? (
+              <span style={{ color: '#FF6B6B' }}>FAILED {catchup.fetch.error}</span>
+            ) : (
+              <span style={{ color: catchup.fetch.count > 0 ? '#7CFFB2' : '#FFD54A' }}>
+                {catchup.fetch.status} · {catchup.fetch.count} prompt{catchup.fetch.count === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+          <div>
+            pushed {catchup.pushedCount} · answered {catchup.answeredCount} · offered {catchup.offeredCount}
+            {' → outstanding '}
+            <span style={{ color: catchup.outstanding > 0 ? '#7CFFB2' : '#FFD54A' }}>{catchup.outstanding}</span>
+          </div>
+          {catchup.outstandingIds.length > 0 && (
+            <div style={{ color: '#9ad' }}>next: {catchup.outstandingIds.join(', ')}</div>
+          )}
+          <div>
+            {/* THE GATE THAT WAS MISSING. The scheduler's first check is
+                `if (activePrompt) return`, and the timer knows nothing
+                about it -- so the line could read DUE while nothing
+                could possibly be delivered. That is precisely what
+                "sticks on due" was. */}
+            {catchup.blockedBy && (
+              <span style={{ color: '#FF6B6B' }}>BLOCKED: {catchup.blockedBy} · </span>
+            )}
+            watched {Math.floor(catchup.watchedMs / 1000)}s/{catchup.thresholdS}s · shown {catchup.shown}/3
+            {' · '}
+            <span style={{ color: catchup.dueInMs === null ? '#888' : catchup.dueInMs <= 0 ? '#FF9F4A' : '#888' }}>
+              {catchup.dueInMs === null
+                ? (catchup.shown >= 3 ? 'cap reached' : 'nothing outstanding')
+                : catchup.dueInMs <= 0 ? 'DUE' : `in ${Math.ceil(catchup.dueInMs / 1000)}s`}
+            </span>
+            {' '}
+            <button
+              type="button"
+              onClick={catchup.onForce}
+              style={{
+                pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+                background: 'transparent', color: '#FFD54A',
+                border: '1px solid #FFD54A', borderRadius: 3, padding: '0 5px',
+              }}
+            >
+              force
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
     </div>
   );
@@ -2464,6 +2755,65 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const [reactions, setReactions] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
+  // ── ITEM 6 ────────────────────────────────────────────────────
+  // The question currently on screen, and whether THIS viewer has
+  // answered it. Answered is local: the route enforces one-answer-per-
+  // viewer, so this only decides whether to show the card or the
+  // acknowledgement, and a reload legitimately shows the card again
+  // (answering twice overwrites, which is the intended behaviour).
+  const [activePrompt, setActivePrompt] = useState(null);
+  const [promptAnswered, setPromptAnswered] = useState(false);
+  // Read by the data-channel handler, which is defined ABOVE
+  // displayShowState. check:tdz caught the direct reference -- it would
+  // have been fine at runtime (the handler runs later) and is exactly
+  // the hazard that rule exists to stop being relied on.
+  const displayShowStateRef = useRef('scheduled');
+
+  // ── CLEARING THE CARD IS WHAT UNBLOCKS THE QUEUE ──────────────
+  // The scheduler's first gate is `if (activePrompt) return`, and
+  // answering used only to set promptAnswered -- the card switched to
+  // "Thanks" and activePrompt stayed set forever. The scheduler was then
+  // blocked for the rest of the page's life, so a viewer received
+  // exactly ONE catch-up per page load and a reload was the only way to
+  // get another. Found on fe9fcc8.
+  //
+  // The acknowledgement is worth showing, so the card is cleared on a
+  // short delay rather than instantly. Nothing races: the next card
+  // cannot arrive for another two minutes regardless.
+  const ANSWERED_CARD_MS = 3000;
+  useEffect(() => {
+    if (!promptAnswered || !activePrompt) return undefined;
+    const t = setTimeout(() => {
+      setActivePrompt(null);
+      setPromptAnswered(false);
+    }, ANSWERED_CARD_MS);
+    return () => clearTimeout(t);
+  }, [promptAnswered, activePrompt]);
+  // ── CATCH-UP FOR LATE JOINERS ─────────────────────────────────
+  // Everything this show has asked (fetched, because a prompt broadcast
+  // before this client joined can never reach it over the data channel),
+  // what this DEVICE has already answered (persisted, so a reload does
+  // not re-offer it), and what has been put in front of them this
+  // session (so a dismissed card is not re-offered in a loop).
+  const [pushedPrompts, setPushedPrompts] = useState([]);
+  const [answeredIds, setAnsweredIds] = useState(() =>
+    (typeof window === 'undefined' ? [] : getAnsweredPromptIds()));
+  // Prompts this viewer has already been OFFERED BY THE CATCH-UP. Not
+  // "seen": a live prompt that scrolled past is still unanswered and is
+  // still the catch-up's business. This set exists only so the queue
+  // advances instead of re-offering the same card every tick.
+  const [catchupOfferedIds, setCatchupOfferedIds] = useState([]);
+  // What the prompt-list fetch actually did, for the overlay.
+  const [listFetch, setListFetch] = useState(null);
+  const [lastCatchupAt, setLastCatchupAt] = useState(null);
+  // Counted separately from catchupOfferedIds so the cap survives the
+  // list being recomputed. The cap is on how many catch-up cards this
+  // viewer has been handed, not on how many questions they have seen.
+  const [catchupShownCount, setCatchupShownCount] = useState(0);
+  // When THIS client joined -- the 5-minute threshold is measured from
+  // arrival, not from the start of the show. A late joiner has watched
+  // five minutes when they have watched five minutes.
+  const joinedAtRef = useRef(Date.now());
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
 
   // ── Cameras, on stage ────────────────────────────────────────
@@ -3488,6 +3838,49 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     if (payload.type === 'SHOW_ENDED') {
       setReceivedShowEnded(true);
     }
+    // ── ITEM 6: a question arrives ────────────────────────────
+    // The PROMPT message carries the whole question, so the card renders
+    // the moment it arrives with no round-trip. The id is a uuid
+    // (pilot2_06 chose uuid over a sequential bigint precisely because
+    // this travels over the channel) so it is not guessable from having
+    // seen another one.
+    //
+    // The ANSWER goes back through a route, not this channel: a response
+    // is data, not an event everyone in the room needs. Broadcasting
+    // answers would also show every viewer what everyone else said,
+    // which is not a questionnaire.
+    //
+    // §0.8 applies -- SHOT_COMMAND is applied from any sender and so is
+    // this. A forged PROMPT shows a fake question to the room; it cannot
+    // write a row, because the response route reads the real prompt from
+    // the database and ignores everything descriptive the client sends.
+    // Sender validation lands with item 7 on the 22nd.
+    if (payload.type === 'PROMPT' && payload.prompt?.id) {
+      // Same rule as the catch-up: nothing is asked after the end. A
+      // late broadcast, or one still in flight as the artist presses End
+      // Show, must not put a question over the ended card.
+      if (displayShowStateRef.current === 'ended') return;
+      setActivePrompt(payload.prompt);
+      setPromptAnswered(false);
+      // ⚠️ DELIBERATELY NOT MARKED AS "OFFERED". This used to add every
+      // live prompt to the exclusion set, on the reasoning that
+      // re-offering a dismissed question reads as nagging.
+      //
+      // That was wrong, and a device test on 911da9e showed how wrong: a
+      // viewer present for four pushes had all four excluded, so after
+      // answering one the catch-up reported `outstanding 0` and the
+      // other three were never offered again. The rule asked for was
+      // "never re-show a prompt someone has ALREADY ANSWERED" -- seeing
+      // a card go past is not answering it, and a question nobody
+      // answered is exactly what the catch-up exists to recover.
+      //
+      // The accepted trade: someone who actively dismisses a live
+      // question may be offered it once more. The per-session cap of
+      // three bounds how often that can happen.
+    }
+    if (payload.type === 'PROMPT_CLOSED') {
+      setActivePrompt((prev) => (prev && prev.id === payload.promptId ? null : prev));
+    }
     if (payload.type === 'ACTIVE_PERFORMER_SWITCH') {
       // Stage 4 (MULTI_PERFORMER_SPEC.md section 5) -- this message is
       // NEVER applied directly. shows.active_performer_slot (written
@@ -3525,6 +3918,9 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     : receivedShowLive
       ? 'live'
       : showState;
+  // Mirrored for the data-channel handler above, which cannot read the
+  // const directly -- see displayShowStateRef's declaration.
+  displayShowStateRef.current = displayShowState;
 
   // ─── Fix (1a/1b): take the mic off air when the show ends ──────
   // END SHOW previously updated show state, broadcast SHOW_ENDED and
@@ -3780,7 +4176,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     updateShowStateWithRetry('ended', showId, {
       actual_ended_at: new Date().toISOString(),
       ended_by: 'artist',
-    }).then((ok) => {
+    }).then(({ ok }) => {
       onShowWriteErrorChange?.(ok ? null : 'ended');
     });
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
@@ -3884,7 +4280,26 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     };
     setComments((prev) => [...prev, comment]);
     send(new TextEncoder().encode(JSON.stringify({ type: 'comment', comment })), {});
-  }, [send, selfName]);
+    // ITEM 5 -- ONE LINE, AFTER the two above. The live path is
+    // untouched: the comment is already on every screen in the room by
+    // the time this runs, and this write can fail all night without
+    // anyone noticing anything except that we have no record of it.
+    //
+    // Only what THIS device sent. Every client receives every comment,
+    // so persisting what was RECEIVED would write one copy per viewer
+    // and need something to arbitrate which counts. See lib/comments.js.
+    logComment({
+      showId,
+      roomName,
+      body: text,
+      authorName: selfName,
+      viewerId,
+      livekitIdentity: room?.localParticipant?.identity ?? null,
+      // Item 3 -- measured from when the show actually started, so a
+      // comment lines up with a shot change or a moment in the recording.
+      offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+    });
+  }, [send, selfName, showId, roomName, viewerId, room, show]);
 
   // All video tracks (main performer + any extra camera feeds) tagged to a
   // given slot, for the director panel to list and for the audience view
@@ -5187,6 +5602,11 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // In a versus show both performer devices independently satisfy
   // isMainPerformer and will each send this once their own clock agrees;
   // receiving it twice is a harmless no-op (setReceivedShowLive(true)).
+  // What the actual_started_at write reported, for the overlay. A
+  // failed write, a write that matched no rows, and a write that
+  // succeeded but was never read back are three different faults that
+  // all render as `origin slated`.
+  const [startWriteResult, setStartWriteResult] = useState(null);
   const showLiveBroadcastSentRef = useRef(false);
   useEffect(() => {
     if (!isMainPerformer) return;
@@ -5242,12 +5662,37 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         // showOriginMs falls back to slated_at, and the show carries on.
         // Blocking or warning the artist here would make a diagnostic
         // column a dependency of going live.
-        updateShowStateWithRetry(
-          'soundcheck',
-          showId,
-          { actual_started_at: new Date().toISOString() },
-          'actual_started_at',
-        );
+        const startedAt = new Date().toISOString();
+        updateShowStateWithRetry('soundcheck', showId, { actual_started_at: startedAt }, 'actual_started_at')
+          .then(({ ok, rows, error }) => {
+            // ── THE READ-BACK, AND WHY IT IS NOT OPTIONAL ─────
+            // The artist's own client NEVER re-fetches `show` after this
+            // point: the 15s poll stops the moment state leaves
+            // 'scheduled', and the in-room 30s re-fetch is explicitly
+            // disabled for isMainPerformer. So without this line the
+            // write could succeed and the operator's client would go on
+            // computing every offset it produces -- the offset_ms on
+            // every prompt they push, and on their own comments -- from
+            // slated_at for the whole show.
+            //
+            // A device test on 911da9e found exactly that: the overlay
+            // read `origin slated` 23 minutes in.
+            //
+            // Applied only on a CONFIRMED write. rows === 0 means the
+            // timestamp was already set (a second performer device, or a
+            // reload) and the value we hold is not the authoritative one,
+            // so claiming it locally would be a guess.
+            if (ok && rows === 1) {
+              onShowUpdate?.((prev) => (prev ? { ...prev, actual_started_at: startedAt } : prev));
+            }
+            // rows === 0 is the case that used to be invisible: no error,
+            // no row, no way to tell it from success. Logged with the
+            // distinction intact so the next capture answers the question
+            // instead of raising it.
+            const outcome = !ok ? 'failed' : rows === 1 ? 'written' : 'no_row_matched';
+            setStartWriteResult({ outcome, rows, error: error ?? null });
+            logHealthEvent('show_started_write', { ok, rows, error: error ?? null, startedAt, showId, outcome });
+          });
       });
     }
     // roomConnectionState added (b6.2) so this re-evaluates the moment
@@ -5255,6 +5700,192 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     // effect off for a device that goes live before connecting, and
     // SHOW_LIVE/egress would never fire at all.
   }, [isMainPerformer, showState, send, performanceMode, roomConnectionState, roomName, showId]);
+
+  // ── ITEM 6: push, answer, read back ───────────────────────────
+  const [pushedPromptKeys, setPushedPromptKeys] = useState({}); // key -> prompt id
+  const [promptResults, setPromptResults] = useState({});       // prompt id -> aggregate
+  const [pushingKey, setPushingKey] = useState(null);
+
+  const pushPrompt = useCallback(async (p) => {
+    const invalid = validatePrompt(p);
+    if (invalid) {
+      logHealthEvent('prompt_push_rejected', { key: p.key, reason: invalid });
+      return;
+    }
+    setPushingKey(p.key);
+    try {
+      const token = (await getSession())?.access_token || null;
+      const res = await fetch('/api/show-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          room: roomName,
+          kind: p.kind,
+          body: p.body,
+          options: p.options,
+          source: 'saved',
+          // Item 3 -- measured from when the show ACTUALLY started.
+          offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.prompt?.id) {
+        logHealthEvent('prompt_push_failed', { key: p.key, status: res.status, detail: data?.error ?? null });
+        return;
+      }
+      // The ROW EXISTS BEFORE THE BROADCAST. If the order were reversed,
+      // a viewer could answer a prompt id that had not been stored yet
+      // and the response route would 404 a real answer.
+      setPushedPromptKeys((prev) => ({ ...prev, [p.key]: data.prompt.id }));
+      broadcastPrompt(room, data.prompt);
+      logHealthEvent('prompt_pushed', { key: p.key, promptId: data.prompt.id, kind: p.kind });
+    } catch (e) {
+      logHealthEvent('prompt_push_failed', { key: p.key, detail: String(e?.message || e) });
+    } finally {
+      setPushingKey(null);
+    }
+  }, [room, roomName, show]);
+
+  // Results poll. Only while a prompt of this operator's is outstanding,
+  // and only for the operator -- viewers must never see the running
+  // tally, because a visible tally changes the answers.
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    const ids = Object.values(pushedPromptKeys);
+    if (ids.length === 0) return undefined;
+    let cancelled = false;
+    const read = async () => {
+      const token = (await getSession())?.access_token || null;
+      if (!token) return;
+      for (const id of ids) {
+        try {
+          const res = await fetch(
+            `/api/show-prompts?promptId=${encodeURIComponent(id)}&room=${encodeURIComponent(roomName)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (!cancelled) setPromptResults((prev) => ({ ...prev, [id]: data }));
+        } catch {
+          // A failed read is a stale tally, never a broken show.
+        }
+      }
+    };
+    read();
+    const t = setInterval(read, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isMainPerformer, pushedPromptKeys, roomName]);
+
+  // Fetch what this show has already asked. Once on mount, then on a
+  // slow poll: a viewer who is here for an hour should pick up prompts
+  // pushed while they were watching but momentarily disconnected, and
+  // 60s is far below the 3-minute catch-up spacing so it can never be
+  // the reason a card is late.
+  //
+  // Viewers only. The operator already knows what they pushed, and their
+  // panel reads the artist-only results route instead.
+  useEffect(() => {
+    // Skips are RECORDED, not silent. A client that never fetches and a
+    // client that fetched and got nothing both end at outstanding 0.
+    if (isMainPerformer) { setListFetch({ skipped: 'client is a performer', at: Date.now() }); return undefined; }
+    if (!roomName) { setListFetch({ skipped: 'no room name yet', at: Date.now() }); return undefined; }
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const res = await fetch(`/api/show-prompts/list?room=${encodeURIComponent(roomName)}`);
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        // Recorded whether it worked or not. "The list is empty" and
+        // "the list was never fetched" and "the fetch 500'd" all produce
+        // outstanding 0, and telling them apart from the outside was
+        // impossible -- which is why this bug survived two fixes.
+        setListFetch({
+          status: res.status,
+          count: Array.isArray(data.prompts) ? data.prompts.length : null,
+          error: res.ok ? null : (data?.error || `HTTP ${res.status}`),
+          at: Date.now(),
+        });
+        if (res.ok && Array.isArray(data.prompts)) setPushedPrompts(data.prompts);
+      } catch (e) {
+        if (!cancelled) setListFetch({ status: null, count: null, error: String(e?.message || e), at: Date.now() });
+      }
+    };
+    read();
+    const t = setInterval(read, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isMainPerformer, roomName]);
+
+  // ── THE CATCH-UP SCHEDULER ────────────────────────────────────
+  // Driven by the same 1s `now` tick everything else uses -- no timers to
+  // leak, and the condition is re-read from current state every second
+  // rather than captured in a closure. Same lesson as item 1.
+  //
+  // A LIVE PROMPT ALWAYS WINS: if something is already on screen this
+  // does nothing, so a catch-up card can never sit in front of the
+  // question the artist is talking about right now.
+  // Nothing is asked after the show ends, and anything already on screen
+  // comes down. A question arriving over the ended card is the most
+  // visible way to look broken in front of an audience.
+  useEffect(() => {
+    if (displayShowState !== 'ended') return;
+    setActivePrompt(null);
+    setPromptAnswered(false);
+  }, [displayShowState]);
+
+  useEffect(() => {
+    if (isMainPerformer) return;
+    if (activePrompt) return;
+    const next = nextCatchupPrompt({
+      pushed: pushedPrompts,
+      answeredIds,
+      seenIds: catchupOfferedIds,
+      joinedAt: joinedAtRef.current,
+      lastShownAt: lastCatchupAt,
+      now,
+      shownCount: catchupShownCount,
+      showEnded: displayShowState === 'ended',
+    });
+    if (!next) return;
+    setActivePrompt(next);
+    setPromptAnswered(false);
+    setCatchupOfferedIds((prev) => [...prev, next.id]);
+    setLastCatchupAt(now);
+    setCatchupShownCount((n) => n + 1);
+    logHealthEvent('prompt_catchup_shown', {
+      promptId: next.id,
+      watchedMs: now - joinedAtRef.current,
+      outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
+    });
+  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, catchupOfferedIds, lastCatchupAt, catchupShownCount, now, displayShowState]);
+
+  const answerPrompt = useCallback(async (payload) => {
+    if (!activePrompt?.id) return 'That question is no longer open.';
+    try {
+      const res = await fetch('/api/prompt-responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          promptId: activePrompt.id,
+          viewerId,
+          livekitIdentity: room?.localParticipant?.identity ?? null,
+          offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+          ...payload,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return data?.error || 'That did not send. Try once more.';
+      }
+      setPromptAnswered(true);
+      // Persisted, not just React state. This is what stops the catch-up
+      // re-offering it and what makes the acknowledgement survive a
+      // reload -- the gap a device test found on 15 Sept.
+      setAnsweredIds(markPromptAnswered(activePrompt.id));
+      return null;
+    } catch {
+      return 'That did not send. Try once more.';
+    }
+  }, [activePrompt, viewerId, room, show]);
 
   // ── ITEM 8 LAYER C: the unattended end ────────────────────────
   // Covers "the artist closed the laptop without pressing End Show" as
@@ -5458,6 +6089,40 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         <EndedSelfView still={endedSelfViewStill} />
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
+      {/* ITEM 6 -- the question, for whoever is watching. Rendered for
+          every role including the artist: an artist who cannot see what
+          their audience was just asked cannot talk to it, and talking to
+          it is the entire point of asking during a show rather than
+          after. */}
+      <PromptCard
+        prompt={activePrompt}
+        answered={promptAnswered}
+        onAnswer={answerPrompt}
+        onDismiss={() => setActivePrompt(null)}
+      />
+      {/* ITEM 6 -- the operator's four questions and their running
+          tallies. isMainPerformer only: the tally must never be on a
+          viewer's screen, because a visible tally changes the answers. */}
+      {isMainPerformer && (
+        <div
+          style={{
+            position: 'absolute', right: 12, top: 12, zIndex: 35,
+            width: 'min(86vw, 280px)', maxHeight: '60vh', overflowY: 'auto',
+            background: 'rgba(1,22,39,0.92)', border: '1px solid rgba(253,255,252,0.15)',
+            borderRadius: 10, padding: '10px 12px', color: '#fdfffc', backdropFilter: 'blur(8px)',
+          }}
+        >
+          <PromptPushPanel
+            prompts={SHOW_PROMPTS}
+            pushedKeys={pushedPromptKeys}
+            results={promptResults}
+            onPush={pushPrompt}
+            originMs={showOriginMs(show)}
+            now={now}
+            busyKey={pushingKey}
+          />
+        </div>
+      )}
       <CutTimingDebugOverlay />
       <StaleShotDebugOverlay
         activeShot={activeShot}
@@ -5468,7 +6133,44 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
         show={show}
         viewerId={viewerId}
+        startWrite={startWriteResult}
         onLeaveBeacon={onLeaveBeacon}
+        catchup={{
+          role,
+          isPerformer: isMainPerformer,
+          blockedBy: displayShowState === 'ended'
+            ? 'show ended'
+            : activePrompt
+              ? `card on screen${promptAnswered ? ' (answered, clearing)' : ''}`
+              : null,
+          fetch: listFetch,
+          pushedCount: pushedPrompts.length,
+          answeredCount: answeredIds.length,
+          offeredCount: catchupOfferedIds.length,
+          watchedMs: now - joinedAtRef.current,
+          thresholdS: 300,
+          outstandingIds: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds })
+            .map((p) => String(p.id).slice(0, 8)),
+          shown: catchupShownCount,
+          outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
+          dueInMs: msUntilNextCatchup({
+            pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds,
+            joinedAt: joinedAtRef.current, lastShownAt: lastCatchupAt, now,
+            shownCount: catchupShownCount,
+          }),
+          // Rewinds the two gates rather than bypassing the scheduler, so
+          // the button exercises the REAL path instead of a parallel one
+          // that could pass while the real one is broken.
+          // Rewinds the two gates to exactly the threshold rather than to
+          // zero. Setting joinedAt = 0 made `watched` read as the whole
+          // Unix epoch -- ~56 years -- which was visible in the overlay
+          // and, worse, was written into prompt_catchup_shown.watchedMs,
+          // so every forced catch-up poisoned a field the 21st reads.
+          onForce: () => {
+            joinedAtRef.current = now - CATCHUP_AFTER_JOIN_MS;
+            setLastCatchupAt(now - CATCHUP_SPACING_MS);
+          },
+        }}
         onCloseRoom={() => {
           // The exact Layer B sequence, on demand: stop egress, wait for
           // it up to the grace, then delete the room regardless.
