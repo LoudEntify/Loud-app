@@ -423,8 +423,20 @@ eq('all answered -> nothing to catch up on',
   call({ now: J + CATCHUP_AFTER_JOIN_MS, answeredIds: ['p1','p2','p3','p4','p5'] }), null);
 
 // A dismissed card is not re-offered in a loop.
-eq('★ a seen-but-unanswered prompt is not re-offered',
+eq('★ a prompt the catch-up already offered is not re-offered',
   call({ now: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] })?.id, 'p2');
+
+// THE 911da9e REGRESSION. A viewer present for four pushes who answers
+// one must still be offered the other three. Excluding live-seen prompts
+// reported `outstanding 0` and offered nothing.
+eq('★ present for all four, answered one -> three still outstanding',
+  outstandingPrompts({ pushed: [pAt(1), pAt(2), pAt(3), pAt(4)], answeredIds: ['p2'], seenIds: [] })
+    .map((p) => p.id), ['p1', 'p3', 'p4']);
+eq('★ and the catch-up offers the most recent of them',
+  nextCatchupPrompt({ pushed: [pAt(1), pAt(2), pAt(3), pAt(4)], answeredIds: ['p2'], seenIds: [],
+    joinedAt: J, lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0 })?.id, 'p1');
+eq('★ answering ONE does not clear the rest',
+  outstandingPrompts({ pushed: five, answeredIds: ['p1'], seenIds: [] }).length, 3);
 
 // Nothing pushed at all.
 eq('no prompts -> nothing', nextCatchupPrompt({ pushed: [], answeredIds: [], seenIds: [], joinedAt: J, lastShownAt: null, now: J + 1e7 }), null);

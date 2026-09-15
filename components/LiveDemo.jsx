@@ -307,26 +307,40 @@ function formatCountdown(ms) {
 // PostgREST reports a filtered-out update as a successful zero-row
 // update, which is exactly right here: the timestamp is already set, the
 // desired state already holds, and there is nothing to warn about.
+// ⚠️ RETURNS ROWS AFFECTED, NOT JUST ok/!ok, AND THAT IS THE POINT.
+//
+// PostgREST reports an update that matched NOTHING as a SUCCESS with no
+// error: an RLS policy that excludes the row, a `.is()` filter that was
+// already false, or a mistyped id all come back looking exactly like a
+// write that worked. This function used to return a bare boolean, so
+// "wrote the timestamp" and "silently matched no rows" were the same
+// answer -- which is why item 3 could be merged as passing and write
+// nothing on the deployment.
+//
+// `.select('id')` makes the difference visible. Callers that care check
+// `rows`; callers that do not still get `ok`.
 async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfNull = null) {
+  let rows = null;
   const write = async () => {
     if (!showId) throw new Error('no show id');
     const supabase = getSupabase();
     let q = supabase.from('shows').update({ state: nextState, ...(patch || {}) }).eq('id', showId);
     if (onlyIfNull) q = q.is(onlyIfNull, null);
-    const { error } = await q;
+    const { data, error } = await q.select('id');
     if (error) throw error;
+    rows = Array.isArray(data) ? data.length : null;
   };
   try {
     await write();
-    return true;
+    return { ok: true, rows };
   } catch (e) {
     console.warn(`[show-lifecycle] ${nextState} write failed, retrying once`, e);
     try {
       await write();
-      return true;
+      return { ok: true, rows };
     } catch (e2) {
       console.warn(`[show-lifecycle] ${nextState} write failed again, giving up`, e2);
-      return false;
+      return { ok: false, rows: null, error: String(e2?.message || e2) };
     }
   }
 }
@@ -1300,7 +1314,7 @@ export default function LiveDemo() {
           if (show.state === 'scheduled') {
             setShow((prev) => (prev ? { ...prev, state: 'soundcheck' } : prev));
             setShowWriteError(null);
-            updateShowStateWithRetry('soundcheck', show.id).then((ok) => {
+            updateShowStateWithRetry('soundcheck', show.id).then(({ ok }) => {
               setShowWriteError(ok ? null : 'soundcheck');
             });
           } else {
@@ -2165,7 +2179,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup, startWrite }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -2196,7 +2210,21 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
         return (
           <div style={{ color: src === 'actual' ? '#7CFFB2' : '#FFD54A', marginBottom: 3 }}>
             origin {src} · T+{String(Math.floor(into / 60)).padStart(2, '0')}:{String(into % 60).padStart(2, '0')}
-            {src === 'slated' && ' (actual_started_at not written)'}
+            {src === 'slated' && (
+              // Two very different faults produce this same amber line,
+              // and telling them apart used to require a database.
+              // `startWrite` is what the write actually reported.
+              <span>
+                {' — '}
+                {!startWrite
+                  ? 'not attempted yet (fires at the live transition)'
+                  : startWrite.outcome === 'written'
+                    ? 'WROTE but not read back — this is a client bug'
+                    : startWrite.outcome === 'no_row_matched'
+                      ? 'no row matched — already set, or RLS blocked it'
+                      : `write failed: ${startWrite.error || 'unknown'}`}
+              </span>
+            )}
           </div>
         );
       })()}
@@ -2697,11 +2725,15 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const [pushedPrompts, setPushedPrompts] = useState([]);
   const [answeredIds, setAnsweredIds] = useState(() =>
     (typeof window === 'undefined' ? [] : getAnsweredPromptIds()));
-  const [seenPromptIds, setSeenPromptIds] = useState([]);
+  // Prompts this viewer has already been OFFERED BY THE CATCH-UP. Not
+  // "seen": a live prompt that scrolled past is still unanswered and is
+  // still the catch-up's business. This set exists only so the queue
+  // advances instead of re-offering the same card every tick.
+  const [catchupOfferedIds, setCatchupOfferedIds] = useState([]);
   const [lastCatchupAt, setLastCatchupAt] = useState(null);
-  // Counted separately from seenPromptIds, which also holds prompts seen
-  // LIVE. The cap is on how many catch-up cards this viewer has been
-  // handed, not on how many questions they have seen.
+  // Counted separately from catchupOfferedIds so the cap survives the
+  // list being recomputed. The cap is on how many catch-up cards this
+  // viewer has been handed, not on how many questions they have seen.
   const [catchupShownCount, setCatchupShownCount] = useState(0);
   // When THIS client joined -- the 5-minute threshold is measured from
   // arrival, not from the start of the show. A late joiner has watched
@@ -3751,10 +3783,21 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     if (payload.type === 'PROMPT' && payload.prompt?.id) {
       setActivePrompt(payload.prompt);
       setPromptAnswered(false);
-      // A prompt seen LIVE is not a missed prompt. Without this, a
-      // viewer who dismisses a live question would be offered it again
-      // by the catch-up three minutes later, which reads as nagging.
-      setSeenPromptIds((prev) => (prev.includes(payload.prompt.id) ? prev : [...prev, payload.prompt.id]));
+      // ⚠️ DELIBERATELY NOT MARKED AS "OFFERED". This used to add every
+      // live prompt to the exclusion set, on the reasoning that
+      // re-offering a dismissed question reads as nagging.
+      //
+      // That was wrong, and a device test on 911da9e showed how wrong: a
+      // viewer present for four pushes had all four excluded, so after
+      // answering one the catch-up reported `outstanding 0` and the
+      // other three were never offered again. The rule asked for was
+      // "never re-show a prompt someone has ALREADY ANSWERED" -- seeing
+      // a card go past is not answering it, and a question nobody
+      // answered is exactly what the catch-up exists to recover.
+      //
+      // The accepted trade: someone who actively dismisses a live
+      // question may be offered it once more. The per-session cap of
+      // three bounds how often that can happen.
     }
     if (payload.type === 'PROMPT_CLOSED') {
       setActivePrompt((prev) => (prev && prev.id === payload.promptId ? null : prev));
@@ -4051,7 +4094,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     updateShowStateWithRetry('ended', showId, {
       actual_ended_at: new Date().toISOString(),
       ended_by: 'artist',
-    }).then((ok) => {
+    }).then(({ ok }) => {
       onShowWriteErrorChange?.(ok ? null : 'ended');
     });
     send(new TextEncoder().encode(JSON.stringify({ type: 'SHOW_ENDED' })), {});
@@ -5477,6 +5520,11 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // In a versus show both performer devices independently satisfy
   // isMainPerformer and will each send this once their own clock agrees;
   // receiving it twice is a harmless no-op (setReceivedShowLive(true)).
+  // What the actual_started_at write reported, for the overlay. A
+  // failed write, a write that matched no rows, and a write that
+  // succeeded but was never read back are three different faults that
+  // all render as `origin slated`.
+  const [startWriteResult, setStartWriteResult] = useState(null);
   const showLiveBroadcastSentRef = useRef(false);
   useEffect(() => {
     if (!isMainPerformer) return;
@@ -5532,12 +5580,37 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         // showOriginMs falls back to slated_at, and the show carries on.
         // Blocking or warning the artist here would make a diagnostic
         // column a dependency of going live.
-        updateShowStateWithRetry(
-          'soundcheck',
-          showId,
-          { actual_started_at: new Date().toISOString() },
-          'actual_started_at',
-        );
+        const startedAt = new Date().toISOString();
+        updateShowStateWithRetry('soundcheck', showId, { actual_started_at: startedAt }, 'actual_started_at')
+          .then(({ ok, rows, error }) => {
+            // ── THE READ-BACK, AND WHY IT IS NOT OPTIONAL ─────
+            // The artist's own client NEVER re-fetches `show` after this
+            // point: the 15s poll stops the moment state leaves
+            // 'scheduled', and the in-room 30s re-fetch is explicitly
+            // disabled for isMainPerformer. So without this line the
+            // write could succeed and the operator's client would go on
+            // computing every offset it produces -- the offset_ms on
+            // every prompt they push, and on their own comments -- from
+            // slated_at for the whole show.
+            //
+            // A device test on 911da9e found exactly that: the overlay
+            // read `origin slated` 23 minutes in.
+            //
+            // Applied only on a CONFIRMED write. rows === 0 means the
+            // timestamp was already set (a second performer device, or a
+            // reload) and the value we hold is not the authoritative one,
+            // so claiming it locally would be a guess.
+            if (ok && rows === 1) {
+              onShowUpdate?.((prev) => (prev ? { ...prev, actual_started_at: startedAt } : prev));
+            }
+            // rows === 0 is the case that used to be invisible: no error,
+            // no row, no way to tell it from success. Logged with the
+            // distinction intact so the next capture answers the question
+            // instead of raising it.
+            const outcome = !ok ? 'failed' : rows === 1 ? 'written' : 'no_row_matched';
+            setStartWriteResult({ outcome, rows, error: error ?? null });
+            logHealthEvent('show_started_write', { ok, rows, error: error ?? null, startedAt, showId, outcome });
+          });
       });
     }
     // roomConnectionState added (b6.2) so this re-evaluates the moment
@@ -5662,7 +5735,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     const next = nextCatchupPrompt({
       pushed: pushedPrompts,
       answeredIds,
-      seenIds: seenPromptIds,
+      seenIds: catchupOfferedIds,
       joinedAt: joinedAtRef.current,
       lastShownAt: lastCatchupAt,
       now,
@@ -5671,15 +5744,15 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     if (!next) return;
     setActivePrompt(next);
     setPromptAnswered(false);
-    setSeenPromptIds((prev) => [...prev, next.id]);
+    setCatchupOfferedIds((prev) => [...prev, next.id]);
     setLastCatchupAt(now);
     setCatchupShownCount((n) => n + 1);
     logHealthEvent('prompt_catchup_shown', {
       promptId: next.id,
       watchedMs: now - joinedAtRef.current,
-      outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds }).length,
+      outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
     });
-  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, seenPromptIds, lastCatchupAt, catchupShownCount, now]);
+  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, catchupOfferedIds, lastCatchupAt, catchupShownCount, now]);
 
   const answerPrompt = useCallback(async (payload) => {
     if (!activePrompt?.id) return 'That question is no longer open.';
@@ -5956,12 +6029,13 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
         show={show}
         viewerId={viewerId}
+        startWrite={startWriteResult}
         onLeaveBeacon={onLeaveBeacon}
         catchup={{
           shown: catchupShownCount,
-          outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds }).length,
+          outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
           dueInMs: msUntilNextCatchup({
-            pushed: pushedPrompts, answeredIds, seenIds: seenPromptIds,
+            pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds,
             joinedAt: joinedAtRef.current, lastShownAt: lastCatchupAt, now,
             shownCount: catchupShownCount,
           }),
