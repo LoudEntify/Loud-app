@@ -83,6 +83,18 @@ const ALLOWLIST = {
       'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
       'Requiring a session here would put the check behind the thing being checked.',
   },
+  'viewer-session/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, same posture and same reasoning as ' +
+      'health-events beside it. Counting the audience IS the point, and most of the pilot ' +
+      'audience is not signed in — which is exactly why viewer_id carries the work; requiring a ' +
+      'session would discard the majority of the measurement and leave a number that looks real ' +
+      'and describes only signed-in users. There is no GET, so a caller can add a row or close ' +
+      'one they can already name but cannot enumerate anything. viewer_sessions has RLS on with ' +
+      'zero policies and no product surface reads it. The honest cost: the unique-viewer count ' +
+      'is what clients reported, not an adversarial measurement, and should not be quoted as one.',
+  },
   'token/route.js': {
     status: 'settled',
     reason:
