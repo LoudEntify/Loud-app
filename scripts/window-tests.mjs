@@ -12,7 +12,7 @@ import {
 import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
-import { humanCountdown } from '../lib/showWindow.js';
+import { humanCountdown, countdownParts } from '../lib/showWindow.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
 import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
@@ -502,6 +502,52 @@ eq('4h 12m', humanCountdown((4 * 60 + 12) * 60000), 'in 4h 12m');
 eq('one day is singular', humanCountdown(25 * 3600000), 'in 1 day');
 eq('three days', humanCountdown(3 * 86400000), 'in 3 days');
 eq('null -> empty', humanCountdown(null), '');
+
+
+
+// ── viewer homepage: the countdown to showtime ──────────────────
+// The spec is "days, then hours, then minutes, then seconds as it gets
+// closer", so `scale` is the load-bearing field -- it decides which
+// units are on screen. A fixed MM:SS reads "4320:00" three days out.
+console.log('\n── countdownParts ──');
+const cSEC = 1000, cMIN = 60 * cSEC, cHOUR = 60 * cMIN, cDAY = 24 * cHOUR;
+const cp = (ms) => countdownParts(ms);
+
+eq('★ three days out -> days scale', cp(3 * cDAY + 4 * cHOUR).scale, 'days');
+eq('and the parts split correctly',
+  [cp(3 * cDAY + 4 * cHOUR).days, cp(3 * cDAY + 4 * cHOUR).hours], [3, 4]);
+eq('★ 25 hours is still days scale (1 day, 1 hour)',
+  [cp(25 * cHOUR).scale, cp(25 * cHOUR).days, cp(25 * cHOUR).hours], ['days', 1, 1]);
+eq('★ just under a day switches to hours', cp(cDAY - cSEC).scale, 'hours');
+eq('an hour and two minutes -> hours scale',
+  [cp(cHOUR + 2 * cMIN).scale, cp(cHOUR + 2 * cMIN).hours, cp(cHOUR + 2 * cMIN).minutes],
+  ['hours', 1, 2]);
+eq('★ just under an hour switches to minutes', cp(cHOUR - cSEC).scale, 'minutes');
+eq('90 seconds -> minutes scale, 1m30s',
+  [cp(90 * cSEC).scale, cp(90 * cSEC).minutes, cp(90 * cSEC).seconds], ['minutes', 1, 30]);
+eq('★ under a minute switches to seconds', cp(45 * cSEC).scale, 'seconds');
+eq('45 seconds', cp(45 * cSEC).seconds, 45);
+
+// Showtime and past it must both read done, because `done` is what the
+// page routes on. A negative that fell through as a huge positive would
+// park a viewer on a countdown while the show ran without them.
+eq('★ zero is done', cp(0).done, true);
+eq('★ past showtime is done, not a negative countdown', cp(-5000).done, true);
+eq('past showtime zeroes every part',
+  [cp(-5000).days, cp(-5000).hours, cp(-5000).minutes, cp(-5000).seconds], [0, 0, 0, 0]);
+eq('★ NaN is done rather than NaN parts', cp(NaN).done, true);
+eq('undefined is done', cp(undefined).done, true);
+
+// The audio window: starts at T-100m, and must be off at showtime so the
+// loop is not still playing under the room's own audio.
+const LEAD = 100 * cMIN;
+const audioOn = (ms) => Number.isFinite(ms) && ms > 0 && ms <= LEAD;
+eq('★ music is off 101 minutes out', audioOn(LEAD + cMIN), false);
+eq('★ music starts at exactly 100 minutes', audioOn(LEAD), true);
+eq('music is on 5 minutes out', audioOn(5 * cMIN), true);
+eq('★ music is OFF at showtime', audioOn(0), false);
+eq('★ music is OFF after showtime', audioOn(-1000), false);
+eq('no show -> no music', audioOn(null), false);
 
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
