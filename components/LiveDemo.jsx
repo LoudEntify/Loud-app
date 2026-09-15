@@ -785,6 +785,28 @@ export default function LiveDemo() {
   // asked for their name a second time.
   const [viewerEntry, setViewerEntry] = useState(() =>
     (typeof window === 'undefined' ? null : getSavedEntry()));
+  // ── READ AT CALL TIME, NOT AT MEMOISATION TIME ────────────────
+  // enterShow is a useCallback whose deps are [show, session, name,
+  // registerParticipant, showNotice]. Adding viewerEntry to that list
+  // would work, but this ref is the pattern already used throughout this
+  // file (activeShotRef, tracksRef, ineligibleRef) and it does not change
+  // enterShow's identity -- which matters because enterShow is itself a
+  // dependency of the auto-enter effect below.
+  //
+  // THE BUG THIS FIXES, found by device test on b734758: every viewer's
+  // FIRST session row had display_name, email and age_confirmed_at all
+  // null, and every later row carried them. The entry gate was working
+  // correctly -- the form did block entry -- but enterShow had been
+  // memoised in the render BEFORE the form was submitted, so its closure
+  // still held viewerEntry === null. Submitting re-ran the effect, which
+  // called that same stale closure. On a RELOAD getSavedEntry() populates
+  // the state at mount, so enterShow is created with the details already
+  // present, which is exactly why only the first row was affected.
+  //
+  // Left unfixed this would have put one anonymous row per viewer into
+  // the pilot's own dataset.
+  const viewerEntryRef = useRef(viewerEntry);
+  viewerEntryRef.current = viewerEntry;
   // Armed by the join write with everything the beacon needs, so the
   // leave path re-derives nothing at the one moment the page is going.
   const viewerLeaveRef = useRef(null);
@@ -1315,6 +1337,17 @@ export default function LiveDemo() {
       // it needs to close THIS row, so the leave path does not have to
       // re-derive anything at the one moment the page is going away.
       viewerLeaveRef.current = { showId: show.id, livekitIdentity: identity };
+      const entry = viewerEntryRef.current;
+      // Defence in depth, and a tripwire. The gate above should make this
+      // impossible for anyone who is not the artist, so if it ever fires
+      // again the row says so instead of just being quietly blank -- which
+      // is how the first version of this got through a passing device
+      // test. An artist who falls through to the viewer path legitimately
+      // has no entry, so they are excluded rather than reported.
+      const ownsShowNow = !!session?.user?.id && show.artist_id === session.user.id;
+      if (!entry && !ownsShowNow) {
+        logHealthEvent('viewer_session_join_without_entry', { showId: show.id, identity });
+      }
       writeViewerSession({
         action: 'join',
         showId: show.id,
@@ -1322,9 +1355,9 @@ export default function LiveDemo() {
         viewerId: viewerIdRef.current,
         livekitIdentity: identity,
         userId: session?.user?.id || null,
-        displayName: viewerEntry?.displayName || null,
-        email: viewerEntry?.email || null,
-        ageConfirmedAt: viewerEntry?.ageConfirmedAt || null,
+        displayName: entry?.displayName || null,
+        email: entry?.email || null,
+        ageConfirmedAt: entry?.ageConfirmedAt || null,
       });
       const res = await fetch(
         `/api/token?room=${encodeURIComponent(show.room_name)}&identity=${encodeURIComponent(identity)}`
