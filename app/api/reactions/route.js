@@ -53,6 +53,11 @@ export async function POST(request) {
         emoji: String(r.emoji).slice(0, 16),
         offset_ms: Number.isFinite(Number(r.offset_ms)) ? Math.max(0, Math.round(Number(r.offset_ms))) : null,
         tokens_spent: Number.isFinite(Number(r.tokens_spent)) ? Math.trunc(Number(r.tokens_spent)) : 0,
+        // ITEM 4 (pilot2_04). Both nullable: a reaction that cannot be
+        // attributed is still a reaction, and dropping it to protect a
+        // join key would trade real data for a tidier one.
+        viewer_id: r.viewer_id ? String(r.viewer_id).slice(0, 200) : null,
+        room_name: r.room_name ? String(r.room_name).slice(0, 200) : null,
       }));
 
     if (rows.length === 0) return NextResponse.json({ ok: true, inserted: 0 });

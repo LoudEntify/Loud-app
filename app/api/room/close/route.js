@@ -77,7 +77,44 @@ export async function POST(request) {
       detail = String(err?.message || err);
     }
 
-    return NextResponse.json({ ok: true, room, reason, deleted, detail });
+    // ── CLOSE OUT OPEN VIEWER SESSIONS (item 4) ───────────────
+    //
+    // This exists because item 9 was CUT. The plan ranked the
+    // participant_left webhook as authoritative and demoted the sweep to
+    // unnecessary on that basis. With the webhook deferred to the 22nd,
+    // the beacon is the only leave source -- and the beacon does not
+    // fire on every mobile kill path. Without this, a viewer whose phone
+    // was locked or whose tab was evicted has left_at NULL forever, and
+    // their watch time is not "unknown", it is silently unbounded.
+    //
+    // 'sweep' is an UPPER BOUND and is labelled as one, exactly like
+    // shows.ended_by = 'window_sweep'. All this knows is that the room
+    // was torn down at this moment and the session had not closed
+    // itself; the viewer may have left an hour earlier. Analysis on the
+    // 21st must treat sweep-closed sessions as a ceiling, not a
+    // measurement, which is only possible because the label is there.
+    //
+    // `.is('left_at', null)` preserves the source ranking: a real beacon
+    // (and, from the 22nd, a webhook) always wins over this.
+    //
+    // Best-effort and never allowed to fail the close: the room being
+    // gone is the point of this endpoint, and a diagnostic column must
+    // not stand between the artist and the end of the bill.
+    let sessionsSwept = null;
+    try {
+      const { data: swept, error: sweepErr } = await admin
+        .from('viewer_sessions')
+        .update({ left_at: new Date().toISOString(), left_source: 'sweep' })
+        .eq('show_id', owner.show.id)
+        .is('left_at', null)
+        .select('id');
+      sessionsSwept = sweepErr ? null : (swept?.length ?? 0);
+      if (sweepErr) console.warn('[room/close] viewer-session sweep failed:', sweepErr);
+    } catch (e) {
+      console.warn('[room/close] viewer-session sweep threw:', e);
+    }
+
+    return NextResponse.json({ ok: true, room, reason, deleted, detail, sessionsSwept });
   } catch (err) {
     console.warn('[room/close] request failed:', err);
     return NextResponse.json({ error: 'Could not close the room.', detail: String(err?.message || err) }, { status: 500 });

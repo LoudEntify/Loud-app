@@ -57,6 +57,7 @@ import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState';
 import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import { viewerIdOrSession, getSavedEntry, saveEntry } from '../lib/viewerIdentity';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
@@ -351,6 +352,80 @@ async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfN
 // supabase-js refreshes the session in the background, so asking for it
 // now always gets a current one. It also removes the whole class of bug
 // where a stale token is captured in a useCallback dependency array.
+// ── ITEM 4: the viewer-session writes ─────────────────────────
+// Fire-and-forget, and that is a rule rather than a shortcut. This is
+// measurement: a viewer must never fail to reach a show, or be held up
+// on their way out of one, because a counter could not be incremented.
+// Failures go to health_events so an empty table and a broken write are
+// distinguishable afterwards -- the exact confusion that let the
+// reactions write be silently dead for weeks.
+const VIEWER_SESSION_ENDPOINT = '/api/viewer-session';
+
+function writeViewerSession(payload) {
+  try {
+    fetch(VIEWER_SESSION_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async (res) => {
+        if (res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        logHealthEvent('viewer_session_write_failed', {
+          action: payload.action, status: res.status, detail: data?.error ?? null,
+        });
+      })
+      .catch((e) => logHealthEvent('viewer_session_write_failed', {
+        action: payload.action, detail: String(e?.message || e),
+      }));
+  } catch (e) {
+    logHealthEvent('viewer_session_write_failed', { action: payload.action, detail: String(e?.message || e) });
+  }
+}
+
+// ── THE LEAVE BEACON ──────────────────────────────────────────
+// sendBeacon, not fetch, and `pagehide`, not `beforeunload`. Both
+// choices are copied from lib/reactions.js, which is the one mechanism
+// in this codebase already proven to survive a page going away:
+//
+//   * a page that is actually going away will not reliably let an async
+//     fetch finish, and sendBeacon is the API designed for exactly this
+//   * `beforeunload` does not fire on mobile at all in the cases that
+//     matter -- a locked phone, an evicted background tab
+//
+// ⚠️ STATED LIMIT: the beacon still does not fire on EVERY mobile kill
+// path. The plan ranked LiveKit's participant_left webhook above this
+// and demoted the sweep on that basis -- but item 9 is cut to the 22nd,
+// so the beacon is the only client-side leave source this week. The
+// sweep in /api/room/close is what stops an unfired beacon becoming an
+// unbounded watch time, and it labels those rows 'sweep' so they read as
+// the upper bound they are.
+function sendViewerLeaveBeacon(ref) {
+  const payload = ref?.current;
+  if (!payload?.showId || !payload?.livekitIdentity) return;
+  // Once. A pagehide can fire more than once (bfcache), and the route's
+  // `.is('left_at', null)` guard makes a duplicate harmless anyway --
+  // but a second beacon is a second write nobody needs.
+  ref.current = null;
+  const body = JSON.stringify({ action: 'leave', ...payload });
+  try {
+    const blob = new Blob([body], { type: 'application/json' });
+    if (navigator.sendBeacon?.(VIEWER_SESSION_ENDPOINT, blob)) return;
+  } catch {
+    // fall through to keepalive fetch
+  }
+  try {
+    fetch(VIEWER_SESSION_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // Nothing further is possible, and the sweep covers it.
+  }
+}
+
 // ── ITEM 8 LAYER B: tear the room down ────────────────────────
 // Fire-and-forget in the same spirit as triggerEgress: a failure to
 // close costs money and tidiness, never the show. The show is already
@@ -696,6 +771,57 @@ export default function LiveDemo() {
   // sets 'a'/'b' locally -- entitlement is join-show's answer, not this
   // component's guess.
   const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' (post-join only)
+
+  // ── ITEM 4 / 11f: who is watching ─────────────────────────────
+  // viewerId is device-scoped and NEVER goes over the LiveKit wire --
+  // see lib/viewerIdentity.js for why that separation is load-bearing.
+  // Read once per mount rather than per render so the value cannot
+  // change under a write that is already in flight.
+  const viewerIdRef = useRef(null);
+  if (viewerIdRef.current === null && typeof window !== 'undefined') {
+    viewerIdRef.current = viewerIdOrSession();
+  }
+  // Restored from the device so a viewer who reloads mid-show is not
+  // asked for their name a second time.
+  const [viewerEntry, setViewerEntry] = useState(() =>
+    (typeof window === 'undefined' ? null : getSavedEntry()));
+  // ── READ AT CALL TIME, NOT AT MEMOISATION TIME ────────────────
+  // enterShow is a useCallback whose deps are [show, session, name,
+  // registerParticipant, showNotice]. Adding viewerEntry to that list
+  // would work, but this ref is the pattern already used throughout this
+  // file (activeShotRef, tracksRef, ineligibleRef) and it does not change
+  // enterShow's identity -- which matters because enterShow is itself a
+  // dependency of the auto-enter effect below.
+  //
+  // THE BUG THIS FIXES, found by device test on b734758: every viewer's
+  // FIRST session row had display_name, email and age_confirmed_at all
+  // null, and every later row carried them. The entry gate was working
+  // correctly -- the form did block entry -- but enterShow had been
+  // memoised in the render BEFORE the form was submitted, so its closure
+  // still held viewerEntry === null. Submitting re-ran the effect, which
+  // called that same stale closure. On a RELOAD getSavedEntry() populates
+  // the state at mount, so enterShow is created with the details already
+  // present, which is exactly why only the first row was affected.
+  //
+  // Left unfixed this would have put one anonymous row per viewer into
+  // the pilot's own dataset.
+  const viewerEntryRef = useRef(viewerEntry);
+  viewerEntryRef.current = viewerEntry;
+  // Armed by the join write with everything the beacon needs, so the
+  // leave path re-derives nothing at the one moment the page is going.
+  const viewerLeaveRef = useRef(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onHide = () => sendViewerLeaveBeacon(viewerLeaveRef);
+    window.addEventListener('pagehide', onHide);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      // Unmounting without a pagehide is still a leave -- navigating
+      // away inside the SPA, or the show ending and this component
+      // coming down. Same write, same idempotence.
+      onHide();
+    };
+  }, []);
   // Held for Stage 4's active-performer switch control -- only ever
   // non-null on the device that most recently claimed slot 'a'.
   const [sessionToken, setSessionToken] = useState(null);
@@ -1202,6 +1328,37 @@ export default function LiveDemo() {
       // the same account on a second device gets a distinct identity
       // (the timestamp) so the two can't collide and evict each other.
       const identity = `viewer-${(session?.user?.id || 'anon').slice(0, 8)}-${Date.now()}`;
+      // ITEM 4 -- one row per CONNECTION, written as soon as we know the
+      // identity. Fire-and-forget by design: this is measurement, and a
+      // viewer must never fail to reach a show because a counter could
+      // not be incremented.
+      //
+      // viewerLeaveRef arms the pagehide beacon below with exactly what
+      // it needs to close THIS row, so the leave path does not have to
+      // re-derive anything at the one moment the page is going away.
+      viewerLeaveRef.current = { showId: show.id, livekitIdentity: identity };
+      const entry = viewerEntryRef.current;
+      // Defence in depth, and a tripwire. The gate above should make this
+      // impossible for anyone who is not the artist, so if it ever fires
+      // again the row says so instead of just being quietly blank -- which
+      // is how the first version of this got through a passing device
+      // test. An artist who falls through to the viewer path legitimately
+      // has no entry, so they are excluded rather than reported.
+      const ownsShowNow = !!session?.user?.id && show.artist_id === session.user.id;
+      if (!entry && !ownsShowNow) {
+        logHealthEvent('viewer_session_join_without_entry', { showId: show.id, identity });
+      }
+      writeViewerSession({
+        action: 'join',
+        showId: show.id,
+        roomName: show.room_name,
+        viewerId: viewerIdRef.current,
+        livekitIdentity: identity,
+        userId: session?.user?.id || null,
+        displayName: entry?.displayName || null,
+        email: entry?.email || null,
+        ageConfirmedAt: entry?.ageConfirmedAt || null,
+      });
       const res = await fetch(
         `/api/token?room=${encodeURIComponent(show.room_name)}&identity=${encodeURIComponent(identity)}`
       );
@@ -1257,11 +1414,26 @@ export default function LiveDemo() {
       setStep('waiting');
       return;
     }
+    // ITEM 11f -- the audience gives their name before they are seated.
+    // NOT the artist: `ownsShow` is known client-side and an artist being
+    // asked to confirm they are 18 before entering their own show would
+    // be absurd. A camfeed never reaches this path at all (it has its own
+    // page), and a versus co-performer is resolved by join-show INSIDE
+    // enterShow -- so the only people this can gate are the audience.
+    //
+    // The gate is the ONLY blocking thing in item 4. Everything after it
+    // is fire-and-forget: the write can fail and the viewer still
+    // watches.
+    const ownsShowHere = !!session?.user?.id && show.artist_id === session.user.id;
+    if (!ownsShowHere && !viewerEntry) {
+      setStep('waiting');
+      return;
+    }
     if (enterAttemptedRef.current) return;
     enterAttemptedRef.current = true;
     setStep('entering');
     enterShow();
-  }, [step, session, identityReady, show, showState, windowOpen, enterShow]);
+  }, [step, session, identityReady, show, showState, windowOpen, enterShow, viewerEntry]);
 
   // One deliberate human retry, for the case the automatic path gave up
   // on. Resets the once-per-mount guard rather than reloading the page,
@@ -1412,6 +1584,18 @@ export default function LiveDemo() {
         show={show}
         now={now}
         note={`Doors open ${humanCountdown(msUntilWindow(show, now))}.`}
+        entry={
+          viewerEntry ? null : (
+            <ViewerEntryForm
+              onSubmit={(entry) => {
+                saveEntry(entry);
+                // State AND storage: storage so a reload does not ask
+                // again, state so this render pass proceeds without one.
+                setViewerEntry(entry);
+              }}
+            />
+          )
+        }
       />
     );
   }
@@ -1503,6 +1687,8 @@ export default function LiveDemo() {
             show={show}
             showState={showState}
             now={now}
+            viewerId={viewerIdRef.current}
+            onLeaveBeacon={() => sendViewerLeaveBeacon(viewerLeaveRef)}
             onShowUpdate={setShow}
             onRefetchShow={fetchShow}
             showWriteError={showWriteError}
@@ -1532,7 +1718,109 @@ export default function LiveDemo() {
 // as well as the in-room one, so a viewer who follows a show link hours
 // early sees the same screen with the same countdown, just without a
 // LiveKit connection behind it.
-function HoldingScreen({ show, now, note }) {
+// ── ITEM 11f: THE ENTRY FORM ──────────────────────────────────
+// On the holding screen, above the countdown, so it is filled in while
+// the viewer is already waiting rather than as a gate in front of a show
+// that has started.
+//
+// ── WHY THE EMAIL LABEL IS PART OF THE DESIGN ─────────────────
+// A bare email field on a join screen suppresses entry and reads as
+// harvesting. The sentence next to it is the difference between asking
+// and taking, and it is why the field is allowed to exist at all.
+//
+// ── WHY THE FORM DOES NOT BLOCK THE SHOW ──────────────────────
+// 18+ is required and blocks the button; name is required and blocks the
+// button. But the WRITE that follows is fire-and-forget: if the network
+// eats it, the viewer still watches. pilot2_02 makes display_name and
+// age_confirmed_at nullable for exactly this reason -- a rejected insert
+// would cost the whole session rather than one field, and "a missing
+// name should cost a name".
+function ViewerEntryForm({ onSubmit }) {
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [over18, setOver18] = useState(false);
+  const canEnter = displayName.trim().length > 0 && over18;
+  const field = {
+    width: '100%', padding: '10px 12px', borderRadius: 8, fontSize: 15,
+    border: '1px solid rgba(253,255,252,0.25)', background: 'rgba(253,255,252,0.06)',
+    color: '#fdfffc', boxSizing: 'border-box',
+  };
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!canEnter) return;
+        onSubmit({
+          displayName: displayName.trim(),
+          email: email.trim() || null,
+          ageConfirmedAt: new Date().toISOString(),
+        });
+      }}
+      style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}
+    >
+      <label style={{ fontSize: 13, opacity: 0.8 }}>
+        Your name
+        <input
+          style={{ ...field, marginTop: 4 }}
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          maxLength={120}
+          autoComplete="nickname"
+          placeholder="What should we call you?"
+        />
+      </label>
+      <div style={{ fontSize: 11, opacity: 0.5, marginTop: -6 }}>This is what appears next to your messages.</div>
+
+      <label style={{ fontSize: 13, opacity: 0.8 }}>
+        Email
+        <input
+          style={{ ...field, marginTop: 4 }}
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          maxLength={254}
+          autoComplete="email"
+        />
+      </label>
+      <div style={{ fontSize: 11, opacity: 0.5, marginTop: -6 }}>
+        Optional — if you&rsquo;d like to hear about future shows.
+      </div>
+
+      <label style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'flex-start', opacity: 0.9 }}>
+        <input
+          type="checkbox"
+          checked={over18}
+          onChange={(e) => setOver18(e.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>I am 18 or over</span>
+      </label>
+
+      {/* Above the button and not behind a link, deliberately: a notice
+          someone has to go looking for is a notice nobody read. */}
+      <div style={{ fontSize: 11, opacity: 0.55, lineHeight: 1.45 }}>
+        We keep your messages and answers so we can improve the platform. Your name and email are
+        only used for this show and, if you opt in, to tell you about future ones. Ask us any time
+        and we&rsquo;ll delete them.
+      </div>
+
+      <button
+        type="submit"
+        disabled={!canEnter}
+        style={{
+          padding: '11px 14px', borderRadius: 8, fontSize: 15, fontWeight: 700, border: 'none',
+          background: canEnter ? '#fdfffc' : 'rgba(253,255,252,0.18)',
+          color: canEnter ? '#011627' : 'rgba(253,255,252,0.5)',
+          cursor: canEnter ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Enter the show
+      </button>
+    </form>
+  );
+}
+
+function HoldingScreen({ show, now, note, entry }) {
   const slated = show?.slated_at ? new Date(show.slated_at).getTime() : null;
   return (
     <div
@@ -1564,6 +1852,7 @@ function HoldingScreen({ show, now, note }) {
       ) : (
         <div style={{ fontSize: 14, opacity: 0.6 }}>Waiting for the show to be scheduled...</div>
       )}
+      {entry}
       {note && <div style={{ fontSize: 12, opacity: 0.45, letterSpacing: '0.06em' }}>{note}</div>}
     </div>
   );
@@ -1684,7 +1973,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -1794,6 +2083,30 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
           </div>
         );
       })()}
+      {/* ITEM 4 -- the identity actually being written, and a button to
+          fire the leave beacon without closing the tab. Testing a
+          pagehide normally means killing the page, which also kills the
+          thing you were watching to see whether it worked. `nostore-`
+          means this device could not persist, so it counts as a session
+          but must NOT be counted as a unique person. */}
+      <div style={{ color: '#9ad', marginTop: 3 }}>
+        viewer {viewerId ? `${viewerId.slice(0, 18)}${viewerId.length > 18 ? '…' : ''}` : 'none'}
+        {viewerId?.startsWith('nostore-') && (
+          <span style={{ color: '#FFD54A' }}> (no storage — not a unique viewer)</span>
+        )}
+        {' '}
+        <button
+          type="button"
+          onClick={onLeaveBeacon}
+          style={{
+            pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+            background: 'transparent', color: '#9ad',
+            border: '1px solid #9ad', borderRadius: 3, padding: '0 5px',
+          }}
+        >
+          leave beacon
+        </button>
+      </div>
       <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
     </div>
   );
@@ -1801,7 +2114,7 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
 
 // --- Connected room UI -------------------------------------------------
 
-function RoomInner({ performanceMode, role, notice, selfName, email, artistAccessToken, artistId, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
+function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, selfName, email, artistAccessToken, artistId, roomName, showId, maximized, onToggleMaximize, sidebarCollapsed, show, showState, now, onShowUpdate, onRefetchShow, showWriteError, onShowWriteErrorChange, sessionToken, connToken, connServerUrl, onBroadcastEnded, onLeave, onResume, resuming }) {
   const room = useRoomContext();
   // ScreenShare is in this list ONLY because that is how b-roll clips are
   // published (lib/trackSources.js explains why not Camera). Nothing in
@@ -3539,6 +3852,10 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
     const startedAt = showOriginMs(show);
     logReaction({
       showId: showId || roomName,
+      // ITEM 4 -- carried explicitly so the 21st does not have to infer
+      // which namespace show_id happens to be in for this row.
+      roomName,
+      viewerId,
       emoji,
       // Offset from showtime, which is the column the training data is
       // actually about — wall-clock is unusable for comparing across
@@ -5150,6 +5467,8 @@ function RoomInner({ performanceMode, role, notice, selfName, email, artistAcces
         isTargetPresent={(slot, cmd) =>
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
         show={show}
+        viewerId={viewerId}
+        onLeaveBeacon={onLeaveBeacon}
         onCloseRoom={() => {
           // The exact Layer B sequence, on demand: stop egress, wait for
           // it up to the grace, then delete the room regardless.
