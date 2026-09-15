@@ -61,7 +61,7 @@ import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, mark
 import { logComment } from '../lib/comments';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
-import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup } from '../lib/promptCatchup';
+import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS } from '../lib/promptCatchup';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -2368,6 +2368,14 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
             <div style={{ color: '#9ad' }}>next: {catchup.outstandingIds.join(', ')}</div>
           )}
           <div>
+            {/* THE GATE THAT WAS MISSING. The scheduler's first check is
+                `if (activePrompt) return`, and the timer knows nothing
+                about it -- so the line could read DUE while nothing
+                could possibly be delivered. That is precisely what
+                "sticks on due" was. */}
+            {catchup.blockedBy && (
+              <span style={{ color: '#FF6B6B' }}>BLOCKED: {catchup.blockedBy} · </span>
+            )}
             watched {Math.floor(catchup.watchedMs / 1000)}s/{catchup.thresholdS}s · shown {catchup.shown}/3
             {' · '}
             <span style={{ color: catchup.dueInMs === null ? '#888' : catchup.dueInMs <= 0 ? '#FF9F4A' : '#888' }}>
@@ -2755,6 +2763,32 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // (answering twice overwrites, which is the intended behaviour).
   const [activePrompt, setActivePrompt] = useState(null);
   const [promptAnswered, setPromptAnswered] = useState(false);
+  // Read by the data-channel handler, which is defined ABOVE
+  // displayShowState. check:tdz caught the direct reference -- it would
+  // have been fine at runtime (the handler runs later) and is exactly
+  // the hazard that rule exists to stop being relied on.
+  const displayShowStateRef = useRef('scheduled');
+
+  // ── CLEARING THE CARD IS WHAT UNBLOCKS THE QUEUE ──────────────
+  // The scheduler's first gate is `if (activePrompt) return`, and
+  // answering used only to set promptAnswered -- the card switched to
+  // "Thanks" and activePrompt stayed set forever. The scheduler was then
+  // blocked for the rest of the page's life, so a viewer received
+  // exactly ONE catch-up per page load and a reload was the only way to
+  // get another. Found on fe9fcc8.
+  //
+  // The acknowledgement is worth showing, so the card is cleared on a
+  // short delay rather than instantly. Nothing races: the next card
+  // cannot arrive for another two minutes regardless.
+  const ANSWERED_CARD_MS = 3000;
+  useEffect(() => {
+    if (!promptAnswered || !activePrompt) return undefined;
+    const t = setTimeout(() => {
+      setActivePrompt(null);
+      setPromptAnswered(false);
+    }, ANSWERED_CARD_MS);
+    return () => clearTimeout(t);
+  }, [promptAnswered, activePrompt]);
   // ── CATCH-UP FOR LATE JOINERS ─────────────────────────────────
   // Everything this show has asked (fetched, because a prompt broadcast
   // before this client joined can never reach it over the data channel),
@@ -3822,6 +3856,10 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     // the database and ignores everything descriptive the client sends.
     // Sender validation lands with item 7 on the 22nd.
     if (payload.type === 'PROMPT' && payload.prompt?.id) {
+      // Same rule as the catch-up: nothing is asked after the end. A
+      // late broadcast, or one still in flight as the artist presses End
+      // Show, must not put a question over the ended card.
+      if (displayShowStateRef.current === 'ended') return;
       setActivePrompt(payload.prompt);
       setPromptAnswered(false);
       // ⚠️ DELIBERATELY NOT MARKED AS "OFFERED". This used to add every
@@ -3880,6 +3918,9 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     : receivedShowLive
       ? 'live'
       : showState;
+  // Mirrored for the data-channel handler above, which cannot read the
+  // const directly -- see displayShowStateRef's declaration.
+  displayShowStateRef.current = displayShowState;
 
   // ─── Fix (1a/1b): take the mic off air when the show ends ──────
   // END SHOW previously updated show state, broadcast SHOW_ENDED and
@@ -5782,6 +5823,15 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // A LIVE PROMPT ALWAYS WINS: if something is already on screen this
   // does nothing, so a catch-up card can never sit in front of the
   // question the artist is talking about right now.
+  // Nothing is asked after the show ends, and anything already on screen
+  // comes down. A question arriving over the ended card is the most
+  // visible way to look broken in front of an audience.
+  useEffect(() => {
+    if (displayShowState !== 'ended') return;
+    setActivePrompt(null);
+    setPromptAnswered(false);
+  }, [displayShowState]);
+
   useEffect(() => {
     if (isMainPerformer) return;
     if (activePrompt) return;
@@ -5793,6 +5843,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       lastShownAt: lastCatchupAt,
       now,
       shownCount: catchupShownCount,
+      showEnded: displayShowState === 'ended',
     });
     if (!next) return;
     setActivePrompt(next);
@@ -5805,7 +5856,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       watchedMs: now - joinedAtRef.current,
       outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
     });
-  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, catchupOfferedIds, lastCatchupAt, catchupShownCount, now]);
+  }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, catchupOfferedIds, lastCatchupAt, catchupShownCount, now, displayShowState]);
 
   const answerPrompt = useCallback(async (payload) => {
     if (!activePrompt?.id) return 'That question is no longer open.';
@@ -6087,6 +6138,11 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         catchup={{
           role,
           isPerformer: isMainPerformer,
+          blockedBy: displayShowState === 'ended'
+            ? 'show ended'
+            : activePrompt
+              ? `card on screen${promptAnswered ? ' (answered, clearing)' : ''}`
+              : null,
           fetch: listFetch,
           pushedCount: pushedPrompts.length,
           answeredCount: answeredIds.length,
@@ -6105,7 +6161,15 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
           // Rewinds the two gates rather than bypassing the scheduler, so
           // the button exercises the REAL path instead of a parallel one
           // that could pass while the real one is broken.
-          onForce: () => { joinedAtRef.current = 0; setLastCatchupAt(null); },
+          // Rewinds the two gates to exactly the threshold rather than to
+          // zero. Setting joinedAt = 0 made `watched` read as the whole
+          // Unix epoch -- ~56 years -- which was visible in the overlay
+          // and, worse, was written into prompt_catchup_shown.watchedMs,
+          // so every forced catch-up poisoned a field the 21st reads.
+          onForce: () => {
+            joinedAtRef.current = now - CATCHUP_AFTER_JOIN_MS;
+            setLastCatchupAt(now - CATCHUP_SPACING_MS);
+          },
         }}
         onCloseRoom={() => {
           // The exact Layer B sequence, on demand: stop egress, wait for

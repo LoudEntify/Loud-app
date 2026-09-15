@@ -14,7 +14,7 @@ import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
 import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
-import { nextCatchupPrompt, outstandingPrompts, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
+import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -437,6 +437,19 @@ eq('★ and the catch-up offers the most recent of them',
     joinedAt: J, lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0 })?.id, 'p1');
 eq('★ answering ONE does not clear the rest',
   outstandingPrompts({ pushed: five, answeredIds: ['p1'], seenIds: [] }).length, 3);
+
+// Nothing is asked after the end, and the queue is DROPPED rather than
+// deferred. A prompt over the ended card in front of fifty people is the
+// most visible way to look broken.
+eq('★ show ended -> no catch-up, however much is outstanding',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: true }), null);
+eq('★ show ended -> the countdown reports nothing due, not a time',
+  msUntilNextCatchup({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: true }), null);
+eq('and while the show is live it still delivers',
+  nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: [], joinedAt: J,
+    lastShownAt: null, now: J + CATCHUP_AFTER_JOIN_MS, shownCount: 0, showEnded: false })?.id, 'p1');
 
 // Nothing pushed at all.
 eq('no prompts -> nothing', nextCatchupPrompt({ pushed: [], answeredIds: [], seenIds: [], joinedAt: J, lastShownAt: null, now: J + 1e7 }), null);
