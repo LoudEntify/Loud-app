@@ -83,6 +83,21 @@ const ALLOWLIST = {
       'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
       'Requiring a session here would put the check behind the thing being checked.',
   },
+  'prompt-responses/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, same posture as viewer-session and health-events. ' +
+      'The audience has no account, and requiring one would make the questionnaire measure ' +
+      'signed-in users rather than the room. Note the ASYMMETRY with show-prompts, which is the ' +
+      'design: ASKING a question puts text on every screen in a live broadcast and READING the ' +
+      'results exposes what people said — both are artist-only. ANSWERING is anonymous and open. ' +
+      'There is no GET here, so a caller can add their own answer and can never read anyone ' +
+      "else's. Everything descriptive on the stored row (prompt_body, choice_label) is read from " +
+      'the prompt in the database, never taken from the request, so a client cannot rewrite what ' +
+      'question it answered. Honest cost: a scripted caller can stuff a vote; the unique index ' +
+      'stops one person tapping four times, not a determined one, and the number should not be ' +
+      'quoted as adversarial.',
+  },
   'viewer-session/route.js': {
     status: 'settled',
     reason:

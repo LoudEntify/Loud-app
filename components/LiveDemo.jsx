@@ -59,6 +59,7 @@ import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { viewerIdOrSession, getSavedEntry, saveEntry } from '../lib/viewerIdentity';
 import { planStaleShots } from '../lib/staleShotPlan';
+import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
 import { useMicState, useMicStateAnnouncer } from '../lib/micState';
@@ -352,6 +353,25 @@ async function updateShowStateWithRetry(nextState, showId, patch = null, onlyIfN
 // supabase-js refreshes the session in the background, so asking for it
 // now always gets a current one. It also removes the whole class of bug
 // where a stale token is captured in a useCallback dependency array.
+// ── ITEM 6: put the question on every screen ──────────────────
+// The whole prompt travels, so the card renders the instant it arrives
+// with no round-trip. The row is already stored by the time this is
+// called -- see pushPrompt for why that order is not optional.
+//
+// Best-effort, like every other broadcast here: a publish landing inside
+// a reconnect window throws, and an unhandled rejection during a live
+// show is noise in exactly the console someone is reading to find out
+// what went wrong. A viewer who misses the broadcast simply does not see
+// the question; nothing is corrupted.
+function broadcastPrompt(room, prompt) {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify({ type: 'PROMPT', prompt }));
+    room?.localParticipant?.publishData?.(bytes, {});
+  } catch (e) {
+    console.warn('[prompt] broadcast failed (likely a transient reconnect)', e);
+  }
+}
+
 // ── ITEM 4: the viewer-session writes ─────────────────────────
 // Fire-and-forget, and that is a rule rather than a shortcut. This is
 // measurement: a viewer must never fail to reach a show, or be held up
@@ -1718,6 +1738,176 @@ export default function LiveDemo() {
 // as well as the in-room one, so a viewer who follows a show link hours
 // early sees the same screen with the same countdown, just without a
 // LiveKit connection behind it.
+// ── ITEM 6: THE ANSWER CARD (viewer side) ─────────────────────
+// Sits over the stage, bottom-centre, and is dismissable. It must never
+// be modal: a question is not worth covering a performance with, and a
+// viewer who does not want to answer should be able to keep watching
+// without tapping anything.
+//
+// Pin persistence is CUT this week -- pilot2_06 has a `pinned` column
+// and nothing reads it yet, so a viewer who reloads mid-question loses
+// the card until the next one. Stated rather than hidden: the deferred
+// half is a re-fetch on mount, not a schema change.
+function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (!prompt) return null;
+
+  const wrap = {
+    position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)',
+    zIndex: 40, width: 'min(92vw, 420px)', boxSizing: 'border-box',
+    background: 'rgba(1,22,39,0.94)', color: '#fdfffc',
+    border: '1px solid rgba(253,255,252,0.18)', borderRadius: 12,
+    padding: '12px 14px', backdropFilter: 'blur(8px)',
+  };
+
+  if (answered) {
+    return (
+      <div style={wrap}>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Thanks — your answer is in.</div>
+      </div>
+    );
+  }
+
+  const send = async (payload) => {
+    setBusy(true); setError(null);
+    const err = await onAnswer(payload);
+    setBusy(false);
+    if (err) setError(err);
+  };
+
+  return (
+    <div style={wrap}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.35 }}>{prompt.body}</div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss question"
+          style={{ background: 'none', border: 'none', color: '#fdfffc', opacity: 0.5, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
+        >
+          ×
+        </button>
+      </div>
+
+      {prompt.kind === 'choice' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          {(prompt.options || []).map((label, i) => (
+            <button
+              key={label}
+              type="button"
+              disabled={busy}
+              onClick={() => send({ choiceIndex: i })}
+              style={{
+                padding: '9px 12px', borderRadius: 8, fontSize: 14, textAlign: 'left',
+                border: '1px solid rgba(253,255,252,0.3)', background: 'rgba(253,255,252,0.08)',
+                color: '#fdfffc', cursor: busy ? 'wait' : 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => { e.preventDefault(); if (text.trim()) send({ textBody: text.trim() }); }}
+          style={{ display: 'flex', gap: 6, marginTop: 10 }}
+        >
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={1000}
+            placeholder="Your answer"
+            style={{
+              flex: 1, padding: '9px 10px', borderRadius: 8, fontSize: 14, minWidth: 0,
+              border: '1px solid rgba(253,255,252,0.3)', background: 'rgba(253,255,252,0.08)', color: '#fdfffc',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={busy || !text.trim()}
+            style={{
+              padding: '9px 14px', borderRadius: 8, fontSize: 14, fontWeight: 700, border: 'none',
+              background: text.trim() ? '#fdfffc' : 'rgba(253,255,252,0.2)',
+              color: text.trim() ? '#011627' : 'rgba(253,255,252,0.5)',
+              cursor: busy ? 'wait' : 'pointer',
+            }}
+          >
+            Send
+          </button>
+        </form>
+      )}
+      {error && <div style={{ fontSize: 12, color: '#FF6B6B', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+// ── ITEM 6: THE PUSH PANEL (operator side) ────────────────────
+// Four prepared questions, one tap each. Compose is cut this week; when
+// it lands it uses the same route with source:'composed'.
+//
+// `suggestedAtMs` is shown as guidance and nothing fires automatically.
+// A question landing in the middle of a song is an editorial mistake no
+// timer can avoid, and the order is load-bearing (see lib/showPrompts.js)
+// so the operator needs to see where they are in it.
+function PromptPushPanel({ prompts, pushedKeys, onPush, results, originMs, now, busyKey }) {
+  const intoShow = originMs ? Math.max(0, now - originMs) : null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: '0.08em' }}>
+        QUESTIONS{intoShow !== null && ` · ${Math.floor(intoShow / 60000)} min in`}
+      </div>
+      {prompts.map((p) => {
+        const pushed = pushedKeys[p.key];
+        const r = pushed ? results[pushed] : null;
+        const due = p.suggestedAtMs !== null && intoShow !== null && intoShow >= p.suggestedAtMs;
+        return (
+          <div
+            key={p.key}
+            style={{
+              border: '1px solid rgba(253,255,252,0.15)', borderRadius: 8, padding: '8px 10px',
+              background: due && !pushed ? 'rgba(124,255,178,0.08)' : 'transparent',
+            }}
+          >
+            <div style={{ fontSize: 12, lineHeight: 1.35, marginBottom: 6 }}>{p.body}</div>
+            {p.verbatim && (
+              <div style={{ fontSize: 10, color: '#FFD54A', marginBottom: 6 }}>
+                July survey, verbatim — comparable only if unedited
+              </div>
+            )}
+            {!pushed ? (
+              <button
+                type="button"
+                disabled={busyKey === p.key}
+                onClick={() => onPush(p)}
+                style={{
+                  padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700, border: 'none',
+                  background: '#fdfffc', color: '#011627', cursor: busyKey === p.key ? 'wait' : 'pointer',
+                }}
+              >
+                {busyKey === p.key ? 'Sending…' : p.suggestedAtMs === null ? 'Ask at the end' : `Ask${due ? ' now' : ''}`}
+              </button>
+            ) : (
+              <div style={{ fontSize: 11, opacity: 0.85 }}>
+                {!r ? 'Asked — waiting for answers…' : r.kind === 'text' ? (
+                  <span>{r.total} answer{r.total === 1 ? '' : 's'}</span>
+                ) : (
+                  <span>
+                    {r.total} vote{r.total === 1 ? '' : 's'}
+                    {r.counts?.length ? ' · ' : ''}
+                    {(r.counts || []).map((c) => `${c.label} ${c.count}`).join(' · ')}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── ITEM 11f: THE ENTRY FORM ──────────────────────────────────
 // On the holding screen, above the countdown, so it is filled in while
 // the viewer is already waiting rather than as a gate in front of a show
@@ -2464,6 +2654,14 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const [reactions, setReactions] = useState([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [activeCamera, setActiveCamera] = useState({}); // slot -> identity of the live feed (generalized: no fixed a/b keys, any slot letter works as a plain lookup)
+  // ── ITEM 6 ────────────────────────────────────────────────────
+  // The question currently on screen, and whether THIS viewer has
+  // answered it. Answered is local: the route enforces one-answer-per-
+  // viewer, so this only decides whether to show the card or the
+  // acknowledgement, and a reload legitimately shows the card again
+  // (answering twice overwrites, which is the intended behaviour).
+  const [activePrompt, setActivePrompt] = useState(null);
+  const [promptAnswered, setPromptAnswered] = useState(false);
   const [activeShot, setActiveShot] = useState({}); // slot -> full SHOT_COMMAND (shot, transition, targetIdentity, params...)
 
   // ── Cameras, on stage ────────────────────────────────────────
@@ -3487,6 +3685,30 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     }
     if (payload.type === 'SHOW_ENDED') {
       setReceivedShowEnded(true);
+    }
+    // ── ITEM 6: a question arrives ────────────────────────────
+    // The PROMPT message carries the whole question, so the card renders
+    // the moment it arrives with no round-trip. The id is a uuid
+    // (pilot2_06 chose uuid over a sequential bigint precisely because
+    // this travels over the channel) so it is not guessable from having
+    // seen another one.
+    //
+    // The ANSWER goes back through a route, not this channel: a response
+    // is data, not an event everyone in the room needs. Broadcasting
+    // answers would also show every viewer what everyone else said,
+    // which is not a questionnaire.
+    //
+    // §0.8 applies -- SHOT_COMMAND is applied from any sender and so is
+    // this. A forged PROMPT shows a fake question to the room; it cannot
+    // write a row, because the response route reads the real prompt from
+    // the database and ignores everything descriptive the client sends.
+    // Sender validation lands with item 7 on the 22nd.
+    if (payload.type === 'PROMPT' && payload.prompt?.id) {
+      setActivePrompt(payload.prompt);
+      setPromptAnswered(false);
+    }
+    if (payload.type === 'PROMPT_CLOSED') {
+      setActivePrompt((prev) => (prev && prev.id === payload.promptId ? null : prev));
     }
     if (payload.type === 'ACTIVE_PERFORMER_SWITCH') {
       // Stage 4 (MULTI_PERFORMER_SPEC.md section 5) -- this message is
@@ -5256,6 +5478,106 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     // SHOW_LIVE/egress would never fire at all.
   }, [isMainPerformer, showState, send, performanceMode, roomConnectionState, roomName, showId]);
 
+  // ── ITEM 6: push, answer, read back ───────────────────────────
+  const [pushedPromptKeys, setPushedPromptKeys] = useState({}); // key -> prompt id
+  const [promptResults, setPromptResults] = useState({});       // prompt id -> aggregate
+  const [pushingKey, setPushingKey] = useState(null);
+
+  const pushPrompt = useCallback(async (p) => {
+    const invalid = validatePrompt(p);
+    if (invalid) {
+      logHealthEvent('prompt_push_rejected', { key: p.key, reason: invalid });
+      return;
+    }
+    setPushingKey(p.key);
+    try {
+      const token = (await getSession())?.access_token || null;
+      const res = await fetch('/api/show-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          room: roomName,
+          kind: p.kind,
+          body: p.body,
+          options: p.options,
+          source: 'saved',
+          // Item 3 -- measured from when the show ACTUALLY started.
+          offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.prompt?.id) {
+        logHealthEvent('prompt_push_failed', { key: p.key, status: res.status, detail: data?.error ?? null });
+        return;
+      }
+      // The ROW EXISTS BEFORE THE BROADCAST. If the order were reversed,
+      // a viewer could answer a prompt id that had not been stored yet
+      // and the response route would 404 a real answer.
+      setPushedPromptKeys((prev) => ({ ...prev, [p.key]: data.prompt.id }));
+      broadcastPrompt(room, data.prompt);
+      logHealthEvent('prompt_pushed', { key: p.key, promptId: data.prompt.id, kind: p.kind });
+    } catch (e) {
+      logHealthEvent('prompt_push_failed', { key: p.key, detail: String(e?.message || e) });
+    } finally {
+      setPushingKey(null);
+    }
+  }, [room, roomName, show]);
+
+  // Results poll. Only while a prompt of this operator's is outstanding,
+  // and only for the operator -- viewers must never see the running
+  // tally, because a visible tally changes the answers.
+  useEffect(() => {
+    if (!isMainPerformer) return undefined;
+    const ids = Object.values(pushedPromptKeys);
+    if (ids.length === 0) return undefined;
+    let cancelled = false;
+    const read = async () => {
+      const token = (await getSession())?.access_token || null;
+      if (!token) return;
+      for (const id of ids) {
+        try {
+          const res = await fetch(
+            `/api/show-prompts?promptId=${encodeURIComponent(id)}&room=${encodeURIComponent(roomName)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (!cancelled) setPromptResults((prev) => ({ ...prev, [id]: data }));
+        } catch {
+          // A failed read is a stale tally, never a broken show.
+        }
+      }
+    };
+    read();
+    const t = setInterval(read, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isMainPerformer, pushedPromptKeys, roomName]);
+
+  const answerPrompt = useCallback(async (payload) => {
+    if (!activePrompt?.id) return 'That question is no longer open.';
+    try {
+      const res = await fetch('/api/prompt-responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          promptId: activePrompt.id,
+          viewerId,
+          livekitIdentity: room?.localParticipant?.identity ?? null,
+          offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+          ...payload,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return data?.error || 'That did not send. Try once more.';
+      }
+      setPromptAnswered(true);
+      return null;
+    } catch {
+      return 'That did not send. Try once more.';
+    }
+  }, [activePrompt, viewerId, room, show]);
+
   // ── ITEM 8 LAYER C: the unattended end ────────────────────────
   // Covers "the artist closed the laptop without pressing End Show" as
   // long as ONE artist browser somewhere noticed. The endpoint is
@@ -5458,6 +5780,40 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         <EndedSelfView still={endedSelfViewStill} />
       )}
       <BlurFillBackground trackRef={blurFillTrackRef} />
+      {/* ITEM 6 -- the question, for whoever is watching. Rendered for
+          every role including the artist: an artist who cannot see what
+          their audience was just asked cannot talk to it, and talking to
+          it is the entire point of asking during a show rather than
+          after. */}
+      <PromptCard
+        prompt={activePrompt}
+        answered={promptAnswered}
+        onAnswer={answerPrompt}
+        onDismiss={() => setActivePrompt(null)}
+      />
+      {/* ITEM 6 -- the operator's four questions and their running
+          tallies. isMainPerformer only: the tally must never be on a
+          viewer's screen, because a visible tally changes the answers. */}
+      {isMainPerformer && (
+        <div
+          style={{
+            position: 'absolute', right: 12, top: 12, zIndex: 35,
+            width: 'min(86vw, 280px)', maxHeight: '60vh', overflowY: 'auto',
+            background: 'rgba(1,22,39,0.92)', border: '1px solid rgba(253,255,252,0.15)',
+            borderRadius: 10, padding: '10px 12px', color: '#fdfffc', backdropFilter: 'blur(8px)',
+          }}
+        >
+          <PromptPushPanel
+            prompts={SHOW_PROMPTS}
+            pushedKeys={pushedPromptKeys}
+            results={promptResults}
+            onPush={pushPrompt}
+            originMs={showOriginMs(show)}
+            now={now}
+            busyKey={pushingKey}
+          />
+        </div>
+      )}
       <CutTimingDebugOverlay />
       <StaleShotDebugOverlay
         activeShot={activeShot}

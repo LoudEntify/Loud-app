@@ -13,6 +13,7 @@ import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
+import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
 
 let fail = 0;
 const eq = (name, got, want) => {
@@ -320,6 +321,54 @@ eq('describeDisconnect names the action',
   describeDisconnect('SIGNAL_CLOSE'), { reason: 'SIGNAL_CLOSE', intentional: false, action: 'hold' });
 eq('and for a real ending',
   describeDisconnect('ROOM_DELETED'), { reason: 'ROOM_DELETED', intentional: true, action: 'release' });
+
+
+
+// ── item 6: the prompts, and the two that must not change ───────
+// The July-survey strings are the only evidence in this pilot that
+// measures a CHANGE of mind rather than an opinion. Editing one is
+// silent -- the rows still write and the chart still renders -- so the
+// exact bytes are asserted here, where a diff shows up in review.
+console.log('\n── show prompts (item 6) ──');
+
+eq('four prepared prompts', SHOW_PROMPTS.length, 4);
+eq('all validate against the DB CHECK', SHOW_PROMPTS.map(validatePrompt), [null, null, null, null]);
+eq('three choice, one text at the end',
+  SHOW_PROMPTS.map((p) => p.kind), ['choice', 'choice', 'choice', 'text']);
+
+eq('★ July survey Q2 body is byte-exact',
+  promptByKey('would_buy_tokens').body,
+  'Watching would be free. Would you ever buy tokens to power-vote or tip an artist you loved?');
+eq('★ July survey Q2 options are byte-exact and in order',
+  promptByKey('would_buy_tokens').options,
+  ['Definitely', 'Only for an artist I really love', 'No, never']);
+eq('★ July survey Q3 body is byte-exact',
+  promptByKey('first_purchase').body, 'Which would you most likely try first?');
+eq('★ July survey Q3 options are byte-exact and in order',
+  promptByKey('first_purchase').options, ['Free votes only', '£10 token pack', '£20 token pack']);
+eq('both verbatim prompts are flagged as such',
+  SHOW_PROMPTS.filter((p) => p.verbatim).map((p) => p.key), ['would_buy_tokens', 'first_purchase']);
+
+// Order is load-bearing: the comparison needs them to have watched, and
+// the survey questions need to be late enough to reflect the experience.
+eq('★ suggested order is ascending, text last',
+  SHOW_PROMPTS.map((p) => p.suggestedAtMs), [600000, 1500000, 2400000, null]);
+
+// validatePrompt mirrors show_prompts_options_check. Every case here
+// would be a 400 mid-show if it reached the route instead.
+eq('choice with 1 option rejected', !!validatePrompt({ kind: 'choice', body: 'q', options: ['a'] }), true);
+eq('choice with 5 options rejected',
+  !!validatePrompt({ kind: 'choice', body: 'q', options: ['a', 'b', 'c', 'd', 'e'] }), true);
+eq('choice with 2 accepted', validatePrompt({ kind: 'choice', body: 'q', options: ['a', 'b'] }), null);
+eq('choice with 4 accepted', validatePrompt({ kind: 'choice', body: 'q', options: ['a', 'b', 'c', 'd'] }), null);
+eq('★ blank option rejected', !!validatePrompt({ kind: 'choice', body: 'q', options: ['a', '  '] }), true);
+eq('text with options rejected', !!validatePrompt({ kind: 'text', body: 'q', options: ['a'] }), true);
+eq('text with none accepted', validatePrompt({ kind: 'text', body: 'q', options: [] }), null);
+eq('empty body rejected', !!validatePrompt({ kind: 'text', body: '   ', options: [] }), true);
+eq('★ 280 chars accepted', validatePrompt({ kind: 'text', body: 'x'.repeat(280), options: [] }), null);
+eq('★ 281 chars rejected', !!validatePrompt({ kind: 'text', body: 'x'.repeat(281), options: [] }), true);
+eq('unknown kind rejected', !!validatePrompt({ kind: 'poll', body: 'q', options: ['a', 'b'] }), true);
+eq('null rejected', !!validatePrompt(null), true);
 
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
