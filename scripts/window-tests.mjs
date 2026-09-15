@@ -12,6 +12,7 @@ import {
 import { isLivePairing, PAIRING_LIVENESS_MS } from '../lib/pairingLiveness.js';
 import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.js';
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
+import { humanCountdown } from '../lib/showWindow.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
 import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
@@ -483,6 +484,25 @@ eq('★ nothing once 3 have been shown, however long it has been',
 eq('the 3rd is still allowed',
   nextCatchupPrompt({ pushed: five, answeredIds: [], seenIds: ['p1','p2'], joinedAt: J,
     lastShownAt: null, now: J + 60 * 60000, shownCount: 2 })?.id, 'p3');
+
+
+// ── artist door: the Go Live countdown ──────────────────────────
+// The last 59 seconds before the window opens all read "in 0m", on the
+// one button an artist stands watching. Seconds matter there, and the
+// viewer countdown needs the same granularity.
+console.log('\n── humanCountdown ──');
+eq('past -> now', humanCountdown(-1), 'now');
+eq('zero -> now', humanCountdown(0), 'now');
+eq('★ 45 seconds reads in seconds, not "in 0m"', humanCountdown(45000), 'in 45s');
+eq('★ 59 seconds', humanCountdown(59000), 'in 59s');
+eq('60 seconds crosses to minutes', humanCountdown(60000), 'in 1m');
+eq('59 minutes', humanCountdown(59 * 60000), 'in 59m');
+eq('an hour', humanCountdown(60 * 60000), 'in 1h 0m');
+eq('4h 12m', humanCountdown((4 * 60 + 12) * 60000), 'in 4h 12m');
+eq('one day is singular', humanCountdown(25 * 3600000), 'in 1 day');
+eq('three days', humanCountdown(3 * 86400000), 'in 3 days');
+eq('null -> empty', humanCountdown(null), '');
+
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
 process.exit(fail === 0 ? 0 : 1);

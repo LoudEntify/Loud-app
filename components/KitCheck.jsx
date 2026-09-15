@@ -17,6 +17,7 @@ import { getSession, getProfile } from '../lib/supabaseAuth';
 import { initHealthLog } from '../lib/healthLog';
 import { getSupabase } from '../lib/supabaseClient';
 import { isWindowOpen, nextUpcomingShow, msUntilWindow, humanCountdown, canHandOverNow, handoverState } from '../lib/scheduling';
+import { WINDOW_OPENS_BEFORE_MS } from '../lib/showWindow';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -546,6 +547,13 @@ export default function KitCheck() {
   // window is open -- see canHandOverNow for why that bound and not the
   // show window.
   const canGoLiveNow = canHandOverNow(upcoming, now);
+  // The clock time the button unlocks, not only the countdown. An artist
+  // setting up hours early wants to know WHEN to come back; "in 4h 12m"
+  // is something they then have to do arithmetic on.
+  const goLiveUnlocksAtLabel = upcoming?.slated_at
+    ? new Date(new Date(upcoming.slated_at).getTime() - WINDOW_OPENS_BEFORE_MS)
+        .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : '';
 
   if (session === null) {
     return <div style={{ padding: 40, fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>;
@@ -622,7 +630,11 @@ export default function KitCheck() {
               type="button"
               onClick={() => handOverToShow('manual')}
               disabled={!canGoLiveNow || handingOver}
-              title={canGoLiveNow ? 'Take me to my show now' : 'Your broadcast window is not open yet'}
+              title={
+                canGoLiveNow
+                  ? 'Take me to my show now'
+                  : `Unlocks at ${goLiveUnlocksAtLabel} — 30 minutes before your show`
+              }
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 padding: '13px 20px', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
@@ -639,7 +651,7 @@ export default function KitCheck() {
                 ? 'Moving your cameras across and putting you on stage.'
                 : canGoLiveNow
                   ? 'Skips the wait. Your paired cameras come with you, exactly as they would at showtime.'
-                  : `Opens ${humanCountdown(msUntilWindow(upcoming, now))} — 30 minutes before your show.`}
+                  : `Unlocks at ${goLiveUnlocksAtLabel}, ${humanCountdown(msUntilWindow(upcoming, now))} — 30 minutes before your show.`}
             </span>
           </div>
         )}
