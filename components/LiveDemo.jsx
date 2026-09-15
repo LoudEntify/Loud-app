@@ -2331,24 +2331,63 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
           otherwise means waiting five minutes and then three more, which
           is how item 1 turned eleven tests into two days. */}
       {catchup && (
-        <div style={{ color: '#fdfffc', marginTop: 3 }}>
-          catchup {catchup.shown}/3 · outstanding {catchup.outstanding}
-          {' · '}
-          <span style={{ color: catchup.dueInMs === null ? '#888' : catchup.dueInMs <= 0 ? '#FF9F4A' : '#888' }}>
-            {catchup.dueInMs === null ? 'done' : catchup.dueInMs <= 0 ? 'due' : `in ${Math.ceil(catchup.dueInMs / 1000)}s`}
-          </span>
-          {' '}
-          <button
-            type="button"
-            onClick={catchup.onForce}
-            style={{
-              pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
-              background: 'transparent', color: '#FFD54A',
-              border: '1px solid #FFD54A', borderRadius: 3, padding: '0 5px',
-            }}
-          >
-            force
-          </button>
+        // ── THE WORKING, NOT THE CONCLUSION ──────────────────────
+        // This used to print `outstanding 0 · done` and nothing else, so
+        // four different faults -- a performer client that never fetches,
+        // a fetch that failed, an empty list, and an over-broad exclusion
+        // set -- were indistinguishable from the outside. Every INPUT is
+        // shown, then the output, so the wrong one is readable at a
+        // glance instead of inferred.
+        <div style={{ color: '#fdfffc', marginTop: 4, borderTop: '1px solid rgba(253,255,252,0.15)', paddingTop: 3 }}>
+          <div>
+            role <span style={{ color: catchup.isPerformer ? '#FF6B6B' : '#7CFFB2' }}>{catchup.role}</span>
+            {catchup.isPerformer && (
+              <span style={{ color: '#FF6B6B' }}> — CATCH-UP DISABLED for performers</span>
+            )}
+          </div>
+          <div>
+            fetch{' '}
+            {!catchup.fetch ? (
+              <span style={{ color: '#FFD54A' }}>not run yet</span>
+            ) : catchup.fetch.skipped ? (
+              <span style={{ color: '#FF6B6B' }}>SKIPPED — {catchup.fetch.skipped}</span>
+            ) : catchup.fetch.error ? (
+              <span style={{ color: '#FF6B6B' }}>FAILED {catchup.fetch.error}</span>
+            ) : (
+              <span style={{ color: catchup.fetch.count > 0 ? '#7CFFB2' : '#FFD54A' }}>
+                {catchup.fetch.status} · {catchup.fetch.count} prompt{catchup.fetch.count === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+          <div>
+            pushed {catchup.pushedCount} · answered {catchup.answeredCount} · offered {catchup.offeredCount}
+            {' → outstanding '}
+            <span style={{ color: catchup.outstanding > 0 ? '#7CFFB2' : '#FFD54A' }}>{catchup.outstanding}</span>
+          </div>
+          {catchup.outstandingIds.length > 0 && (
+            <div style={{ color: '#9ad' }}>next: {catchup.outstandingIds.join(', ')}</div>
+          )}
+          <div>
+            watched {Math.floor(catchup.watchedMs / 1000)}s/{catchup.thresholdS}s · shown {catchup.shown}/3
+            {' · '}
+            <span style={{ color: catchup.dueInMs === null ? '#888' : catchup.dueInMs <= 0 ? '#FF9F4A' : '#888' }}>
+              {catchup.dueInMs === null
+                ? (catchup.shown >= 3 ? 'cap reached' : 'nothing outstanding')
+                : catchup.dueInMs <= 0 ? 'DUE' : `in ${Math.ceil(catchup.dueInMs / 1000)}s`}
+            </span>
+            {' '}
+            <button
+              type="button"
+              onClick={catchup.onForce}
+              style={{
+                pointerEvents: 'auto', cursor: 'pointer', font: 'inherit',
+                background: 'transparent', color: '#FFD54A',
+                border: '1px solid #FFD54A', borderRadius: 3, padding: '0 5px',
+              }}
+            >
+              force
+            </button>
+          </div>
         </div>
       )}
       <div style={{ color: '#888', marginTop: 3 }}>last event: {lastEvent || 'none yet'}</div>
@@ -2730,6 +2769,8 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // still the catch-up's business. This set exists only so the queue
   // advances instead of re-offering the same card every tick.
   const [catchupOfferedIds, setCatchupOfferedIds] = useState([]);
+  // What the prompt-list fetch actually did, for the overlay.
+  const [listFetch, setListFetch] = useState(null);
   const [lastCatchupAt, setLastCatchupAt] = useState(null);
   // Counted separately from catchupOfferedIds so the cap survives the
   // list being recomputed. The cap is on how many catch-up cards this
@@ -5703,17 +5744,29 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // Viewers only. The operator already knows what they pushed, and their
   // panel reads the artist-only results route instead.
   useEffect(() => {
-    if (isMainPerformer) return undefined;
-    if (!roomName) return undefined;
+    // Skips are RECORDED, not silent. A client that never fetches and a
+    // client that fetched and got nothing both end at outstanding 0.
+    if (isMainPerformer) { setListFetch({ skipped: 'client is a performer', at: Date.now() }); return undefined; }
+    if (!roomName) { setListFetch({ skipped: 'no room name yet', at: Date.now() }); return undefined; }
     let cancelled = false;
     const read = async () => {
       try {
         const res = await fetch(`/api/show-prompts/list?room=${encodeURIComponent(roomName)}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled && Array.isArray(data.prompts)) setPushedPrompts(data.prompts);
-      } catch {
-        // A failed read means catch-up is quiet, never that the show breaks.
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        // Recorded whether it worked or not. "The list is empty" and
+        // "the list was never fetched" and "the fetch 500'd" all produce
+        // outstanding 0, and telling them apart from the outside was
+        // impossible -- which is why this bug survived two fixes.
+        setListFetch({
+          status: res.status,
+          count: Array.isArray(data.prompts) ? data.prompts.length : null,
+          error: res.ok ? null : (data?.error || `HTTP ${res.status}`),
+          at: Date.now(),
+        });
+        if (res.ok && Array.isArray(data.prompts)) setPushedPrompts(data.prompts);
+      } catch (e) {
+        if (!cancelled) setListFetch({ status: null, count: null, error: String(e?.message || e), at: Date.now() });
       }
     };
     read();
@@ -6032,6 +6085,16 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         startWrite={startWriteResult}
         onLeaveBeacon={onLeaveBeacon}
         catchup={{
+          role,
+          isPerformer: isMainPerformer,
+          fetch: listFetch,
+          pushedCount: pushedPrompts.length,
+          answeredCount: answeredIds.length,
+          offeredCount: catchupOfferedIds.length,
+          watchedMs: now - joinedAtRef.current,
+          thresholdS: 300,
+          outstandingIds: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds })
+            .map((p) => String(p.id).slice(0, 8)),
           shown: catchupShownCount,
           outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
           dueInMs: msUntilNextCatchup({
