@@ -58,6 +58,7 @@ import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState
 import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, markPromptAnswered } from '../lib/viewerIdentity';
+import { logComment } from '../lib/comments';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup } from '../lib/promptCatchup';
@@ -4154,7 +4155,26 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     };
     setComments((prev) => [...prev, comment]);
     send(new TextEncoder().encode(JSON.stringify({ type: 'comment', comment })), {});
-  }, [send, selfName]);
+    // ITEM 5 -- ONE LINE, AFTER the two above. The live path is
+    // untouched: the comment is already on every screen in the room by
+    // the time this runs, and this write can fail all night without
+    // anyone noticing anything except that we have no record of it.
+    //
+    // Only what THIS device sent. Every client receives every comment,
+    // so persisting what was RECEIVED would write one copy per viewer
+    // and need something to arbitrate which counts. See lib/comments.js.
+    logComment({
+      showId,
+      roomName,
+      body: text,
+      authorName: selfName,
+      viewerId,
+      livekitIdentity: room?.localParticipant?.identity ?? null,
+      // Item 3 -- measured from when the show actually started, so a
+      // comment lines up with a shot change or a moment in the recording.
+      offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+    });
+  }, [send, selfName, showId, roomName, viewerId, room, show]);
 
   // All video tracks (main performer + any extra camera feeds) tagged to a
   // given slot, for the director panel to list and for the audience view

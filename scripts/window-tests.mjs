@@ -403,11 +403,15 @@ eq('★ at exactly 5 minutes, the most recent missed prompt',
 eq('★ at most 3 outstanding, most recent first',
   outstandingPrompts({ pushed: five, answeredIds: [], seenIds: [] }).map((p) => p.id), ['p1', 'p2', 'p3']);
 eq('the cap is 3', CATCHUP_MAX_OUTSTANDING, 3);
+// Pinned so changing either is a visible diff in review rather than a
+// silent shift in how much of the show a late joiner spends answering.
+eq('★ threshold is 5 minutes', CATCHUP_AFTER_JOIN_MS, 5 * 60000);
+eq('★ spacing is 2 minutes', CATCHUP_SPACING_MS, 2 * 60000);
 
 // Spacing.
-eq('nothing within 3 minutes of the last card',
+eq('nothing within the spacing window of the last card',
   call({ now: J + CATCHUP_AFTER_JOIN_MS + CATCHUP_SPACING_MS - 1000, lastShownAt: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] }), null);
-eq('★ the next one exactly 3 minutes later',
+eq('★ the next one exactly one spacing later',
   call({ now: J + CATCHUP_AFTER_JOIN_MS + CATCHUP_SPACING_MS, lastShownAt: J + CATCHUP_AFTER_JOIN_MS, seenIds: ['p1'] })?.id, 'p2');
 
 // Never re-show an answered prompt -- the rule that was explicitly asked for.
@@ -441,8 +445,8 @@ eq('junk clock -> nothing, not a throw',
     });
     if (n) { shown.push([t / 60000, n.id]); seen = [...seen, n.id]; last = J + t; }
   }
-  eq('★ a late joiner sees exactly 3, at 5, 8 and 11 minutes -- and then STOPS',
-    shown, [[5, 'p1'], [8, 'p2'], [11, 'p3']]);
+  eq('★ a late joiner sees exactly 3, at 5, 7 and 9 minutes -- and then STOPS',
+    shown, [[5, 'p1'], [7, 'p2'], [9, 'p3']]);
 }
 
 // The cap directly. Without it a viewer with five missed prompts was

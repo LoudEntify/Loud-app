@@ -83,6 +83,19 @@ const ALLOWLIST = {
       'newest build of the branch, so rebuilding an older commit silently moves it backwards. ' +
       'Requiring a session here would put the check behind the thing being checked.',
   },
+  'show-comments/route.js': {
+    status: 'settled',
+    reason:
+      'Deliberately open and rate-limited, the same posture as reactions/route.js which it is ' +
+      'modelled on, and for the same reason: the audience has no account, so requiring one would ' +
+      'make the stored chat log contain only signed-in users — a worse record and a misleading ' +
+      'one. There is no GET, so a caller can add their own comments and never read anybody ' +
+      "else's; show_comments has RLS on with zero policies and the live chat everyone reads comes " +
+      'over the LiveKit data channel, never through this table. Honest cost: a determined caller ' +
+      'can write comments nobody in the room saw — bounded by rate limit, batch cap and length ' +
+      'cap, but not prevented — so the stored log is a record of what was said, not evidence that ' +
+      'only those things were said.',
+  },
   'show-prompts/list/route.js': {
     status: 'settled',
     reason:
