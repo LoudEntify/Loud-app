@@ -59,6 +59,7 @@ import { showWindowClosesAt } from '../lib/showWindow';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
 import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, markPromptAnswered } from '../lib/viewerIdentity';
 import { logComment } from '../lib/comments';
+import ViewerEntryForm from './ViewerEntryForm';
 import { planStaleShots } from '../lib/staleShotPlan';
 import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS } from '../lib/promptCatchup';
@@ -1924,107 +1925,6 @@ function PromptPushPanel({ prompts, pushedKeys, onPush, results, originMs, now, 
   );
 }
 
-// ── ITEM 11f: THE ENTRY FORM ──────────────────────────────────
-// On the holding screen, above the countdown, so it is filled in while
-// the viewer is already waiting rather than as a gate in front of a show
-// that has started.
-//
-// ── WHY THE EMAIL LABEL IS PART OF THE DESIGN ─────────────────
-// A bare email field on a join screen suppresses entry and reads as
-// harvesting. The sentence next to it is the difference between asking
-// and taking, and it is why the field is allowed to exist at all.
-//
-// ── WHY THE FORM DOES NOT BLOCK THE SHOW ──────────────────────
-// 18+ is required and blocks the button; name is required and blocks the
-// button. But the WRITE that follows is fire-and-forget: if the network
-// eats it, the viewer still watches. pilot2_02 makes display_name and
-// age_confirmed_at nullable for exactly this reason -- a rejected insert
-// would cost the whole session rather than one field, and "a missing
-// name should cost a name".
-function ViewerEntryForm({ onSubmit }) {
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
-  const [over18, setOver18] = useState(false);
-  const canEnter = displayName.trim().length > 0 && over18;
-  const field = {
-    width: '100%', padding: '10px 12px', borderRadius: 8, fontSize: 15,
-    border: '1px solid rgba(253,255,252,0.25)', background: 'rgba(253,255,252,0.06)',
-    color: '#fdfffc', boxSizing: 'border-box',
-  };
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!canEnter) return;
-        onSubmit({
-          displayName: displayName.trim(),
-          email: email.trim() || null,
-          ageConfirmedAt: new Date().toISOString(),
-        });
-      }}
-      style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left' }}
-    >
-      <label style={{ fontSize: 13, opacity: 0.8 }}>
-        Your name
-        <input
-          style={{ ...field, marginTop: 4 }}
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          maxLength={120}
-          autoComplete="nickname"
-          placeholder="What should we call you?"
-        />
-      </label>
-      <div style={{ fontSize: 11, opacity: 0.5, marginTop: -6 }}>This is what appears next to your messages.</div>
-
-      <label style={{ fontSize: 13, opacity: 0.8 }}>
-        Email
-        <input
-          style={{ ...field, marginTop: 4 }}
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          maxLength={254}
-          autoComplete="email"
-        />
-      </label>
-      <div style={{ fontSize: 11, opacity: 0.5, marginTop: -6 }}>
-        Optional — if you&rsquo;d like to hear about future shows.
-      </div>
-
-      <label style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'flex-start', opacity: 0.9 }}>
-        <input
-          type="checkbox"
-          checked={over18}
-          onChange={(e) => setOver18(e.target.checked)}
-          style={{ marginTop: 2 }}
-        />
-        <span>I am 18 or over</span>
-      </label>
-
-      {/* Above the button and not behind a link, deliberately: a notice
-          someone has to go looking for is a notice nobody read. */}
-      <div style={{ fontSize: 11, opacity: 0.55, lineHeight: 1.45 }}>
-        We keep your messages and answers so we can improve the platform. Your name and email are
-        only used for this show and, if you opt in, to tell you about future ones. Ask us any time
-        and we&rsquo;ll delete them.
-      </div>
-
-      <button
-        type="submit"
-        disabled={!canEnter}
-        style={{
-          padding: '11px 14px', borderRadius: 8, fontSize: 15, fontWeight: 700, border: 'none',
-          background: canEnter ? '#fdfffc' : 'rgba(253,255,252,0.18)',
-          color: canEnter ? '#011627' : 'rgba(253,255,252,0.5)',
-          cursor: canEnter ? 'pointer' : 'not-allowed',
-        }}
-      >
-        Enter the show
-      </button>
-    </form>
-  );
-}
 
 function HoldingScreen({ show, now, note, entry }) {
   const slated = show?.slated_at ? new Date(show.slated_at).getTime() : null;

@@ -78,6 +78,18 @@ export default function Auth() {
   // ?next= (set by RequireAuth) wins so a shared show link survives the
   // detour through this page.
   const nextParam = searchParams?.get('next') || '';
+  // ── PILOT 2: NO SELF-SIGNUP ───────────────────────────────────
+  // Artist accounts are created by hand in the Supabase dashboard for
+  // both pilots, and the audience never reaches this screen at all --
+  // they come through the viewer door with a name and an email, and
+  // never hold an account.
+  //
+  // HIDDEN, NOT DELETED, and behind a single flag. Everything the signup
+  // path does -- role selection, username validation, the profile row
+  // built from user_metadata by ensureProfile -- is left intact and
+  // untouched, so restoring it after the 27th is flipping this constant
+  // back rather than rebuilding a flow and re-testing it.
+  const SELF_SIGNUP_ENABLED = false;
   const [mode, setMode] = useState('login');
   const [role, setRole] = useState('fan');
   const [email, setEmail] = useState('');
@@ -92,7 +104,10 @@ export default function Auth() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const isSignup = mode === 'signup';
+  // Gated as well as hidden. The tab is the only way to reach signup
+  // today, but a flag that only hides a button leaves the form one stray
+  // setMode away from rendering.
+  const isSignup = SELF_SIGNUP_ENABLED && mode === 'signup';
 
   function destinationFor(dbRole) {
     if (nextParam && nextParam.startsWith('/')) return nextParam;
@@ -232,22 +247,28 @@ export default function Auth() {
           <span style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.4)' }}>LIVE MUSIC PLATFORM</span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => setMode('login')}
-            style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'login' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'login' ? TEAL : 'rgba(1,22,39,0.5)' }}
-          >
-            LOG IN
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('signup')}
-            style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'signup' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'signup' ? TEAL : 'rgba(1,22,39,0.5)' }}
-          >
-            SIGN UP
-          </button>
-        </div>
+        {SELF_SIGNUP_ENABLED ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setMode('login')}
+              style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'login' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'login' ? TEAL : 'rgba(1,22,39,0.5)' }}
+            >
+              LOG IN
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('signup')}
+              style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'signup' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'signup' ? TEAL : 'rgba(1,22,39,0.5)' }}
+            >
+              SIGN UP
+            </button>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: TEAL, background: 'rgba(46,196,182,0.12)' }}>
+            ARTIST LOG IN
+          </div>
+        )}
 
         {isSignup && (
           <>

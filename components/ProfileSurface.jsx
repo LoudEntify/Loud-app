@@ -7,6 +7,9 @@ import AvatarRing from './AvatarRing';
 import EmptyState from './EmptyState';
 import AuthButton from './AuthButton';
 import ScheduleShow from './ScheduleShow';
+
+// PILOT 2 — see the owner console below. Flip to true after the 27th.
+const ARTIST_SCHEDULING_ENABLED = false;
 import InvitedShows from './InvitedShows';
 import BRollLibrary from './BRollLibrary';
 import CueSheetLibrary from './CueSheetLibrary';
@@ -267,10 +270,25 @@ export default function ProfileSurface({ artistId }) {
         {/* ── OWNER CONSOLE ────────────────────────────────── */}
         {isOwner && (
           <>
-            <div style={{ marginTop: 30 }}>
-              <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SHOWS</span>
-              <div style={{ marginTop: 12 }}><ScheduleShow /></div>
-            </div>
+            {/* ── PILOT 2: SCHEDULING IS THE OPERATOR'S ONLY ──────
+                Shows for both pilots are scheduled by hand, by one
+                person. An artist creating their own show would produce a
+                room nobody is operating, with no camera rig, no
+                recording and no questions -- and on the 20th it would sit
+                in Discover alongside the real one.
+
+                HIDDEN, NOT REMOVED. ScheduleShow and everything it calls
+                are untouched and still imported, so restoring this after
+                the 27th is deleting one constant rather than rebuilding
+                a surface. The artist still SEES their assigned show --
+                that comes from `shows.artist_id = me` plus
+                /api/performer/my-slots, neither of which is affected. */}
+            {ARTIST_SCHEDULING_ENABLED && (
+              <div style={{ marginTop: 30 }}>
+                <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SHOWS</span>
+                <div style={{ marginTop: 12 }}><ScheduleShow /></div>
+              </div>
+            )}
 
             <div style={{ marginTop: 30 }}><BRollLibrary /></div>
             <div style={{ marginTop: 30 }}><CueSheetLibrary /></div>
