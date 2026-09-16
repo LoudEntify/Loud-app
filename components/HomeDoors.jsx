@@ -8,6 +8,7 @@ import { countdownParts } from '../lib/showWindow';
 import { getSavedEntry, saveEntry } from '../lib/viewerIdentity';
 import ViewerEntryForm from './ViewerEntryForm';
 import PreshowAudio from './PreshowAudio';
+import Logo from './Logo';
 
 // components/HomeDoors.jsx
 // ─────────────────────────────────────────────────────────────
@@ -126,8 +127,8 @@ export default function HomeDoors() {
   // Reserved, fixed height. The animated logo replaces the contents of
   // this block and the page does not reflow when it lands.
   const logo = (
-    <div style={{ height: 72, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4 }}>
-      <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.01em' }}>Loudentify</div>
+    <div style={{ height: 72, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+      <Logo surface="dark" height={60} />
       <div style={{ fontSize: 9, letterSpacing: '0.18em', opacity: 0.5 }}>LIVE MUSIC PLATFORM</div>
     </div>
   );

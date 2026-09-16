@@ -7,6 +7,7 @@ import { countryOptions } from '../lib/countries';
 import GenreSelect from './GenreSelect';
 import { setAccountType } from '../lib/mockAccount';
 import './reactions.css';
+import Logo from './Logo';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -243,7 +244,7 @@ export default function Auth() {
       <div style={{ width: '100%', maxWidth: 380 }}>
 
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: INK, letterSpacing: '-0.01em' }}>Loudentify</div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><Logo surface="light" height={36} /></div>
           <span style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.4)' }}>LIVE MUSIC PLATFORM</span>
         </div>
 

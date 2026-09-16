@@ -6,6 +6,7 @@ import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft } fr
 import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
 import { getSession } from '../lib/supabaseAuth';
 import { fetchUnreadCount } from '../lib/unreadCount';
+import Logo from './Logo';
 
 // Matches Sidebar.dc.html from the Claude Design project exactly (icons,
 // labels, active/wallet color rules). PROFILE's destination is the one
@@ -117,7 +118,7 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
           </button>
         )}
         <div className="sidebar-header">
-          <div className="sidebar-title">Loudentify</div>
+          <div className="sidebar-title"><Logo surface="dark" height={28} /></div>
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
         </div>
         <div className="sidebar-nav">

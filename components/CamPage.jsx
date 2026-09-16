@@ -47,6 +47,7 @@ import '@livekit/components-styles';
 import ReleaseOnShowEnd from './ReleaseOnShowEnd';
 import { useSourceDimensions, useNativeIsLandscape, landscapeNativeCaptureOptions } from '../lib/useSourceDimensions';
 import { createPortraitProcessor, ROTATION_OPTIONS_DEG } from '../lib/rotationProcessor';
+import Logo from './Logo';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -274,7 +275,7 @@ export default function CamPage() {
     return (
       <div style={{ minHeight: '100vh', background: '#011627', color: '#fdfffc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ maxWidth: 320 }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(253,255,252,0.5)' }}>LOUDENTIFY</div>
+          <Logo surface="dark" height={24} />
           <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
           <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
             This camera is off — the light on this device should be out. Nothing is being sent.
