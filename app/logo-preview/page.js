@@ -21,12 +21,12 @@ const PORCELAIN = '#fdfffc';
 
 const PLACEMENTS = [
   { n: 1, file: 'HomeDoors.jsx', where: 'Landing page — primary', surface: 'dark', bg: INK, height: 60 },
-  { n: 2, file: 'Sidebar.jsx', where: 'Sidebar title (artist dashboard chrome)', surface: 'dark', bg: INK, height: 28 },
-  { n: 6, file: 'CamPair.jsx:257', where: 'Pair a camera — code screen', surface: 'dark', bg: INK, height: 24 },
-  { n: 7, file: 'CamPair.jsx:269', where: 'Pair a camera — waiting', surface: 'dark', bg: INK, height: 24 },
-  { n: 8, file: 'CamPair.jsx:281', where: 'Pair a camera — paired', surface: 'dark', bg: INK, height: 24 },
-  { n: 9, file: 'CamPair.jsx:325', where: 'Pair a camera — error', surface: 'dark', bg: INK, height: 24 },
-  { n: 10, file: 'CamPage.jsx:277', where: 'Camera viewfinder header', surface: 'dark', bg: INK, height: 24 },
+  { n: 2, file: 'Sidebar.jsx', where: 'Sidebar title (artist dashboard chrome)', surface: 'dark', bg: INK, height: 32 },
+  { n: 6, file: 'CamPair.jsx:257', where: 'Pair a camera — code screen', surface: 'dark', bg: INK, height: 36 },
+  { n: 7, file: 'CamPair.jsx:269', where: 'Pair a camera — waiting', surface: 'dark', bg: INK, height: 36 },
+  { n: 8, file: 'CamPair.jsx:281', where: 'Pair a camera — paired', surface: 'dark', bg: INK, height: 36 },
+  { n: 9, file: 'CamPair.jsx:325', where: 'Pair a camera — error', surface: 'dark', bg: INK, height: 36 },
+  { n: 10, file: 'CamPage.jsx:277', where: 'Camera viewfinder header', surface: 'dark', bg: INK, height: 36 },
   { n: 11, file: 'Auth.jsx:246', where: 'Artist log in', surface: 'light', bg: PORCELAIN, height: 36 },
 ];
 
@@ -64,10 +64,11 @@ export default function LogoPreviewPage() {
         <div style={{ border: '1px solid rgba(231,29,54,0.35)', borderRadius: 10, overflow: 'hidden', margin: '22px 0' }}>
           <div style={{ padding: '8px 12px', background: 'rgba(231,29,54,0.08)', fontSize: 12 }}>
             <strong>The floor.</strong> Minimum legible height is <strong>{MIN_LEGIBLE_HEIGHT}px</strong>.
-            The original 14px is shown for comparison — the whale is the thing that fails first.
+            14px and 24px are shown for comparison. With the signal arc restored, the ARC fails
+            before the whale does.
           </div>
           <div style={{ background: INK, padding: 22, display: 'flex', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap' }}>
-            {[14, 20, 24, 28, 36, 60].map((h) => (
+            {[14, 24, 28, 32, 36, 60].map((h) => (
               <div key={h} style={{ textAlign: 'center' }}>
                 {/* height below the floor is clamped by Logo, so this
                     bypasses the component to show what was rejected. */}
@@ -96,7 +97,7 @@ export default function LogoPreviewPage() {
             between the two files.
           </div>
           <div style={{ background: INK, padding: 22, display: 'flex', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap' }}>
-            {[24, 28, 36, 60, 120].map((h) => (
+            {[24, 32, 36, 60, 120].map((h) => (
               <div key={h} style={{ textAlign: 'center' }}>
                 <Logo surface="dark" height={h} />
                 <div style={{ fontSize: 10, color: 'rgba(253,255,252,0.5)', marginTop: 8 }}>
@@ -106,7 +107,7 @@ export default function LogoPreviewPage() {
             ))}
           </div>
           <div style={{ background: PORCELAIN, padding: 22, display: 'flex', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap', borderTop: '1px solid rgba(1,22,39,0.1)' }}>
-            {[24, 36, 60, 120].map((h) => (
+            {[32, 36, 60, 120].map((h) => (
               <div key={h} style={{ textAlign: 'center' }}>
                 <Logo surface="light" height={h} />
                 <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 8 }}>{h}px</div>
@@ -114,9 +115,9 @@ export default function LogoPreviewPage() {
             ))}
           </div>
           <div style={{ padding: '8px 12px', fontSize: 11, color: 'rgba(1,22,39,0.6)', lineHeight: 1.5 }}>
-            At the 24px floor the arc is roughly 7px wide — about 2px per colour band. Legible as colour,
-            not as three distinct bands. If the arc needs to read as three, the floor is 36px, and the
-            CamPair screens would go up rather than the mark being used smaller.
+            The floor is 32px: below it the whale is a blob and the arc is a coloured smudge. 36px is
+            the target and is what every full-screen card now uses — at 36 the arc resolves into three
+            distinct bands.
           </div>
         </div>
 

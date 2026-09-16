@@ -275,7 +275,7 @@ export default function CamPage() {
     return (
       <div style={{ minHeight: '100vh', background: '#011627', color: '#fdfffc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center' }}>
         <div style={{ maxWidth: 320 }}>
-          <Logo surface="dark" height={24} />
+          <Logo surface="dark" height={36} style={{ margin: '0 auto' }} />
           <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
           <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
             This camera is off — the light on this device should be out. Nothing is being sent.
