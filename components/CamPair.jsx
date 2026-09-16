@@ -255,7 +255,7 @@ export default function CamPair() {
   if (resuming && !conn) {
     return (
       <Shell>
-        <Logo surface="dark" height={24} />
+        <Logo surface="dark" height={36} />
         <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>Reconnecting this camera…</div>
         <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
           This device is already paired. Picking up where it left off — no new code needed.
@@ -267,7 +267,7 @@ export default function CamPair() {
   if (showOver) {
     return (
       <Shell>
-        <Logo surface="dark" height={24} />
+        <Logo surface="dark" height={36} />
         <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>The show has ended</div>
         <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
           This camera is off — the light on this phone should be out. Nothing is being sent.
@@ -279,7 +279,7 @@ export default function CamPair() {
   if (revoked) {
     return (
       <Shell>
-        <Logo surface="dark" height={24} />
+        <Logo surface="dark" height={36} />
         <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>This camera was removed</div>
         <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
           The artist took this camera out of the rig. Nothing is being sent from this phone any more.
@@ -323,7 +323,7 @@ export default function CamPair() {
 
   return (
     <Shell>
-      <Logo surface="dark" height={24} />
+      <Logo surface="dark" height={36} />
       <div style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>Pair this camera</div>
       <div style={{ fontSize: 12.5, color: 'rgba(253,255,252,0.6)', marginTop: 8, lineHeight: 1.55 }}>
         Enter the six-character code from your Kit Check screen.

@@ -118,7 +118,7 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
           </button>
         )}
         <div className="sidebar-header">
-          <div className="sidebar-title"><Logo surface="dark" height={28} /></div>
+          <div className="sidebar-title"><Logo surface="dark" height={32} /></div>
           <span className="sidebar-subtitle">LIVE MUSIC PLATFORM</span>
         </div>
         <div className="sidebar-nav">

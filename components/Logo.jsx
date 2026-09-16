@@ -28,26 +28,30 @@
 export const LOGO_ASPECT = 4.56;
 
 // ── THE LEGIBILITY FLOOR ──────────────────────────────────────
-// Below this the whale stops being an animal and becomes a dark blob
-// inside a letter. At 4.56:1 the lowercase 'o' is roughly half the
-// mark's height and the whale sits inside its counter, so it renders at
-// roughly 0.3 × height:
+// The floor was 24 until the signal arc was restored. With the arc in
+// place the ARC is the finest detail, not the whale, and it fails first:
 //
-//     height 14px  ->  whale ~4px   a smudge
-//     height 24px  ->  whale ~7px   reads as a shape
-//     height 32px  ->  whale ~10px  reads clearly
+//     height 24px  ->  arc ~7px wide, ~2px per band. A coloured smudge,
+//                      and the whale is a blob.
+//     height 28px  ->  barely better.
+//     height 32px  ->  the whale reads; the arc reads as colour.
+//     height 36px  ->  the arc resolves into three distinct bands.
 //
-// 24 is the floor, not the target. Use more wherever there is room.
-// /logo-preview renders every placement at its real size so this is a
-// judgement made by looking rather than by arithmetic.
-export const MIN_LEGIBLE_HEIGHT = 24;
+// Raised to 32 after looking at all four rendered at real size with
+// nearest-neighbour magnification. 32 is the FLOOR; 36 is the target
+// wherever there is room, which on every full-screen card there is.
+export const MIN_LEGIBLE_HEIGHT = 32;
 
 const SRC = {
   dark: '/logo/loudentify-on-dark.png',   // porcelain mark, for dark surfaces
   light: '/logo/loudentify-on-light.png', // ink mark, for light surfaces
 };
 
-export default function Logo({ surface = 'dark', height = 28, style, className }) {
+export default function Logo({ surface = 'dark', height = MIN_LEGIBLE_HEIGHT, style, className }) {
+  // Clamped, so no caller can go below the floor by accident. It is a
+  // backstop, not a licence: a call site asking for less than the floor
+  // is a call site whose number no longer describes what renders, so
+  // they are set explicitly instead of relying on this.
   const h = Math.max(MIN_LEGIBLE_HEIGHT, height);
   return (
     // Plain <img>, not next/image: the optimiser adds nothing for a
