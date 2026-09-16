@@ -85,6 +85,41 @@ export default function LogoPreviewPage() {
           </div>
         </div>
 
+        {/* THE SIGNAL ARC. It is the finest detail in the mark and the
+            first thing to fail at small sizes -- finer than the whale
+            the 24px floor was set from. Shown magnified, then at every
+            height in use, on both surfaces. */}
+        <div style={{ border: '1px solid rgba(46,196,182,0.4)', borderRadius: 10, overflow: 'hidden', margin: '22px 0' }}>
+          <div style={{ padding: '8px 12px', background: 'rgba(46,196,182,0.09)', fontSize: 12 }}>
+            <strong>The signal arc.</strong> Teal, red and amber, and it stays in colour on BOTH versions —
+            only the wordmark and whale change. It is 54% teal / 33% red / 13% amber by pixel, unchanged
+            between the two files.
+          </div>
+          <div style={{ background: INK, padding: 22, display: 'flex', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap' }}>
+            {[24, 28, 36, 60, 120].map((h) => (
+              <div key={h} style={{ textAlign: 'center' }}>
+                <Logo surface="dark" height={h} />
+                <div style={{ fontSize: 10, color: 'rgba(253,255,252,0.5)', marginTop: 8 }}>
+                  {h}px · arc ≈{Math.round(233 * (h * LOGO_ASPECT) / 3450)}px wide
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: PORCELAIN, padding: 22, display: 'flex', alignItems: 'flex-end', gap: 26, flexWrap: 'wrap', borderTop: '1px solid rgba(1,22,39,0.1)' }}>
+            {[24, 36, 60, 120].map((h) => (
+              <div key={h} style={{ textAlign: 'center' }}>
+                <Logo surface="light" height={h} />
+                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)', marginTop: 8 }}>{h}px</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '8px 12px', fontSize: 11, color: 'rgba(1,22,39,0.6)', lineHeight: 1.5 }}>
+            At the 24px floor the arc is roughly 7px wide — about 2px per colour band. Legible as colour,
+            not as three distinct bands. If the arc needs to read as three, the floor is 36px, and the
+            CamPair screens would go up rather than the mark being used smaller.
+          </div>
+        </div>
+
         {PLACEMENTS.map((p) => <Row key={`${p.n}-${p.file}`} p={p} />)}
 
         {/* Contrast check: each file on the wrong background, so the
@@ -108,7 +143,9 @@ export default function LogoPreviewPage() {
         <p style={{ fontSize: 11, color: 'rgba(1,22,39,0.5)', marginTop: 22, lineHeight: 1.6 }}>
           Both files are 1168×256 with a transparent background, trimmed to the artwork so height
           means the height of the mark rather than the height of its padding. The porcelain version is
-          DERIVED from the ink artwork — see the commit message.
+          DERIVED from the ink artwork: the wordmark and whale are recoloured porcelain, the signal arc
+          is masked out of the recolour by hue and keeps its original teal/red/amber. See the commit
+          message.
         </p>
       </div>
     </main>
