@@ -130,7 +130,7 @@ select id, room_name, artist_name,
        slated_at at time zone 'Europe/London' as local_time,
        state, performance_mode, duration_minutes,
        (state <> 'ended'
-        and slated_at + (duration_minutes||' minutes')::interval + interval '15 minutes' > now())
+        and slated_at + (coalesce(duration_minutes, 60)||' minutes')::interval + interval '15 minutes' > now())
          as counts_as_upcoming
   from shows
  order by slated_at desc

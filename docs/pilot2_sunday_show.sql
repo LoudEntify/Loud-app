@@ -144,7 +144,13 @@ update shows sh
        ended_by = coalesce(sh.ended_by, 'window_sweep')
  where sh.state <> 'ended'
    and sh.id <> (select id from keep)
-   and sh.slated_at + (sh.duration_minutes || ' minutes')::interval + interval '15 minutes' > now()
+   -- ⚠️ coalesce, because duration_minutes being NULL made this whole
+   -- expression NULL rather than false -- and a NULL in a WHERE excludes
+   -- the row exactly as silently as a false. That is how a duplicate show
+   -- at an identical slated_at survived S3b on 17 September. 60 is the
+   -- column's own default.
+   and sh.slated_at + (coalesce(sh.duration_minutes, 60) || ' minutes')::interval
+         + interval '15 minutes' > now()
 returning sh.id, sh.room_name, sh.slated_at, 'retired' as action;
 
 -- ══════════════════════════════════════════════════════════════
@@ -207,5 +213,6 @@ select id, room_name, artist_name,
        state, performance_mode, duration_minutes
   from shows
  where state <> 'ended'
-   and slated_at + (duration_minutes || ' minutes')::interval + interval '15 minutes' > now()
+   and slated_at + (coalesce(duration_minutes, 60) || ' minutes')::interval
+         + interval '15 minutes' > now()
  order by slated_at;
