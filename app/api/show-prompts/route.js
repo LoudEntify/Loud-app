@@ -161,3 +161,67 @@ export async function GET(request) {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
   }
 }
+
+// ── CLOSE A PROMPT (item 6 / the Versus vote) ─────────────────
+//
+// PATCH, so the POST that opens a prompt and the call that closes one
+// cannot be confused for each other, and so neither had to grow a mode
+// flag. Same auth as the rest of this file: artist bearer AND ownership
+// of the room.
+//
+// Closing sets closed_at, which two already-built paths then honour with
+// no further change:
+//   /api/prompt-responses  refuses a closed prompt with 410
+//   /api/show-prompts/list filters `closed_at is null`, so a closed vote
+//                          stops being offered to late joiners
+//
+// The caller broadcasts PROMPT_CLOSED afterwards to take the card off
+// screen immediately; this is what makes it true rather than cosmetic.
+// A viewer who misses the broadcast simply cannot submit -- the 410 is
+// the real gate.
+export async function PATCH(request) {
+  try {
+    const gate = rateLimit(clientKey(request, 'show-prompts'), RATE_LIMIT);
+    if (!gate.ok) {
+      return NextResponse.json({ error: 'Rate limited' }, { status: 429, headers: { 'Retry-After': String(gate.retryAfterSec) } });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const room = body.room;
+    const promptId = body.promptId ? String(body.promptId) : null;
+    if (!room || !promptId) {
+      return NextResponse.json({ error: 'room and promptId are required' }, { status: 400 });
+    }
+
+    const auth = await verifyArtistAuth(request);
+    if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const admin = getSupabaseAdmin();
+    const owner = await verifyShowOwner(admin, room, auth.user);
+    if (owner.error) return NextResponse.json({ error: owner.error }, { status: owner.status });
+
+    // Scoped to this show as well as this id, for the same reason the
+    // results GET is: authenticating the caller and then trusting an
+    // identifier they supplied is the shape of the cue-sheets IDOR.
+    const { data, error } = await admin
+      .from('show_prompts')
+      .update({ closed_at: new Date().toISOString() })
+      .eq('id', promptId)
+      .eq('show_id', owner.show.id)
+      .is('closed_at', null)          // first close wins; re-closing is a no-op
+      .select('id, closed_at');
+
+    if (error) {
+      console.warn('[show-prompts] close failed:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    // rows === 0 means it was already closed, or the id is not in this
+    // show. Reported rather than collapsed into a bare ok, because those
+    // are different things and a silent success is what made the
+    // actual_started_at write undiagnosable.
+    return NextResponse.json({ ok: true, closed: (data?.length ?? 0) === 1, rows: data?.length ?? 0 });
+  } catch (err) {
+    console.warn('[show-prompts] close request failed:', err);
+    return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
+  }
+}

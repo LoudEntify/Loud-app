@@ -61,7 +61,7 @@ import { viewerIdOrSession, getSavedEntry, saveEntry, getAnsweredPromptIds, mark
 import { logComment } from '../lib/comments';
 import ViewerEntryForm from './ViewerEntryForm';
 import { planStaleShots } from '../lib/staleShotPlan';
-import { SHOW_PROMPTS, validatePrompt } from '../lib/showPrompts';
+import { SHOW_PROMPTS, validatePrompt, VERSUS_VOTE, isVersusVote } from '../lib/showPrompts';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS } from '../lib/promptCatchup';
 import { describeTransport } from '../lib/transportDiagnostics';
 import { useIneligibleTracks, filterEligible, feedLossShape } from '../lib/trackLiveness';
@@ -1766,6 +1766,8 @@ export default function LiveDemo() {
 // the card until the next one. Stated rather than hidden: the deferred
 // half is a re-fetch on mount, not a schema change.
 function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
+  const vote = isVersusVote(prompt);
+  const [chosen, setChosen] = useState(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -1779,7 +1781,15 @@ function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
     padding: '12px 14px', backdropFilter: 'blur(8px)',
   };
 
-  if (answered) {
+  // A VOTE DOES NOT CLEAR. A question is answered once and the card goes
+  // away; a vote can be changed until the operator closes it, so the card
+  // stays with the choice highlighted. prompt_responses is last-one-wins,
+  // so changing a vote overwrites rather than adding -- the behaviour the
+  // card is now honest about.
+  //
+  // Questions keep their tested behaviour exactly: acknowledge, then
+  // clear after 3s so the catch-up queue unblocks.
+  if (answered && !vote) {
     return (
       <div style={wrap}>
         <div style={{ fontSize: 13, opacity: 0.8 }}>Thanks — your answer is in.</div>
@@ -1792,6 +1802,7 @@ function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
     const err = await onAnswer(payload);
     setBusy(false);
     if (err) setError(err);
+    else if (payload.choiceIndex !== undefined) setChosen(payload.choiceIndex);
   };
 
   return (
@@ -1810,21 +1821,26 @@ function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
 
       {prompt.kind === 'choice' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
-          {(prompt.options || []).map((label, i) => (
-            <button
-              key={label}
-              type="button"
-              disabled={busy}
-              onClick={() => send({ choiceIndex: i })}
-              style={{
-                padding: '9px 12px', borderRadius: 8, fontSize: 14, textAlign: 'left',
-                border: '1px solid rgba(253,255,252,0.3)', background: 'rgba(253,255,252,0.08)',
-                color: '#fdfffc', cursor: busy ? 'wait' : 'pointer',
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          {(prompt.options || []).map((label, i) => {
+            const picked = vote && chosen === i;
+            return (
+              <button
+                key={label}
+                type="button"
+                disabled={busy}
+                onClick={() => send({ choiceIndex: i })}
+                style={{
+                  padding: vote ? '12px 14px' : '9px 12px', borderRadius: 8,
+                  fontSize: vote ? 15 : 14, fontWeight: vote ? 700 : 400, textAlign: 'left',
+                  border: picked ? '1px solid #2ec4b6' : '1px solid rgba(253,255,252,0.3)',
+                  background: picked ? 'rgba(46,196,182,0.18)' : 'rgba(253,255,252,0.08)',
+                  color: '#fdfffc', cursor: busy ? 'wait' : 'pointer',
+                }}
+              >
+                {label}{picked ? '  ✓' : ''}
+              </button>
+            );
+          })}
         </div>
       ) : (
         <form
@@ -1854,6 +1870,13 @@ function PromptCard({ prompt, answered, onAnswer, onDismiss }) {
             Send
           </button>
         </form>
+      )}
+      {vote && chosen !== null && !error && (
+        // No tally, ever. Confirmation that THEIR vote landed, and that
+        // they may change it -- a visible score changes the vote.
+        <div style={{ fontSize: 12, color: '#2ec4b6', marginTop: 8 }}>
+          Your vote is in — you can change it until voting closes.
+        </div>
       )}
       {error && <div style={{ fontSize: 12, color: '#FF6B6B', marginTop: 8 }}>{error}</div>}
     </div>
@@ -2683,6 +2706,11 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const ANSWERED_CARD_MS = 3000;
   useEffect(() => {
     if (!promptAnswered || !activePrompt) return undefined;
+    // A VOTE STAYS UNTIL THE OPERATOR CLOSES IT. Clearing it would take
+    // away the ability to change a vote, which is the one thing the card
+    // promises. Questions are unchanged: they clear after 3s, which is
+    // what unblocks the catch-up queue.
+    if (isVersusVote(activePrompt)) return undefined;
     const t = setTimeout(() => {
       setActivePrompt(null);
       setPromptAnswered(false);
@@ -5605,6 +5633,12 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const [pushedPromptKeys, setPushedPromptKeys] = useState({}); // key -> prompt id
   const [promptResults, setPromptResults] = useState({});       // prompt id -> aggregate
   const [pushingKey, setPushingKey] = useState(null);
+  // Versus vote state, declared with the other prompt state because the
+  // results poll below reads votePromptId -- check:tdz caught it sitting
+  // under the effect that consumes it.
+  const [votePromptId, setVotePromptId] = useState(null);
+  const [voteClosed, setVoteClosed] = useState(false);
+  const [voteBusy, setVoteBusy] = useState(false);
 
   const pushPrompt = useCallback(async (p) => {
     const invalid = validatePrompt(p);
@@ -5651,7 +5685,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // tally, because a visible tally changes the answers.
   useEffect(() => {
     if (!isMainPerformer) return undefined;
-    const ids = Object.values(pushedPromptKeys);
+    const ids = [...Object.values(pushedPromptKeys), ...(votePromptId ? [votePromptId] : [])];
     if (ids.length === 0) return undefined;
     let cancelled = false;
     const read = async () => {
@@ -5674,7 +5708,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     read();
     const t = setInterval(read, 5000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [isMainPerformer, pushedPromptKeys, roomName]);
+  }, [isMainPerformer, pushedPromptKeys, votePromptId, roomName]);
 
   // Fetch what this show has already asked. Once on mount, then on a
   // slow poll: a viewer who is here for an hour should pick up prompts
@@ -5757,6 +5791,78 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       outstanding: outstandingPrompts({ pushed: pushedPrompts, answeredIds, seenIds: catchupOfferedIds }).length,
     });
   }, [isMainPerformer, activePrompt, pushedPrompts, answeredIds, catchupOfferedIds, lastCatchupAt, catchupShownCount, now, displayShowState]);
+
+  // ── THE VERSUS VOTE, operator side ────────────────────────────
+  // Opening it is the SAME push path the questions use -- one route, one
+  // broadcast, one tested mechanism. Closing sets closed_at, which makes
+  // /api/prompt-responses refuse late votes with a 410 and takes the
+  // prompt out of the catch-up list; the broadcast just takes the card
+  // off screen immediately.
+
+  const openVote = useCallback(async () => {
+    setVoteBusy(true);
+    try {
+      const token = (await getSession())?.access_token || null;
+      const res = await fetch('/api/show-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          room: roomName,
+          kind: VERSUS_VOTE.kind,
+          body: VERSUS_VOTE.body,
+          options: VERSUS_VOTE.options,
+          source: 'saved',
+          offsetMs: showOriginMs(show) ? Date.now() - showOriginMs(show) : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.prompt?.id) {
+        logHealthEvent('versus_vote_open_failed', { status: res.status, detail: data?.error ?? null });
+        return;
+      }
+      setVotePromptId(data.prompt.id);
+      setVoteClosed(false);
+      // Row first, broadcast second -- reversed, a viewer could vote on
+      // an id that is not stored yet and have a real vote 404'd.
+      broadcastPrompt(room, data.prompt);
+      logHealthEvent('versus_vote_opened', { promptId: data.prompt.id });
+    } catch (e) {
+      logHealthEvent('versus_vote_open_failed', { detail: String(e?.message || e) });
+    } finally {
+      setVoteBusy(false);
+    }
+  }, [room, roomName, show]);
+
+  const closeVote = useCallback(async () => {
+    if (!votePromptId) return;
+    setVoteBusy(true);
+    try {
+      const token = (await getSession())?.access_token || null;
+      const res = await fetch('/api/show-prompts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ room: roomName, promptId: votePromptId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        logHealthEvent('versus_vote_close_failed', { status: res.status, detail: data?.error ?? null });
+        return;
+      }
+      setVoteClosed(true);
+      try {
+        const bytes = new TextEncoder().encode(JSON.stringify({ type: 'PROMPT_CLOSED', promptId: votePromptId }));
+        room?.localParticipant?.publishData?.(bytes, {});
+      } catch {
+        // The 410 on the response route is the real gate; this is only
+        // what takes the card off screen without waiting for a tap.
+      }
+      logHealthEvent('versus_vote_closed', { promptId: votePromptId, rows: data?.rows ?? null });
+    } catch (e) {
+      logHealthEvent('versus_vote_close_failed', { detail: String(e?.message || e) });
+    } finally {
+      setVoteBusy(false);
+    }
+  }, [room, roomName, votePromptId]);
 
   const answerPrompt = useCallback(async (payload) => {
     if (!activePrompt?.id) return 'That question is no longer open.';
@@ -6012,6 +6118,72 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
             borderRadius: 10, padding: '10px 12px', color: '#fdfffc', backdropFilter: 'blur(8px)',
           }}
         >
+          {/* ── THE VERSUS VOTE ─────────────────────────────────
+              Operator only, above the questions because it is a control
+              rather than a list. The tally is here and NOWHERE else: no
+              viewer sees a count at any point, because a visible score
+              changes the vote. */}
+          <div style={{ borderBottom: '1px solid rgba(253,255,252,0.15)', paddingBottom: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: '0.08em', marginBottom: 6 }}>VOTING</div>
+            {!votePromptId ? (
+              <button
+                type="button"
+                disabled={voteBusy}
+                onClick={openVote}
+                style={{
+                  padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700, border: 'none',
+                  background: '#2ec4b6', color: '#011627', cursor: voteBusy ? 'wait' : 'pointer', width: '100%',
+                }}
+              >
+                {voteBusy ? 'Opening…' : 'OPEN VOTING'}
+              </button>
+            ) : (
+              <>
+                <div style={{ fontSize: 11, marginBottom: 6 }}>
+                  {(() => {
+                    const r = promptResults[votePromptId];
+                    if (!r) return voteClosed ? 'Closed — reading final tally…' : 'Open — waiting for votes…';
+                    const counts = r.counts || [];
+                    const top = [...counts].sort((a, b) => b.count - a.count);
+                    const tied = top.length > 1 && top[0].count === top[1].count;
+                    return (
+                      <>
+                        <div style={{ fontWeight: 700, marginBottom: 3 }}>
+                          {r.total} vote{r.total === 1 ? '' : 's'}{voteClosed ? ' · CLOSED' : ' · open'}
+                        </div>
+                        {counts.map((c) => (
+                          <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{c.label}</span>
+                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{c.count}</span>
+                          </div>
+                        ))}
+                        {voteClosed && r.total > 0 && (
+                          <div style={{ marginTop: 4, color: tied ? '#FFD54A' : '#2ec4b6', fontWeight: 700 }}>
+                            {tied ? 'TIED — your call' : `Leading: ${top[0].label}`}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                {!voteClosed && (
+                  <button
+                    type="button"
+                    disabled={voteBusy}
+                    onClick={closeVote}
+                    style={{
+                      padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+                      border: '1px solid #e71d36', background: 'transparent', color: '#e71d36',
+                      cursor: voteBusy ? 'wait' : 'pointer', width: '100%',
+                    }}
+                  >
+                    {voteBusy ? 'Closing…' : 'CLOSE VOTING'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
           <PromptPushPanel
             prompts={SHOW_PROMPTS}
             pushedKeys={pushedPromptKeys}
