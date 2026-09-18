@@ -229,10 +229,21 @@ export default function ScheduleShow() {
 
   const upcoming = nextUpcomingShow(shows, now);
   const windowOpen = upcoming ? isWindowOpen(upcoming, now) : false;
+  // This component only ever loads shows the artist OWNS (artist_id =
+  // me, line 83). An artist who was INVITED to a show owns nothing, so
+  // `shows` is empty and every line here reads "no show" -- directly
+  // beneath the InvitedShows card showing the show they are performing
+  // in. On the night that reads as broken.
+  //
+  // With the form hidden there is nothing left to render for someone
+  // with no owned shows, so render nothing and let InvitedShows speak.
+  const ownsNoLiveShows = shows !== null && shows.filter((s) => s.state !== 'ended').length === 0;
 
   if (!session) {
     return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="LOG IN" actionHref="/auth" />;
   }
+
+  if (!SHOW_SCHEDULE_FORM && ownsNoLiveShows) return null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -520,7 +531,19 @@ export default function ScheduleShow() {
                       !expired stays. An invite to a show whose window
                       closed unused is genuinely dead, and offering one is
                       the "diary that says now" problem Ruling 1 fixed. */}
-                  {(s.performance_mode === 'versus') && !expired && (
+                  {/* ⚠️ INVITING IS PART OF SCHEDULING, so it is hidden
+                      with the form. Slots for both pilots are created by
+                      SQL, and this offered to fill slot B on a show where
+                      slot B was already claimed -- it has no idea, because
+                      this component loads shows and never reads
+                      show_slots.
+
+                      The server does refuse (invite/route.js returns 409
+                      "Slot B is already taken"), so the slot could not
+                      actually be reassigned -- but an operator tapping it
+                      during setup would get an error they had no reason to
+                      expect. */}
+                  {SHOW_SCHEDULE_FORM && (s.performance_mode === 'versus') && !expired && (
                     <div style={{ marginTop: 8 }}>
                       {invited[s.id] ? (
                         <div style={{ border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
