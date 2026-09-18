@@ -20,6 +20,9 @@ import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
 import PairingPanel from './PairingPanel';
 import ReactionLayer from './ReactionLayer';
+
+// PILOT 2 — see the render site for why. Flip to true after the 27th.
+const REACTIONS_ENABLED = false;
 import ConnectionRecovery from './ConnectionRecovery';
 import BlurFillBackground from './BlurFillBackground';
 import { CUT_DEBUG_ENABLED, logCutDebug, CutTimingDebugOverlay, ShotVideo } from './ShotRendering';
@@ -2939,6 +2942,18 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // before that (or for viewers/camfeed) it's one of the three known
   // sentinels below.
   const isMainPerformer = role !== 'viewer' && role !== 'performer' && !role.startsWith('camfeed-');
+  // ── WHO OPERATES THE SHOW ─────────────────────────────────────
+  // isMainPerformer is true for BOTH slots in a Versus, so gating the
+  // questions and the vote on it put an Ask button in front of the
+  // invited artist as well. verifyShowOwner would have refused their
+  // pushes -- every one of those routes checks shows.artist_id -- so
+  // nothing could have been written, but an artist mid-performance
+  // should not be offered a control that errors.
+  //
+  // The operator is the show's OWNER, which is knowable here without a
+  // round trip: artistId is session?.user?.id and show.artist_id is on
+  // the row we already have.
+  const isShowOperator = !!artistId && show?.artist_id === artistId;
   const camFeedSlot = isCamFeed ? role.split('-')[1] : null;
 
   // ── WHO HAS AN OPEN MIC ───────────────────────────────────────
@@ -6109,7 +6124,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       {/* ITEM 6 -- the operator's four questions and their running
           tallies. isMainPerformer only: the tally must never be on a
           viewer's screen, because a visible tally changes the answers. */}
-      {isMainPerformer && (
+      {isShowOperator && (
         <div
           style={{
             position: 'absolute', right: 12, top: 12, zIndex: 35,
@@ -6444,7 +6459,22 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
           soundcheck would animate over a rehearsal for an audience that
           is not there, and after the ended card they would be a party in
           an empty room. */}
-      {displayShowState === 'live' && (
+      {/* ── REACTIONS ARE OFF FOR BOTH PILOTS ────────────────
+          Three reasons, and the third is the one that decided it:
+
+            it occupies the corner the vote control needs;
+            a reaction carries NO ARTIST -- sendReaction sends {id, emoji}
+              and reaction_events has no slot column -- so in a Versus it
+              is not attributable to either performer and means nothing;
+            it invites an audience to tap something that does not count,
+              during a show whose entire point is that their input does.
+
+          Blended scoring, where a free reaction carries structural weight
+          alongside a paid vote, is the thing that makes this meaningful
+          and it is after the 27th. HIDDEN, NOT REMOVED: ReactionLayer,
+          lib/reactions.js, the spend action and reaction_events are all
+          untouched, so restoring it is this constant. */}
+      {REACTIONS_ENABLED && displayShowState === 'live' && (
         <ReactionLayer
           reactions={reactions}
           onReact={sendReaction}
