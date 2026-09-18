@@ -210,11 +210,28 @@ export default function ScheduleShow() {
     }
   }
 
+  // ── PILOT 2: THE FORM IS HIDDEN, THE DASHBOARD IS NOT ────────
+  // This component is not a create-show form. It is the OWNER'S
+  // dashboard: the GO LIVE button, the Kit Check link, the window
+  // countdown and the upcoming list. The form is one section in the
+  // middle of it.
+  //
+  // Hiding the WHOLE component (which is what ProfileSurface did from
+  // 17-18 Sept) removed the owner's only navigation to Kit Check and Go
+  // Live. It was invisible in testing because a NON-owning artist reaches
+  // Kit Check by a completely different route -- InvitedShows, fed by
+  // /api/performer/my-slots, which deliberately excludes shows you own
+  // (`if (show.artist_id === auth.user.id) return null`). So the invited
+  // artist looked fine and the owner had no route at all.
+  //
+  // Flip to true after the 27th to restore scheduling.
+  const SHOW_SCHEDULE_FORM = false;
+
   const upcoming = nextUpcomingShow(shows, now);
   const windowOpen = upcoming ? isWindowOpen(upcoming, now) : false;
 
   if (!session) {
-    return <EmptyState title="Sign in to schedule shows" body="Scheduling is tied to your artist account." action="LOG IN" actionHref="/auth" />;
+    return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="LOG IN" actionHref="/auth" />;
   }
 
   return (
@@ -265,11 +282,16 @@ export default function ScheduleShow() {
           ? windowOpen
             ? 'Your broadcast window is open — GO LIVE connects you and starts billing time.'
             : `GO LIVE unlocks ${humanCountdown(msUntilWindow(upcoming, now))} (${Math.round(WINDOW_OPENS_BEFORE_MS / 60000)} minutes before your show).`
-          : 'Schedule a show to unlock GO LIVE.'}
+          : SHOW_SCHEDULE_FORM
+            ? 'Schedule a show to unlock GO LIVE.'
+            // The form is hidden for both pilots, so telling the artist
+            // to schedule something points at a control that is not there.
+            : 'No show assigned to you yet.'}
         {' '}Kit Check is always open and never connects to the internet stream — camera, audio and cues only.
       </div>
 
       {/* ── Schedule form ───────────────────────────────────── */}
+      {SHOW_SCHEDULE_FORM && (
       <div style={{ border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 12 }}>Schedule a show</div>
 
@@ -419,6 +441,7 @@ export default function ScheduleShow() {
           </button>
         </div>
       </div>
+      )}
 
       {/* ── Upcoming list ───────────────────────────────────── */}
       <div>
@@ -427,7 +450,13 @@ export default function ScheduleShow() {
         {shows === null && <div style={{ fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>}
 
         {shows !== null && shows.filter((s) => s.state !== 'ended').length === 0 && (
-          <EmptyState compact title="No shows scheduled" body="Pick a date above and it appears here with a countdown." />
+          <EmptyState
+            compact
+            title="No shows scheduled"
+            body={SHOW_SCHEDULE_FORM
+              ? 'Pick a date above and it appears here with a countdown.'
+              : 'Your show will appear here with a countdown once it is assigned.'}
+          />
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

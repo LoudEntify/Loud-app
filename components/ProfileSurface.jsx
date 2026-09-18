@@ -8,8 +8,11 @@ import EmptyState from './EmptyState';
 import AuthButton from './AuthButton';
 import ScheduleShow from './ScheduleShow';
 
-// PILOT 2 — see the owner console below. Flip to true after the 27th.
-const ARTIST_SCHEDULING_ENABLED = false;
+// PILOT 2 — the gate moved INTO ScheduleShow (SHOW_SCHEDULE_FORM there).
+// Hiding this whole component removed the OWNER's only route to Kit Check
+// and GO LIVE, because a non-owning artist reaches them through
+// InvitedShows instead and so looked unaffected. The form is hidden; the
+// dashboard is not.
 import InvitedShows from './InvitedShows';
 import BRollLibrary from './BRollLibrary';
 import CueSheetLibrary from './CueSheetLibrary';
@@ -283,12 +286,10 @@ export default function ProfileSurface({ artistId }) {
                 a surface. The artist still SEES their assigned show --
                 that comes from `shows.artist_id = me` plus
                 /api/performer/my-slots, neither of which is affected. */}
-            {ARTIST_SCHEDULING_ENABLED && (
-              <div style={{ marginTop: 30 }}>
-                <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SHOWS</span>
-                <div style={{ marginTop: 12 }}><ScheduleShow /></div>
-              </div>
-            )}
+            <div style={{ marginTop: 30 }}>
+              <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>SHOWS</span>
+              <div style={{ marginTop: 12 }}><ScheduleShow /></div>
+            </div>
 
             <div style={{ marginTop: 30 }}><BRollLibrary /></div>
             <div style={{ marginTop: 30 }}><CueSheetLibrary /></div>
