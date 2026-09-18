@@ -14,7 +14,7 @@ import { planStaleShots, STALE_TARGET_DOWNGRADE_MS } from '../lib/staleShotPlan.
 import { showOriginMs, showOriginSource } from '../lib/showState.js';
 import { humanCountdown, countdownParts } from '../lib/showWindow.js';
 import { isIntentionalDisconnect, describeDisconnect } from '../lib/disconnectIntent.js';
-import { SHOW_PROMPTS, validatePrompt, promptByKey } from '../lib/showPrompts.js';
+import { SHOW_PROMPTS, validatePrompt, promptByKey, VERSUS_VOTE, isVersusVote } from '../lib/showPrompts.js';
 import { nextCatchupPrompt, outstandingPrompts, msUntilNextCatchup, CATCHUP_AFTER_JOIN_MS, CATCHUP_SPACING_MS, CATCHUP_MAX_OUTSTANDING } from '../lib/promptCatchup.js';
 
 let fail = 0;
@@ -548,6 +548,34 @@ eq('music is on 5 minutes out', audioOn(5 * cMIN), true);
 eq('★ music is OFF at showtime', audioOn(0), false);
 eq('★ music is OFF after showtime', audioOn(-1000), false);
 eq('no show -> no music', audioOn(null), false);
+
+
+
+// ── the Versus vote ─────────────────────────────────────────────
+// A vote is a choice prompt, so it must satisfy the same CHECK the
+// database enforces -- and it must be recognisable as a vote through
+// BOTH routes it can reach a viewer by: the data-channel broadcast and
+// the catch-up list, which returns only id/kind/body/options/pushed_at.
+console.log('\n── versus vote (item 6) ──');
+eq('the vote validates as a choice prompt', validatePrompt(VERSUS_VOTE), null);
+eq('two options, the stage names in slot order', VERSUS_VOTE.options, ['Artistwon', 'Artisttoo']);
+eq('★ NOT in the questions list -- it is a control, not a question',
+  SHOW_PROMPTS.some((p) => p.key === VERSUS_VOTE.key), false);
+
+// The discriminator has to survive the catch-up round trip, which drops
+// every field except id/kind/body/options/pushed_at.
+eq('★ recognised as a vote', isVersusVote(VERSUS_VOTE), true);
+eq('★ still recognised after a catch-up round trip (body survives)',
+  isVersusVote({ id: 'x', kind: 'choice', body: VERSUS_VOTE.body, options: VERSUS_VOTE.options, pushed_at: 'now' }), true);
+eq('a question is not a vote', isVersusVote(promptByKey('compare')), false);
+eq('the open-text question is not a vote', isVersusVote(promptByKey('come_back')), false);
+for (const p of SHOW_PROMPTS) {
+  eq(`  "${p.key}" is not mistaken for the vote`, isVersusVote(p), false);
+}
+eq('null is not a vote', isVersusVote(null), false);
+eq('a prompt with no body is not a vote', isVersusVote({ kind: 'choice', options: [] }), false);
+eq('★ a DIFFERENT two-option prompt is not the vote',
+  isVersusVote({ kind: 'choice', body: 'Who is winning?', options: ['Artistwon', 'Artisttoo'] }), false);
 
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURE(S)`);
