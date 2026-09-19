@@ -2138,7 +2138,7 @@ const STALE_DEBUG_ENABLED =
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
-function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup, startWrite }) {
+function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup, startWrite, resolutionFor }) {
   if (!STALE_DEBUG_ENABLED) return null;
   const clock = new Date(now || 0).toISOString().slice(11, 19);
   const rows = Object.entries(activeShot || {});
@@ -2206,6 +2206,25 @@ function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEve
                   {present ? 'present' : 'ABSENT'}
                 </td>
                 <td style={{ ...cell }}>{cmd?.downgradedFrom ? `${cmd.downgradedFrom}->wide` : cmd?.shot}</td>
+                {/* ISSUE 2 -- the live resolution of whatever is ON AIR
+                    for this slot, so "one feed is softer" is a number
+                    read off the operator's own screen instead of a
+                    database query after the fact. A smaller encode is
+                    upscaled into the same panel, which IS the blur; a
+                    portrait source cropped into a landscape panel is the
+                    "more zoomed". Both are visible here. */}
+                <td style={{ ...cell }}>
+                  {(() => {
+                    const d = resolutionFor?.(slot, cmd);
+                    if (!d?.width) return <span style={{ color: '#888' }}>—</span>;
+                    const portrait = d.height > d.width;
+                    return (
+                      <span style={{ color: portrait ? '#FFD54A' : '#7CFFB2' }}>
+                        {d.width}×{d.height}{portrait ? ' portrait' : ''}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td style={{ ...cell, color: '#9ad' }}>{(cmd?.targetIdentity || 'none').slice(0, 22)}</td>
                 <td style={{ ...cell }}>
                   <button
@@ -2599,7 +2618,23 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       participantIdentity: room.localParticipant.identity,
       role,
     });
-  }, [room, role, roomName]);
+    // ⚠️ THE IDENTITY IS IN THE DEPENDENCY LIST ON PURPOSE.
+    //
+    // useRoomContext returns a Room object immediately, BEFORE connect()
+    // resolves, and localParticipant.identity is empty until the server
+    // assigns it. `room` is stable for the life of the connection, so
+    // with deps of [room, role, roomName] this effect ran exactly once,
+    // early, and wrote an EMPTY identity into the logging context that
+    // was never corrected.
+    //
+    // logHealthEvent then stamps every event with it, and the ingest
+    // route turns '' into null -- which is why all 1450 width-bearing
+    // rows in votetest-895dc3 had participant_identity null and the two
+    // artists' encoder stats could not be told apart.
+    //
+    // Re-running is free: initHealthLog only updates context and never
+    // resets the queue.
+  }, [room, role, roomName, room.localParticipant.identity]);
 
   // Room + track lifecycle -> health_events (Phase 2). Log-only: never
   // reacts to any of these by changing show behavior. Attached once per
@@ -6257,6 +6292,10 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         lastEvent={staleDebugRef.current.last}
         isTargetPresent={(slot, cmd) =>
           !!cmd?.targetIdentity && tracksForSlot(slot).some((t) => matchesTarget(t, cmd))}
+        resolutionFor={(slot, cmd) => {
+          const { chosen } = resolveSlotTrack(tracksForSlot(slot), cmd, ineligibleTracks);
+          return chosen?.publication?.dimensions || null;
+        }}
         show={show}
         viewerId={viewerId}
         startWrite={startWriteResult}
