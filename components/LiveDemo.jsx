@@ -1464,8 +1464,30 @@ export default function LiveDemo() {
     // The gate is the ONLY blocking thing in item 4. Everything after it
     // is fire-and-forget: the write can fail and the viewer still
     // watches.
-    const ownsShowHere = !!session?.user?.id && show.artist_id === session.user.id;
-    if (!ownsShowHere && !viewerEntry) {
+    // ── THE ENTRY GATE IS FOR PEOPLE WITH NO ACCOUNT ──────────
+    // It exempted the OWNER only, so a bound performer who was not the
+    // owner -- slot B in a Versus -- met the viewer entry form at the
+    // moment they were meant to go on stage. It reads like a signup
+    // screen, and it arrived at GO LIVE.
+    //
+    // The gate ran BEFORE enterShow, so it fired before anything had
+    // consulted show_slots. Nothing in it could have known slot B was
+    // theirs.
+    //
+    // Signed-in users now go straight through and /api/performer/
+    // join-show decides what they are: bound -> performer, 403 -> viewer
+    // token. That is the only thing that actually knows.
+    //
+    // The audience is signed OUT -- that is the whole design of the
+    // viewer door -- so the gate still fires for everyone it was built
+    // for, and this removes it for nobody it was built for.
+    //
+    // Cost, accepted: a signed-in artist watching as a viewer skips the
+    // form, so their viewer_sessions row has a null display_name and
+    // email. They are still counted and still attributable, because the
+    // row carries their real user_id -- which is a stronger key than a
+    // typed name.
+    if (!session?.user?.id && !viewerEntry) {
       setStep('waiting');
       return;
     }
