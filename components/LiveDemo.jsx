@@ -20,6 +20,7 @@ import BroadcastStage from './BroadcastStage';
 import ViewerStage from './ViewerStage';
 import PairingPanel from './PairingPanel';
 import ReactionLayer from './ReactionLayer';
+import ViewerAudioGate from './ViewerAudioGate';
 
 // PILOT 2 — see the render site for why. Flip to true after the 27th.
 const REACTIONS_ENABLED = false;
@@ -1306,7 +1307,15 @@ export default function LiveDemo() {
             token: data.livekitToken,
             url: data.url,
             assignedRole: data.slot,
-            name: name || emailValue || 'guest',
+            // ISSUE 3 -- viewerEntry FIRST. `name` is only ever set
+            // from a PROFILE (line ~1081), so an anonymous viewer had
+            // none and fell through to 'guest'. The name they typed at
+            // the entry gate went to viewer_sessions and localStorage and
+            // was never used as their identity in the room -- so every
+            // comment they sent, and show_comments.author_name with it,
+            // was attributed to "guest". Noticed on departure; it was
+            // wrong everywhere.
+            name: viewerEntryRef.current?.displayName || name || emailValue || 'guest',
           });
           setStep('joined');
           // GO LIVE, in the only place it can honestly happen: this
@@ -1424,7 +1433,9 @@ export default function LiveDemo() {
         token: data.token,
         url: data.url,
         assignedRole: data.assignedRole,
-        name: name || emailValue || 'guest',
+        // Same as the performer branch above: the entry-gate name is the
+        // viewer's identity in the room, and it is the only one they have.
+        name: viewerEntryRef.current?.displayName || name || emailValue || 'guest',
       });
       setStep('joined');
     } catch (e) {
@@ -6232,6 +6243,12 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
           />
         </div>
       )}
+      {/* ISSUE 1 (19 Sept rehearsal) -- a refreshed or reconnected
+          viewer lost audio permanently. The track is subscribed; the
+          BROWSER refuses to play it without a user gesture, and a
+          reloaded page has not had one. RoomAudioRenderer attaches the
+          elements and cannot start blocked playback. See the component. */}
+      <ViewerAudioGate />
       <CutTimingDebugOverlay />
       <StaleShotDebugOverlay
         activeShot={activeShot}
