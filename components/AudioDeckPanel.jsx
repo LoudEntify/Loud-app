@@ -11,7 +11,7 @@ import {
   tuneInputGainDb, tuneOutputGainDb, tuneMonitorEnabled, tuneEffectsBypass,
 } from '../lib/audioProcessing';
 import { logHealthEvent } from '../lib/healthLog';
-import { getAudioHost, subscribeAudioHost } from '../lib/audioHost';
+import { getAudioHost, subscribeAudioHost, swapMicDevice } from '../lib/audioHost';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
@@ -76,6 +76,67 @@ export default function AudioDeckPanel({
   // load re-apply whatever's currently calibrated.
   const [syncDelayMs, setSyncDelayMs] = useState(0);
   const backingPlayerRef = useRef(null);
+
+  // ── MIC DEVICE PICKER (in-app "change microphone") ────────────
+  // The pilot fault this exists for: nothing in this app re-acquired
+  // getUserMedia after the initial capture, so an operator's OS/browser
+  // level device change had no code to act on. This is the missing code
+  // path -- lib/audioHost.js's swapMicDevice, which only rewires the
+  // graph's entry point (source -> inputGain), never the published
+  // track. Rendered here rather than in KitCheck or LiveDemo directly
+  // because this panel is the one place both surfaces already share.
+  const [micDevices, setMicDevices] = useState([]);
+  // Read from the HOST's actual raw stream, not a locally-picked value --
+  // if a swap fails, or the watchdog rebuilds the graph from a different
+  // default device, this must reflect what is ACTUALLY live, not what
+  // was last clicked.
+  const [activeMicDeviceId, setActiveMicDeviceId] = useState(null);
+  const [micSwapBusy, setMicSwapBusy] = useState(false);
+  const [micSwapError, setMicSwapError] = useState('');
+
+  useEffect(() => {
+    function syncActiveDevice() {
+      const rawTrack = getAudioHost().rawStream?.getAudioTracks?.()[0] ?? null;
+      setActiveMicDeviceId(rawTrack?.getSettings?.().deviceId ?? null);
+    }
+    syncActiveDevice();
+    return subscribeAudioHost(syncActiveDevice);
+  }, []);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return undefined;
+    let cancelled = false;
+    async function refreshDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        setMicDevices(devices.filter((d) => d.kind === 'audioinput'));
+      } catch {
+        // Enumeration failing is not the same as having no mic -- leave
+        // whatever list (possibly empty) was already shown.
+      }
+    }
+    refreshDevices();
+    navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
+    };
+  }, []);
+
+  async function handleMicDeviceChange(deviceId) {
+    if (!deviceId || deviceId === activeMicDeviceId || micSwapBusy) return;
+    setMicSwapBusy(true);
+    setMicSwapError('');
+    const result = await swapMicDevice(deviceId);
+    setMicSwapBusy(false);
+    if (!result.ok) {
+      // Surfaced, not swallowed -- the select will snap back to
+      // activeMicDeviceId on the next render since that state was never
+      // updated (swapMicDevice left the working mic untouched on failure).
+      setMicSwapError(result.error || 'Could not switch microphone.');
+    }
+  }
 
   // Cue-Sheet Director (CD-3) -- cue editing state. Owned here (not in
   // CueEditorPanel) because BackingTrackPanel (markers) and
@@ -519,6 +580,40 @@ export default function AudioDeckPanel({
           </span>
         </label>
       </div>
+
+      {/* ── Microphone ──────────────────────────────────────────
+          The in-app fix for "changing mic did nothing" -- swapMicDevice
+          reconnects the graph's own entry point, so this works whether
+          the show is live or still in Kit Check. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, letterSpacing: '0.1em', color: '#888780', textTransform: 'uppercase' }}>
+          Microphone
+        </span>
+        <select
+          value={activeMicDeviceId || ''}
+          disabled={micSwapBusy || micDevices.length === 0}
+          onChange={(e) => handleMicDeviceChange(e.target.value)}
+          style={{
+            flex: '1 1 220px', maxWidth: 320, fontSize: 12, padding: '6px 8px',
+            background: '#1a1a19', color: '#fdfffc', border: '1px solid #3a3a37', borderRadius: 6,
+          }}
+        >
+          {micDevices.length === 0 && <option value="">No microphones found</option>}
+          {micDevices.map((d, i) => (
+            <option key={d.deviceId || i} value={d.deviceId}>
+              {d.label || `Microphone ${i + 1}`}
+            </option>
+          ))}
+        </select>
+      </div>
+      {micSwapBusy && (
+        <p style={{ fontSize: 11, color: '#2ec4b6', margin: 0 }}>Switching microphone…</p>
+      )}
+      {micSwapError && (
+        <div style={{ border: '1px solid #e71d36', borderRadius: 8, padding: '8px 10px', fontSize: 11, color: '#e71d36', lineHeight: 1.4 }}>
+          Could not switch microphone: {micSwapError}. Still using the previous one.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap', justifyContent: 'space-around', padding: '4px 0' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>

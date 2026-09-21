@@ -2136,6 +2136,20 @@ const STALE_DEBUG_ENABLED =
   typeof window !== 'undefined' &&
   (window.location.search.includes('stale=1') || window.location.search.includes('debug=1'));
 
+// Test-only fault injection for the mic-health watchdog (FIX 2/3). Dead
+// code on any normal load, same as STALE_DEBUG_ENABLED above -- this is
+// what lets the confirmed pilot fault be reproduced on a deploy in
+// seconds instead of needing a real device dropout: applied ONCE, right
+// after the initial mount-time graph build (see the live-audio effect
+// below), it disconnects the freshly-created mic source node from
+// inputGain while leaving the raw MediaStreamTrack running -- exactly
+// the observed fault (raw track live/unmuted, AudioContext running, zero
+// signal from inputGain onward). A watchdog-triggered rebuild afterward
+// is a real, undoctored graph, so recovery through this flag proves the
+// same recovery a real dropout would get.
+const FORCE_MIC_SILENCE_DEBUG =
+  typeof window !== 'undefined' && window.location.search.includes('force_mic_silence=1');
+
 const BUILD_SHA = (process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || 'local';
 
 function StaleShotDebugOverlay({ activeShot, now, runs, isTargetPresent, lastEvent, simDropped, onToggleDrop, show, onCloseRoom, viewerId, onLeaveBeacon, catchup, startWrite, resolutionFor }) {
@@ -2487,6 +2501,72 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // created them. Set in an effect below, next to displayShowState.
   const showEndedRef = useRef(false);
 
+  // ── SHARED REBUILD, TWO CALLERS ────────────────────────────────
+  // Extracted out of ensureAudioPublished's old dead-track guard so the
+  // mic-health watchdog below (mic_level_sample effect) can reuse the
+  // exact same three steps -- fresh createPilotAudioTrack(), adopt into
+  // the host, publish -- instead of a second, similar rebuild that could
+  // drift from this one. No room disconnect/reconnect anywhere in here:
+  // that is the whole point, a dead mic under a live room is a graph
+  // problem, not a transport problem.
+  //
+  // Does NOT check showEndedRef or guard re-entrancy itself -- both
+  // callers already do (ensureAudioPublished via its own top-of-function
+  // checks, the watchdog via audioPublishInFlightRef), and duplicating
+  // that here would just be a second copy of the same rule to keep in
+  // sync.
+  const rebuildAndRepublishAudio = useCallback(async (trigger) => {
+    const freshHandle = await createPilotAudioTrack();
+    // Hand the replacement to the host too, or the host keeps pointing at
+    // the graph this line just abandoned — and now that release goes
+    // through releaseAudioHost (see releaseLocalDevices below), a stale
+    // host would close the OLD context on leave and leak this one,
+    // keeping the microphone open after the show.
+    //
+    // adoptAudioGraph releases what it replaces, backing player included.
+    // That is correct rather than collateral here: the player's nodes
+    // hang off the old graph's outputBus and the old context is being
+    // closed, so the track is already silent. The artist has to re-pick
+    // it — which is exactly what the show_session_state row is for.
+    adoptAudioGraph(freshHandle);
+    audioHandleRef.current = freshHandle;
+    setAudioNodes(freshHandle.nodes);
+    setAudioContext(freshHandle.audioContext);
+    detachAudioTrackHealthListenersRef.current?.();
+    detachAudioTrackHealthListenersRef.current = attachAudioTrackHealthListeners(
+      freshHandle.rawStream?.getAudioTracks?.()[0] ?? null,
+      freshHandle.processedTrack
+    );
+    freshHandle.audioContext.onstatechange = () => {
+      logHealthEvent('audiocontext_statechange', { state: freshHandle.audioContext.state });
+    };
+    // Fix (2c) -- the published track is always enabled; mute state lives
+    // in the Web Audio graph (micMuteGain), not on the track. A fresh
+    // graph's micMuteGain starts at unity, so re-assert the current
+    // toggle state against it explicitly.
+    freshHandle.processedTrack.enabled = true;
+    tuneMicMuted(freshHandle.nodes, !micOn);
+
+    // The old publication may still be sitting there with a track LiveKit
+    // itself has no reason to think is dead (that is exactly the fault
+    // this exists for) -- unpublish it explicitly before publishing the
+    // replacement, rather than assuming publishTrack will handle a
+    // same-source republish cleanly.
+    const existingPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (existingPub) {
+      try {
+        await room.localParticipant.unpublishTrack(existingPub.track ?? freshHandle.processedTrack, false);
+      } catch (err) {
+        logHealthEvent('audio_graph_rebuild_unpublish_failed', { trigger, error: String(err?.message || err) });
+      }
+    }
+    await room.localParticipant.publishTrack(freshHandle.processedTrack, {
+      source: Track.Source.Microphone,
+    });
+    logHealthEvent('audio_graph_rebuilt', { trigger });
+    return freshHandle;
+  }, [room, micOn]);
+
   const ensureAudioPublished = useCallback(async (trigger) => {
     // Fix (1b) -- once the show has ended, nothing may put the mic back
     // on air. This is load-bearing, not defensive: this function fires on
@@ -2523,65 +2603,33 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         logHealthEvent('ensure_audio_published', { trigger, action: 'already_published' });
         return;
       }
-      let trackToPublish = handle.processedTrack;
-      let action = 'republished';
-      if (trackToPublish.readyState === 'ended') {
+      if (handle.processedTrack.readyState === 'ended') {
         // Defensive guard -- not observed in either real recovery test
         // captured so far (no mst_ended anywhere), but a genuinely dead
-        // MediaStreamTrack can't be republished, only replaced. Rebuilds
-        // the whole Case 2 graph exactly like the mount effect does, and
-        // re-attaches the same health listeners to the new handle.
-        const freshHandle = await createPilotAudioTrack();
-        // Hand the replacement to the host too, or the host keeps
-        // pointing at the graph this line just abandoned — and now that
-        // release goes through releaseAudioHost (see releaseLocalDevices
-        // below), a stale host would close the OLD context on leave and
-        // leak this one, keeping the microphone open after the show.
-        //
-        // adoptAudioGraph releases what it replaces, backing player
-        // included. That is correct rather than collateral here: the
-        // player's nodes hang off the old graph's outputBus and the old
-        // context is being closed, so the track is already silent. The
-        // artist has to re-pick it — which is exactly what the
-        // show_session_state row is for, once the read path is built.
-        adoptAudioGraph(freshHandle);
-        audioHandleRef.current = freshHandle;
-        setAudioNodes(freshHandle.nodes);
-        setAudioContext(freshHandle.audioContext);
-        detachAudioTrackHealthListenersRef.current?.();
-        detachAudioTrackHealthListenersRef.current = attachAudioTrackHealthListeners(
-          freshHandle.rawStream?.getAudioTracks?.()[0] ?? null,
-          freshHandle.processedTrack
-        );
-        freshHandle.audioContext.onstatechange = () => {
-          logHealthEvent('audiocontext_statechange', { state: freshHandle.audioContext.state });
-        };
-        trackToPublish = freshHandle.processedTrack;
-        action = 'track_ended_recreated';
+        // MediaStreamTrack can't be republished, only replaced.
+        await rebuildAndRepublishAudio(trigger);
+        logHealthEvent('ensure_audio_published', { trigger, action: 'track_ended_recreated' });
+        return;
       }
       // Fix (2c) -- the published track is now ALWAYS enabled; mute state
       // lives in the Web Audio graph (micMuteGain), not on the track.
       // This previously set `.enabled = micOn`, which under the new model
       // would take the backing track off air on every republish whenever
-      // the artist happened to be muted.
-      //
-      // The graph carries mute across a same-object republish by itself.
-      // The track_ended_recreated branch above builds a WHOLE new graph,
-      // though, so its micMuteGain starts at unity -- re-assert the
-      // current toggle state against whichever handle we ended up with.
-      trackToPublish.enabled = true;
-      const nodesToSync = audioHandleRef.current?.nodes;
-      if (nodesToSync) tuneMicMuted(nodesToSync, !micOn);
-      await room.localParticipant.publishTrack(trackToPublish, {
+      // the artist happened to be muted. The graph carries mute across a
+      // same-object republish by itself, so re-assert against whichever
+      // handle we already hold rather than a fresh one.
+      handle.processedTrack.enabled = true;
+      if (handle.nodes) tuneMicMuted(handle.nodes, !micOn);
+      await room.localParticipant.publishTrack(handle.processedTrack, {
         source: Track.Source.Microphone,
       });
-      logHealthEvent('ensure_audio_published', { trigger, action });
+      logHealthEvent('ensure_audio_published', { trigger, action: 'republished' });
     } catch (err) {
       logHealthEvent('ensure_audio_published', { trigger, action: 'failed', error: String(err?.message || err) });
     } finally {
       audioPublishInFlightRef.current = false;
     }
-  }, [room, micOn]);
+  }, [room, micOn, rebuildAndRepublishAudio]);
 
   // DEBUG (bug 2 investigation -- viewer stuck on main) -- viewer-side
   // only. Second link in the chain, between "did the SHOT_COMMAND arrive"
@@ -3362,10 +3410,26 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // the pre-processing raw mic level, logged alongside it so a silent
   // OUTPUT with a live INPUT points at the processing chain, not capture.
   const micSilenceStateRef = useRef({ silentSince: null, loggedSilent: false });
+  // ── MIC-HEALTH WATCHDOG (confirmed pilot fault, 20 Sep) ────────
+  // Separate state from micSilenceStateRef above on purpose: that one is
+  // log-only and intentionally slow (10s, either channel) so it reads as
+  // a diagnostic timeline, not an alarm. This one ACTS, so it watches
+  // only the raw, pre-mix signal (inputRms) -- the one reading that
+  // cannot be masked by a backing track summing into outputBus downstream
+  // -- and on a shorter window, because unlike the log it is the thing
+  // meant to shorten how long a dead mic stays dead.
+  const micWatchdogStateRef = useRef({ silentSince: null, recovering: false });
   useEffect(() => {
     if (!isMainPerformer || !audioNodes) return undefined;
     const SILENCE_RMS_THRESHOLD = 0.001;
     const SILENCE_LOG_AFTER_MS = 10_000;
+    // "A couple of seconds" per the fix spec. Sampling itself only ticks
+    // every 5s (below), so in practice this trips on the second
+    // consecutive silent raw sample rather than on a separate clock --
+    // deliberately reusing the one interval instead of polling the
+    // analyser twice as often for a threshold this codebase already
+    // treats (SILENCE_RMS_THRESHOLD) as a real noise floor, not a guess.
+    const RAW_SILENCE_TRIGGER_MS = 3000;
     const outputBuf = new Float32Array(audioNodes.outputAnalyser.fftSize);
     const inputBuf = new Float32Array(audioNodes.inputAnalyser.fftSize);
 
@@ -3376,7 +3440,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       return Math.sqrt(sum / buf.length);
     }
 
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
       const outputRms = rms(audioNodes.outputAnalyser, outputBuf);
       const inputRms = rms(audioNodes.inputAnalyser, inputBuf);
       const rawTrack = audioHandleRef.current?.rawStream?.getAudioTracks?.()[0] ?? null;
@@ -3391,14 +3455,25 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         deviceLabel: rawTrack?.label ?? null,
       });
 
+      // ── FIX 3: UNMASK THE DETECTOR ───────────────────────────────
+      // Was outputRms-only, which the backing track hides behind: it
+      // sums into outputBus downstream of the mic entirely (see
+      // lib/audioProcessing.js), so a dead mic under a playing track
+      // leaves outputRms sitting well above threshold the whole time.
+      // inputRms is upstream of that join and cannot be masked the same
+      // way, so either channel being silent is now enough to log.
+      const outputSilent = outputRms < SILENCE_RMS_THRESHOLD;
+      const inputSilent = inputRms < SILENCE_RMS_THRESHOLD;
       const state = micSilenceStateRef.current;
-      if (outputRms < SILENCE_RMS_THRESHOLD) {
+      if (outputSilent || inputSilent) {
         if (state.silentSince == null) state.silentSince = Date.now();
         if (!state.loggedSilent && Date.now() - state.silentSince >= SILENCE_LOG_AFTER_MS) {
           state.loggedSilent = true;
           logHealthEvent('mic_silent', {
             outputRms,
             inputRms,
+            outputSilent,
+            inputSilent,
             audioContextState,
             silentSinceMs: state.silentSince,
           });
@@ -3415,10 +3490,57 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
         state.silentSince = null;
         state.loggedSilent = false;
       }
+
+      // ── FIX 2: THE WATCHDOG ITSELF ───────────────────────────────
+      // Gated on micOn -- this codebase has one concept of "muted", not
+      // two (tuneMicMuted IS the mute), so micOn && !muted collapses to
+      // just micOn. A deliberately muted mic having zero raw input is
+      // not a fault and must never trigger a rebuild.
+      if (!micOn) {
+        micWatchdogStateRef.current.silentSince = null;
+        return;
+      }
+      const watch = micWatchdogStateRef.current;
+      if (!inputSilent) {
+        watch.silentSince = null;
+        return;
+      }
+      if (watch.silentSince == null) {
+        watch.silentSince = Date.now();
+        return;
+      }
+      if (watch.recovering || Date.now() - watch.silentSince < RAW_SILENCE_TRIGGER_MS) return;
+      // Shares audioPublishInFlightRef with ensureAudioPublished/
+      // attemptPublishRecovery -- all three touch the same Microphone
+      // publication, and only one may be mid-rebuild at a time.
+      if (audioPublishInFlightRef.current) {
+        logHealthEvent('mic_watchdog_skipped', { reason: 'publish_in_flight' });
+        return;
+      }
+      watch.recovering = true;
+      audioPublishInFlightRef.current = true;
+      const silentForMs = Date.now() - watch.silentSince;
+      logHealthEvent('mic_watchdog_dead_mic_detected', { inputRms, silentForMs });
+      try {
+        // Raw input dead while the published track, its readyState, its
+        // publication and the AudioContext clock all still read healthy
+        // -- the confirmed fault. NOT a room reconnect, NOT a logout:
+        // rebuildAndRepublishAudio reacquires the mic and republishes in
+        // place, same three steps ensureAudioPublished's dead-track guard
+        // already uses.
+        await rebuildAndRepublishAudio('mic_watchdog');
+        logHealthEvent('mic_watchdog_recovered', { silentForMs });
+      } catch (err) {
+        logHealthEvent('mic_watchdog_recovery_failed', { silentForMs, error: String(err?.message || err) });
+      } finally {
+        watch.silentSince = null;
+        watch.recovering = false;
+        audioPublishInFlightRef.current = false;
+      }
     }, 5000);
 
     return () => clearInterval(id);
-  }, [isMainPerformer, audioNodes]);
+  }, [isMainPerformer, audioNodes, micOn, rebuildAndRepublishAudio]);
 
   // Stage 1 of the portrait capture work -- what the local camera is
   // ACTUALLY delivering right now, read live off the real track, never
@@ -3619,6 +3741,22 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       // into the same graph.
       setAudioNodes(handle.nodes);
       setAudioContext(handle.audioContext);
+
+      // Test-only fault injection -- see FORCE_MIC_SILENCE_DEBUG's own
+      // comment. Reproduces the confirmed pilot fault: the raw
+      // MediaStreamTrack keeps running untouched, but no signal reaches
+      // inputGain (and therefore nothing downstream) once this runs.
+      // Applied here, once, at the INITIAL build only -- a
+      // watchdog-triggered rebuild goes through rebuildAndRepublishAudio,
+      // not this effect, so recovery is never re-broken by the same flag.
+      if (FORCE_MIC_SILENCE_DEBUG && handle.nodes.source) {
+        try {
+          handle.nodes.source.disconnect(handle.nodes.inputGain);
+          logHealthEvent('debug_force_mic_silence_applied', {});
+        } catch (err) {
+          logHealthEvent('debug_force_mic_silence_failed', { error: String(err?.message || err) });
+        }
+      }
 
       // Phase 2 diagnostic instrumentation (log-only, see
       // attachAudioTrackHealthListeners above) -- taps both the raw
