@@ -1,9 +1,8 @@
 name: promote
 
 # Manual only. Korey runs this from the Actions tab when staging has been
-# tested and approved. It merges staging into main, applies the same
-# migration files to the production Supabase project, deploys production,
-# and smoke tests it.
+# tested and approved. It merges staging into main and applies the same
+# migration files to the production Supabase database.
 #
 # Two separate gates, deliberately not combined into one:
 #
@@ -16,9 +15,20 @@ name: promote
 #   2. `promote` depends on it and runs under the `production` GitHub
 #      Environment, which is where the actual manual-approval click lives
 #      (configured in repo settings as a required reviewer on that
-#      environment — see docs/NEEDS_KOREY.md, this isn't set up yet). If
-#      gate 1 were inside the gated job, the reviewer would be asked to
-#      approve before the protected-path check had even run.
+#      environment — see docs/NEEDS_KOREY.md). If gate 1 were inside the
+#      gated job, the reviewer would be asked to approve before the
+#      protected-path check had even run.
+#
+# No account-wide Supabase credential here either — same reasoning as
+# staging.yml: connects straight to the one database it's allowed to
+# touch with `--db-url`, guarded by the production project's own ref, never
+# a personal access token that can see every project in the account.
+#
+# No Vercel deploy step: Vercel's Git integration deploys `main` on push by
+# itself once this workflow pushes the merge. No smoke test either — the
+# production smoke test would need PRODUCTION_SMOKE_EMAIL/PASSWORD, which
+# are secrets, and this workflow only keeps checks that need none. See
+# docs/NEEDS_KOREY.md for what that leaves as a manual check.
 #
 # Production credentials exist only as secrets on the `production`
 # environment and are never used anywhere else in this repo.
@@ -73,35 +83,28 @@ jobs:
         with:
           version: latest
 
+      - name: Guard — refuse unless the DB URL is really the production project
+        env:
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+        run: |
+          expected="${{ vars.PRODUCTION_PROJECT_REF }}"
+          if [ -z "$expected" ]; then
+            echo "::error::Repository variable PRODUCTION_PROJECT_REF is not set. Refusing to apply migrations without knowing which project to expect — see docs/NEEDS_KOREY.md."
+            exit 1
+          fi
+          case "$SUPABASE_PRODUCTION_DB_URL" in
+            *"$expected"*) echo "DB URL contains the expected production project ref ($expected). Continuing." ;;
+            *) echo "::error::SUPABASE_PRODUCTION_DB_URL does not contain the expected production project ref ($expected). This URL may point at the wrong project — refusing to apply migrations." ; exit 1 ;;
+          esac
+
       - name: Apply the same migration files to production
         working-directory: supabase
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          supabase link --project-ref "${{ secrets.SUPABASE_PRODUCTION_PROJECT_REF }}" \
-            --password "${{ secrets.SUPABASE_PRODUCTION_DB_PASSWORD }}"
-          supabase db push
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+        run: supabase db push --db-url "$SUPABASE_PRODUCTION_DB_URL" --yes
 
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Deploy production
-        id: deploy
+      - name: Verify migrations landed
+        working-directory: supabase
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-          vercel build --prod --token="$VERCEL_TOKEN"
-          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test production
-        env:
-          SMOKE_URL: ${{ steps.deploy.outputs.url }}
-          SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
-          SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
-        run: |
-          npx playwright install --with-deps chromium
-          npm run smoke
+          SUPABASE_PRODUCTION_DB_URL: ${{ secrets.SUPABASE_PRODUCTION_DB_URL }}
+        run: supabase migration list --db-url "$SUPABASE_PRODUCTION_DB_URL"
