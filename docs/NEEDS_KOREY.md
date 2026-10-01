@@ -2,6 +2,11 @@
 
 Claude Code adds blockers here with exact steps. Tick them off, then tell Claude Code "NEEDS_KOREY updated" in the session.
 
+## Blocking right now: git push authentication
+
+- [ ] **Fix `git push` auth for this machine/session.** All of Phase 1's work is committed locally on two branches (`feature/phase1-foundations` and a new `staging` branch, merged) but could not be pushed to `origin` (`github.com/LoudEntify/Loud-app`): `git push` failed with `remote: Invalid username or token. Password authentication is not supported for Git operations.` The stored credential (macOS Keychain, `osxkeychain` helper) is either an old plain password or an expired/invalid token. Fetches/reads still work (this session could `git fetch`/`git log` the remote fine), so this is specifically a write-credential problem. Fix: generate a GitHub personal access token with `repo` scope (or fine-grained write access to `LoudEntify/Loud-app`) at github.com/settings/tokens, then either run `git push` yourself once from a terminal with that token when prompted (updates the Keychain entry for next time), or tell a future Claude Code session the new token so it can push. Until this is fixed, every session's work stays local-only unless you push it yourself.
+- [ ] **Once pushed**, the `staging` branch exists but there is no GitHub Environment, branch protection, or `gh` CLI/token yet (see the next section) — those still need doing before `.github/workflows/staging.yml` can actually run.
+
 ## Blocking Phase 1 (staging can't go live without these)
 
 - [ ] **Create the new staging Supabase project.** Go to supabase.com/dashboard → New Project → name it `loudentify-staging` → region: pick London/UK if offered, otherwise an EU region (per `docs/CLAUDE.md` §2, this must be a separate project from the frozen pilot one — do not reuse it). Once created, go to Project Settings → API and copy: the Project URL, the `anon` public key, and the `service_role` key. Go to Project Settings → Database and copy the project reference (the short ID in the URL, e.g. `abcdefghijklmnop`) and set/copy the database password. You'll paste all of these into GitHub in the next step.
