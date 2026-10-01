@@ -128,9 +128,19 @@ group by env order by rows desc;
 --     This is the property every un-updated write path depends on.
 --     EXPECT: env = 'production'.
 
+-- `(select id from shows limit 1)` is NULL on a database with no shows
+-- yet (every one of this round's migrations only ever ran against the
+-- pilot project, which always had a real show by the time they ran —
+-- not guaranteed on a fresh project). Fixed by inserting a synthetic
+-- show inside the same begin/rollback block, so it's used and then
+-- discarded by the rollback with everything else — no separate cleanup
+-- needed, unlike the two migrations above this one in the history that
+-- had the same bug but weren't already wrapped in a transaction.
 begin;
+  insert into shows (id, room_name, artist_name, slated_at)
+    values ('00000000-0000-0000-0000-0000000000ff', 'migration-probe-room', 'Migration Probe', now());
   insert into show_prompts (show_id, kind, body, options)
-    values ((select id from shows limit 1), 'choice', 'env default probe',
+    values ('00000000-0000-0000-0000-0000000000ff', 'choice', 'env default probe',
             '["a","b"]'::jsonb);
   select env from show_prompts where body = 'env default probe';
 rollback;
@@ -140,8 +150,10 @@ rollback;
 --     count is unchanged by it.
 
 begin;
+  insert into shows (id, room_name, artist_name, slated_at)
+    values ('00000000-0000-0000-0000-0000000000ff', 'migration-probe-room', 'Migration Probe', now());
   insert into show_prompts (show_id, kind, body, options, env)
-    values ((select id from shows limit 1), 'choice', 'env preview probe',
+    values ('00000000-0000-0000-0000-0000000000ff', 'choice', 'env preview probe',
             '["a","b"]'::jsonb, 'preview');
   select env, count(*) from show_prompts where body like 'env % probe' group by env;
   select count(*) as production_only from show_prompts

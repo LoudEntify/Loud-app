@@ -129,11 +129,27 @@ from pg_policy
 join pg_class on pg_class.oid = pg_policy.polrelid
 where pg_class.relname = 'notifications';
 
--- 6. LIVE PROBE — the new kind is actually insertable. Expect 1 row
---    back, then 0 after cleanup.
+-- 6/7. LIVE PROBE, fixed to not depend on a real signup having happened
+-- yet. The original form of this block used `(select id from auth.users
+-- limit 1)` — fine against the pilot project, which always had real
+-- users by the time this ran, but reproduced here against a genuinely
+-- empty database (supabase/migrations/ applied in order from nothing):
+-- it returns NULL and the insert fails the NOT NULL constraint on
+-- user_id, which would break this migration — and every migration after
+-- it — on day one of a fresh staging or production project. Found by
+-- actually running the full migration history locally, not by reading it.
+--
+-- Fix: use a fixed-uuid synthetic probe user (CLAUDE.md: "test data is
+-- synthetic"), created here if it doesn't already exist and deleted
+-- again in the cleanup step below, so the live probe works identically
+-- whether this is the first migration ever applied or the thousandth.
+insert into auth.users (id, email)
+values ('00000000-0000-0000-0000-000000000001', 'migration-probe@loudentify.invalid')
+on conflict (id) do nothing;
+
 insert into notifications (user_id, kind, body, href, dedupe_key)
 values (
-  (select id from auth.users limit 1),
+  '00000000-0000-0000-0000-000000000001',
   'versus_invite',
   'Migration probe — safe to ignore',
   '/join/probe',
@@ -146,7 +162,7 @@ select id, kind, body, href from notifications where dedupe_key = 'migration-pro
 --    is only tested on the new value is half-tested.
 insert into notifications (user_id, kind, body, dedupe_key)
 values (
-  (select id from auth.users limit 1),
+  '00000000-0000-0000-0000-000000000001',
   'system',
   'Migration probe 2 — safe to ignore',
   'migration-probe-2'
@@ -154,7 +170,15 @@ values (
 
 select id, kind from notifications where dedupe_key = 'migration-probe-2';
 
--- 8. CLEANUP — expect should_be_zero = 0.
+-- 8. CLEANUP — expect should_be_zero = 0. Also removes the synthetic
+-- probe user if nothing else came to depend on it in the meantime (it
+-- was never meant to outlive this migration).
 delete from notifications where dedupe_key in ('migration-probe','migration-probe-2');
 select count(*) as should_be_zero
 from notifications where dedupe_key in ('migration-probe','migration-probe-2');
+
+delete from auth.users
+where id = '00000000-0000-0000-0000-000000000001'
+  and not exists (
+    select 1 from notifications where user_id = '00000000-0000-0000-0000-000000000001'
+  );

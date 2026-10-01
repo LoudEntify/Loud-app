@@ -49,15 +49,32 @@ alter table organisation_members enable row level security;
 -- them — nothing about an organisation a user isn't a member of leaks,
 -- including its existence (the subquery only matches rows the caller is
 -- already in).
+--
+-- organisation_members_select_same_org deliberately does NOT write
+-- `organisation_id in (select organisation_id from organisation_members
+-- where user_id = auth.uid())` directly in the policy: a policy on
+-- organisation_members that subqueries organisation_members itself makes
+-- Postgres re-apply this same policy while evaluating the subquery, which
+-- is the textbook way to get "infinite recursion detected in policy for
+-- relation organisation_members". The fix Supabase's own docs recommend is
+-- a SECURITY DEFINER helper function, which runs as its owner and so
+-- bypasses RLS entirely while answering "which orgs does this user belong
+-- to" — the recursive self-query never happens because the lookup isn't
+-- going back through the policy at all.
+create or replace function my_organisation_ids() returns setof uuid
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select organisation_id from organisation_members where user_id = auth.uid();
+$$;
+
 create policy "organisations_select_member" on organisations
-  for select using (
-    id in (select organisation_id from organisation_members where user_id = auth.uid())
-  );
+  for select using (id in (select my_organisation_ids()));
 
 create policy "organisation_members_select_same_org" on organisation_members
-  for select using (
-    organisation_id in (select organisation_id from organisation_members where user_id = auth.uid())
-  );
+  for select using (organisation_id in (select my_organisation_ids()));
 
 -- No client insert/update/delete policies on either table. Creating an
 -- organisation (sign-up, or a future "add a label" flow) and changing

@@ -129,18 +129,50 @@ where pg_class.relname = 'show_slots';
 -- 6. LIVE PROBE — writable and readable through the service role, with
 --    the FK genuinely exercised. Expect 1 row, then 0 after cleanup.
 --    Uses a show_id that cannot collide with a real show.
+--
+-- Two bugs in the original form of this block, both found by actually
+-- running the full migration history against a genuinely empty
+-- database rather than reading it:
+--   1. `invite_token` is `uuid` (see the column list just above) but the
+--      original probe inserted the text 'migration-probe-token' —
+--      42804 invalid input syntax for type uuid, every time, on any
+--      database, not just an empty one.
+--   2. `show_id` has a real FK to `shows(id)` (confirmed in the
+--      constraint check two sections up), so the synthetic
+--      '...-00ff' id needs a matching `shows` row to reference — on the
+--      pilot project a show with every id anyone tried already existed
+--      by accident often enough that this went unnoticed; it is not
+--      guaranteed on a fresh project. `(select id from auth.users limit
+--      1)` has the same empty-database problem the previous migration's
+--      probe had, fixed the same way.
+insert into shows (id, room_name, artist_name, slated_at)
+values ('00000000-0000-0000-0000-0000000000ff', 'migration-probe-room', 'Migration Probe', now())
+on conflict (id) do nothing;
+
+insert into auth.users (id, email)
+values ('00000000-0000-0000-0000-000000000001', 'migration-probe@loudentify.invalid')
+on conflict (id) do nothing;
+
 insert into show_slots (show_id, slot, invite_token, invited_user_id)
 values (
   '00000000-0000-0000-0000-0000000000ff',
   'b',
-  'migration-probe-token',
-  (select id from auth.users limit 1)
+  '00000000-0000-0000-0000-0000000000aa',
+  '00000000-0000-0000-0000-000000000001'
 );
 
 select show_id, slot, invited_user_id, claimed_by_user_id
-from show_slots where invite_token = 'migration-probe-token';
+from show_slots where invite_token = '00000000-0000-0000-0000-0000000000aa';
 
--- 7. CLEANUP — expect should_be_zero = 0.
-delete from show_slots where invite_token = 'migration-probe-token';
+-- 7. CLEANUP — expect should_be_zero = 0. Also removes the synthetic
+-- show and probe user, same reasoning as the previous migration's probe.
+delete from show_slots where invite_token = '00000000-0000-0000-0000-0000000000aa';
 select count(*) as should_be_zero
-from show_slots where invite_token = 'migration-probe-token';
+from show_slots where invite_token = '00000000-0000-0000-0000-0000000000aa';
+
+delete from shows where id = '00000000-0000-0000-0000-0000000000ff';
+delete from auth.users
+where id = '00000000-0000-0000-0000-000000000001'
+  and not exists (
+    select 1 from notifications where user_id = '00000000-0000-0000-0000-000000000001'
+  );
