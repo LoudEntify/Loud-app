@@ -1,0 +1,241 @@
+-- recordings migration (Accounts & Identity, Day 2 -- profiles + recordings library)
+-- Run manually in the Supabase SQL editor -- not applied automatically.
+--
+-- Amended after the Day 2 test sitting's findings (2026-08-20), batches 1-2:
+--   - profiles.bio/avatar_url were read/written by this round's code but
+--     never actually added by any committed migration -- section 0 below
+--     fixes that gap for real, retroactively. Column name is `avatar_url`
+--     (not the `photo_url` the app briefly used) to match what was
+--     manually patched into the live database during the test sitting --
+--     the app's code has been updated to match this file, not the other
+--     way around, so a fresh environment and the live one now agree.
+--   - `insert into storage.buckets` for `avatars` silently failed in the
+--     SQL editor (storage-schema permissions) and took `avatars_public_read`
+--     down with it (avatars_owner_insert/update landed fine on their own).
+--     Bucket creation is now a dashboard step, not SQL -- see section 2.
+--   - profiles.genres (Change 2, the genre tag picker) was originally a
+--     SEPARATE file, docs/genres_migration.sql -- it WAS written and
+--     committed before the mid-sitting product-decision code shipped
+--     (confirmed: commit 87fb2f2, 2026-08-20 20:56 GMT+1, ahead of the
+--     redeploy), so this wasn't a repeat of the bio/avatar_url gap where
+--     the column genuinely was never written down anywhere. What went
+--     wrong instead: two migration files existed for one round's worth of
+--     profiles changes, and the standalone one wasn't run before testing
+--     reached it. Folded into this single file now (section 0 below,
+--     genres_migration.sql deleted) specifically so there's exactly one
+--     place to look and one thing to diff a round's code against -- not
+--     because the SQL itself was ever wrong.
+--   - Every table this file touches now gets an information_schema.columns
+--     check alongside the pg_policies one, and the whole file ends with a
+--     schema-cache reload -- standard from here, not optional.
+--
+-- Three things in this file:
+--   0. profiles -- bio/avatar_url/genres columns (retroactive fix, see above).
+--   1. recordings -- new table, RLS-gated metadata for egress-produced files.
+--   2. avatars -- new PUBLIC storage bucket, for profile photos.
+--
+-- Storage enforcement note (the actual privacy mechanism for recordings):
+-- this file does NOT touch the `recordings` STORAGE BUCKET's public/private
+-- flag or any storage.objects RLS policy for it -- that's a separate
+-- dashboard step (Storage > recordings > Settings > toggle to private), done
+-- by hand, not via SQL, so it's not silently bundled into a script you might
+-- re-run. The actual read-gating happens in app/api/recordings/[id]/url/
+-- route.js, which uses the SERVICE-ROLE client (bypasses RLS entirely, same
+-- as every other admin-client route in this app) to issue short-lived signed
+-- URLs only after checking this table's own visibility/artist_id columns --
+-- so no storage.objects RLS policy is needed for recordings at all. Once the
+-- bucket is private, a bare object URL 400s for everyone; only a signed URL
+-- obtained through that route works, and only after it authorizes the
+-- request.
+
+-- ─── 0. profiles (retroactive fix -- see header) ─────────────
+-- bio/avatar_url nullable, same as every other optional profile field.
+-- No RLS change needed for any of this -- Day 1's owner-write/public-
+-- artist-read policies already cover any column on this table, RLS is
+-- row-level not column-level.
+alter table profiles add column if not exists bio text;
+alter table profiles add column if not exists avatar_url text;
+
+-- genres text[] -- see lib/genres.js for the canonical fixed list and
+-- components/GenreSelect.jsx for the picker. text[] chosen over a join
+-- table: a bounded, small tag count per profile with no per-genre
+-- metadata needed, and text[] supports GIN indexing + the && / @>
+-- operators directly for "any of these genres" queries, which is what
+-- genre-based discovery/contest matching will need later. Straight
+-- pass-through from supabase-js too -- `.update({ genres: [...] })`
+-- serializes a JS array natively.
+alter table profiles add column if not exists genres text[] not null default '{}';
+
+-- One-time backfill from the old free-text `genre` column -- splits on
+-- commas and normalizes known variants against the canonical list
+-- (case-insensitive, trimmed). Best-effort, not a guarantee -- anything
+-- that doesn't match a known form is dropped from `genres` for that row
+-- (never invented or guessed at); the verification query below finds
+-- exactly which rows that happened to. The old `genre` column is NOT
+-- dropped -- kept as a read-only historical trail, same pattern this app
+-- already uses elsewhere (cue_sheets kept artist_email when artist_id
+-- was added). The app no longer reads or writes it after this round.
+update profiles
+set genres = (
+  select coalesce(array_agg(distinct mapped) filter (where mapped is not null), '{}')
+  from (
+    select case lower(trim(piece))
+      when 'afrobeats' then 'Afrobeats'
+      when 'amapiano' then 'Amapiano'
+      when 'r&b' then 'R&B'
+      when 'rnb' then 'R&B'
+      when 'r n b' then 'R&B'
+      when 'r and b' then 'R&B'
+      when 'r''n''b' then 'R&B'
+      when 'rap' then 'Rap'
+      when 'hip-hop' then 'Hip-Hop'
+      when 'hip hop' then 'Hip-Hop'
+      when 'hiphop' then 'Hip-Hop'
+      when 'gospel' then 'Gospel'
+      when 'pop' then 'Pop'
+      when 'soul' then 'Soul'
+      when 'jazz' then 'Jazz'
+      when 'reggae' then 'Reggae'
+      when 'dancehall' then 'Dancehall'
+      when 'afro-fusion' then 'Afro-fusion'
+      when 'afro fusion' then 'Afro-fusion'
+      when 'afrofusion' then 'Afro-fusion'
+      when 'alte' then 'Alté'
+      when 'alté' then 'Alté'
+      when 'highlife' then 'Highlife'
+      when 'drill' then 'Drill'
+      when 'grime' then 'Grime'
+      when 'electronic' then 'Electronic'
+      when 'house' then 'House'
+      when 'rock' then 'Rock'
+      when 'country' then 'Country'
+      when 'folk' then 'Folk'
+      when 'classical' then 'Classical'
+      else null
+    end as mapped
+    from unnest(string_to_array(profiles.genre, ',')) as piece
+  ) matched
+)
+where genre is not null and genre <> '';
+
+-- ─── 1. recordings ────────────────────────────────────────────
+-- storage_path is the raw S3 key egress already writes
+-- (recordings/{room}-{epoch-ms}.mp4, see app/api/egress/start/route.js) --
+-- never exposed to the client directly; only this row's own `id` is, and
+-- app/api/recordings/[id]/url/route.js exchanges that id for a short-lived
+-- signed URL after checking visibility/ownership. artist_id is NOT NULL --
+-- unlike shows.artist_id (nullable, backfilled over time by claim-slot),
+-- every recordings row is only ever created by the sync route (docs/
+-- ownership_migration.sql's shows.artist_id backfill runs first, and the
+-- sync route skips any object it can't attribute to a known artist), so
+-- there's no equivalent "ownerless" state to allow for here.
+create table if not exists recordings (
+  id           uuid primary key default gen_random_uuid(),
+  show_id      uuid references shows(id),
+  artist_id    uuid not null references auth.users(id) on delete cascade,
+  storage_path text not null unique,
+  title        text not null default 'Untitled recording',
+  recorded_at  timestamptz not null,
+  visibility   text not null default 'private' check (visibility in ('public', 'private')),
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists recordings_artist_idx on recordings (artist_id);
+create index if not exists recordings_public_idx on recordings (artist_id) where visibility = 'public';
+
+alter table recordings enable row level security;
+
+-- Owner: full read/write of their own rows, any visibility.
+create policy "recordings_select_own" on recordings
+  for select using (auth.uid() = artist_id);
+
+create policy "recordings_insert_own" on recordings
+  for insert with check (auth.uid() = artist_id);
+
+create policy "recordings_update_own" on recordings
+  for update using (auth.uid() = artist_id) with check (auth.uid() = artist_id);
+
+-- Public (anon or authed): read-only, and only rows explicitly marked
+-- public. Combines with recordings_select_own via OR, same pattern as
+-- profiles' public-artist-read policy from Day 1 -- an owner's private rows
+-- are never exposed by this policy, only by the one above, to themselves.
+create policy "recordings_select_public" on recordings
+  for select using (visibility = 'public');
+
+-- No delete policy -- not asked for this round; a row with no matching
+-- policy for a command is simply unreachable for that command, same as
+-- every other zero-policy table in this app for whichever commands it
+-- doesn't define.
+
+-- ─── 2. avatars (new public bucket) ──────────────────────────
+-- Public by design -- a public artist profile photo has no privacy
+-- requirement, unlike recordings. Path convention: {auth.uid()}/avatar
+-- (fixed, no extension -- see lib/supabaseAuth.js's uploadAvatar, fixed
+-- alongside this same test-sitting round to stop re-uploads in a
+-- different format from orphaning the old file instead of overwriting
+-- it), enforced by the write policies below via storage.foldername(), so
+-- a user can only ever write inside their own folder.
+--
+-- CREATE THE BUCKET VIA THE DASHBOARD FIRST, NOT SQL: `insert into
+-- storage.buckets` from the SQL editor failed silently here (storage-
+-- schema permissions) and took avatars_public_read down with it as a
+-- side effect. Dashboard -> Storage -> New bucket -> name `avatars`,
+-- Public bucket: ON. Only once that exists, run the three policies below
+-- (they're plain RLS policies on storage.objects, not bucket-creation
+-- statements, so they aren't affected by the same permission issue on
+-- their own).
+
+create policy "avatars_public_read" on storage.objects
+  for select using (bucket_id = 'avatars');
+
+create policy "avatars_owner_insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "avatars_owner_update" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ─── Verification -- run all three, confirm before moving on ────
+-- This is now the standard shape (per Finding 2, 2026-08-20): a policy
+-- check AND a column check for every table this file touches, not just
+-- the new ones -- Finding 1 happened precisely because only the new-table
+-- case was ever checked before.
+
+-- Expect 4 rows for `recordings` (select_own, insert_own, update_own,
+-- select_public) and 3 rows for `storage.objects` scoped to bucket_id =
+-- 'avatars' (public_read, owner_insert, owner_update). If this returns
+-- fewer, some policy failed to create (see Day 1's own experience with this
+-- exact failure mode) -- do not proceed to app verification until it
+-- matches.
+select schemaname, tablename, policyname, cmd, roles
+from pg_policies
+where tablename in ('recordings', 'objects')
+order by tablename, policyname;
+
+-- Expect: profiles -> bio, avatar_url, genres (3 rows). recordings -> all
+-- 7 declared columns. Fewer than expected on profiles means section 0
+-- above didn't (fully) run -- exactly the failure mode both bio/
+-- avatar_url and genres hit, now checked for explicitly instead of
+-- assumed.
+select table_name, column_name
+from information_schema.columns
+where (table_name = 'profiles' and column_name in ('bio', 'avatar_url', 'genres'))
+   or table_name = 'recordings'
+order by table_name, column_name;
+
+-- Rows here had a non-empty old `genre` string that backfilled to an
+-- EMPTY genres array -- every piece failed to match the canonical list.
+-- Not necessarily wrong (could be legitimate free text that was never a
+-- real genre), but worth a manual look since it means that profile lost
+-- its genre display until someone re-picks from the fixed list.
+select id, genre, genres
+from profiles
+where genre is not null and genre <> '' and genres = '{}';
+
+-- Standard final statement from here on -- PostgREST's schema cache
+-- doesn't always pick up new tables/columns/policies immediately on its
+-- own; this is what actually fixed Day 1's "schema cache" 404 and should
+-- be run as a matter of course, not only when something breaks.
+notify pgrst, 'reload schema';
