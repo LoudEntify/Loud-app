@@ -102,8 +102,9 @@ export default function PrivacyPage() {
 
         <H2>Who we are</H2>
         <P>
-          Loudentify is run by [company legal name], [registered address], [company number]. We are responsible for
-          your personal data. You can reach us at <A href="mailto:build@loudentify.app">build@loudentify.app</A>.
+          Loudentify is currently run by Oluwakorede Alashe. A UK company is being set up, and this page will be
+          updated when it is. We are responsible for your personal data. You can reach us at{' '}
+          <A href="mailto:build@loudentify.app">build@loudentify.app</A>.
         </P>
 
         <H2>What we collect</H2>

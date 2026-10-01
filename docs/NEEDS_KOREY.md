@@ -4,7 +4,7 @@ Claude Code adds blockers here with exact steps. Tick them off, then tell Claude
 
 ## Privacy page (`/privacy`), branch `feature/privacy-page`
 
-- [ ] **Fill in the company details.** The page has one placeholder sentence left exactly as you gave it: "Loudentify is run by [company legal name], [registered address], [company number]." Replace the three bracketed items with the real company legal name, registered address and company number before this goes live — Google's OAuth reviewers and anyone reading the policy will see the brackets otherwise. The text lives in `app/privacy/page.js`, in the "Who we are" section.
+- [ ] When the company is registered, update the Who we are paragraph on `/privacy`, the Google consent screen branding, and the terms.
 - [ ] **A solicitor must review this policy before launch.** This is temporary, plain-English content you gave me to use as written — it is not legal advice and hasn't been checked by a lawyer. `docs/ARCHITECTURE.md` already flags that the training-data section in particular needs legal sign-off; this page should go to the same review before Loudentify relies on it in front of real users or regulators.
 - [ ] **To ship it — merge `feature/privacy-page` into `main`.** I confirmed via the live Vercel project data that `main` is the branch serving `loudentify.app` (production auto-deploys on every push to `main`, no separate deploy step). Exact steps:
   1. Go to github.com/LoudEntify/Loud-app in a browser, signed in as yourself.
