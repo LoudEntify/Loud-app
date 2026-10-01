@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Guest sign-up (YouTube viewer)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></div>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.4)"></div>
+  <div role="img" aria-label="YouTube player area" style="position: absolute; left: 16px; top: 56px; width: 200px; height: 356px; outline: 1px solid rgba(253, 255, 252, 0.28); background: radial-gradient(90% 60% at 70% 20%, rgba(46, 196, 182, 0.22), rgba(46, 196, 182, 0) 70%), radial-gradient(80% 50% at 20% 85%, rgba(231, 29, 54, 0.2), rgba(231, 29, 54, 0) 70%), #0a1f2e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: rgba(253, 255, 252, 0.7)">
+    <svg class="i" width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>
+    <div style="font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase">[YouTube player]</div>
+    <div style="font-size: 13px">200 x 356, the smallest allowed</div>
+  </div>
+  <div style="position: absolute; left: 232px; right: 16px; top: 56px; display: flex; flex-direction: column; gap: 10px">
+    <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><span style="padding: 2px 8px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="display: flex; align-items: center; gap: 5px; font-size: 14px"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>[n] watching</span></span>
+    <span style="font-size: 24px; font-weight: 700; line-height: 1.05">[Stage name]</span>
+    <span style="font-size: 17px; line-height: 1.25">Your free minute is up.</span>
+    <span style="font-size: 15px; line-height: 1.25; color: #c9cfd1">The show keeps playing while you sign up.</span>
+  </div>
+  <section aria-labelledby="su-title" style="position: absolute; left: 0; right: 0; top: 428px; bottom: 0; box-sizing: border-box; padding: 10px 20px 28px; border-radius: 24px 24px 0 0; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; display: flex; flex-direction: column; gap: 12px">
+    <div style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: rgba(1, 22, 39, 0.2)"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between"><h1 id="su-title" style="margin: 0; font-size: 28px; line-height: 1.05">Keep watching, free</h1><a href="Login.dc.html" style="padding: 10px 4px; font-size: 16px; font-weight: 700; text-decoration: underline">Log in</a></div>
+    <p style="margin: 0; font-size: 17px; color: rgba(1, 22, 39, 0.72)">Step 1 of 2. Sign in, then add your name, date of birth and location.</p>
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <a href="YT-Show.dc.html" aria-label="Continue with Apple" style="height: 50px; border-radius: 25px; background: #000000; color: #ffffff; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif; font-size: 17px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px"><span aria-hidden="true" title="Apple logo from Sign in with Apple" style="width: 18px; height: 18px; border-radius: 4px; border: 1.5px dashed rgba(255, 255, 255, 0.7); box-sizing: border-box"></span>Continue with Apple</a>
+      <a href="YT-Show.dc.html" aria-label="Continue with Google" style="height: 50px; box-sizing: border-box; border-radius: 25px; background: #ffffff; border: 1px solid #747775; color: #1f1f1f; font-family: Roboto, 'Helvetica Neue', sans-serif; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 10px"><span aria-hidden="true" title="Google G logo from Google Sign-In" style="width: 18px; height: 18px; border-radius: 4px; border: 1.5px dashed #747775; box-sizing: border-box"></span>Continue with Google</a>
+      <a href="#" style="align-self: center; padding: 8px 10px; font-size: 16px; font-weight: 700; text-decoration: underline">Use email instead</a>
+    </div>
+    <p style="margin: 0; font-size: 14px; line-height: 1.35; color: rgba(1, 22, 39, 0.8)">By continuing you confirm you are 18 or over and agree to the <a href="#" style="font-weight: 700; text-decoration: underline">Terms and Conditions</a> and <a href="#" style="font-weight: 700; text-decoration: underline">Community Guidelines</a>.</p>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

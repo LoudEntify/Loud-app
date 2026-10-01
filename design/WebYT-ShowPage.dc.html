@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Website: show page (YouTube viewer)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></div>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.4)"></div>
+  <header style="position: absolute; left: 0; right: 0; top: 0; height: 72px; box-sizing: border-box; padding: 0 28px; display: flex; align-items: center; gap: 28px; border-bottom: 1px solid rgba(253, 255, 252, 0.12)">
+    <img src="/_blob/2946b7f26279d9d1bdfdabc030756454" alt="Loudentify" style="height: 26px; width: auto; display: block">
+    <nav aria-label="Main" style="display: flex; gap: 22px; font-size: 17px"><a href="WebLiveUpcoming.dc.html" style="font-weight: 700">Live and upcoming</a><a href="WebForArtists.dc.html">For artists</a><a href="WebForFans.dc.html">For fans</a><a href="WebPricing.dc.html">Pricing</a></nav>
+    <span style="flex: 1"></span>
+    <a href="Login.dc.html" style="height: 44px; padding: 0 16px; display: flex; align-items: center; font-size: 17px; font-weight: 700">Log in</a>
+    <a href="WebGetApp.dc.html" style="height: 44px; padding: 0 22px; border-radius: 22px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center">Get the app</a>
+  </header>
+  <div style="position: absolute; left: 0; right: 0; top: 72px; box-sizing: border-box; padding: 40px 28px; display: flex; gap: 48px; align-items: flex-start; justify-content: center">
+    <div role="img" aria-label="YouTube player area" style="position: relative; flex-shrink: 0; width: 405px; height: 720px; overflow: hidden; outline: 1px solid rgba(253, 255, 252, 0.28); background: radial-gradient(90% 60% at 70% 20%, rgba(46, 196, 182, 0.28), rgba(46, 196, 182, 0) 70%), radial-gradient(80% 50% at 20% 85%, rgba(231, 29, 54, 0.22), rgba(231, 29, 54, 0) 70%), #0a2234; display: flex; align-items: center; justify-content: center; color: rgba(253, 255, 252, 0.6)"><svg class="i" width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg><span style="position: absolute; left: 10px; bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(1, 22, 39, 0.7); color: #fdfffc; font-size: 14px; font-weight: 700">[Stage name]</span><img src="/_blob/2946b7f26279d9d1bdfdabc030756454" alt="" style="position: absolute; right: 8px; top: 8px; height: 14px; width: auto; opacity: 0.9"></div>
+    <section style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 12px"><span style="padding: 2px 8px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="display: flex; align-items: center; gap: 5px; font-size: 14px"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>[n] watching</span></div>
+      <h1 style="margin: 0; font-size: 44px; line-height: 1.05">[Show title]</h1>
+      <a href="Profile-Public.dc.html" style="display: flex; align-items: center; gap: 12px"><span style="width: 52px; height: 52px; border-radius: 26px; background: #0a2a40; display: flex; align-items: center; justify-content: center"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span><span style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 22px; font-weight: 700">[Stage name]</span><span style="font-size: 16px; color: #c9cfd1">Afrobeats · [City]</span></span></a>
+      <p style="margin: 0; font-size: 18px; line-height: 1.35; max-width: 560px">[Short description of the show from the artist]</p>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap"><button style="height: 48px; padding: 0 20px; border-radius: 24px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>Follow</button><button style="height: 48px; padding: 0 20px; border-radius: 24px; border: none; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path><path d="M10 21h4"></path></svg>Remind me</button><button style="height: 48px; padding: 0 20px; border-radius: 24px; border: none; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="M7 8l5-5 5 5"></path><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"></path></svg>Share</button></div>
+      <div style="padding: 20px; border-radius: 20px; background: rgba(253, 255, 252, 0.1); display: flex; flex-direction: column; gap: 10px; max-width: 560px"><span style="font-size: 22px; font-weight: 700">Chat, vote and support in the app</span><span style="font-size: 17px; line-height: 1.3; color: #c9cfd1">Watching is free. Sign up free to join the chat, vote and send support.</span><span style="display: flex; gap: 10px"><a href="SignUp.dc.html" style="height: 48px; padding: 0 22px; border-radius: 24px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center">Sign up free</a><a href="WebGetApp.dc.html" style="height: 48px; padding: 0 22px; border-radius: 24px; background: rgba(253, 255, 252, 0.14); font-size: 17px; font-weight: 700; display: flex; align-items: center">Get the app</a></span></div>
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 560px"><span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: #2ec4b6">NEXT FROM THIS ARTIST</span><div style="padding: 14px 16px; border-radius: 16px; background: rgba(253, 255, 252, 0.08); display: flex; justify-content: space-between; font-size: 17px"><span style="font-weight: 700">[Show title]</span><span style="color: #c9cfd1">[Sat 19:30]</span></div></div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

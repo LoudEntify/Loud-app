@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notification prompt</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <span style="position: absolute; top: 200px; left: 0; right: 0; text-align: center; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.6)">[Discover, behind]</span>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.6)"></div>
+
+  <section aria-labelledby="np-title" style="position: absolute; left: 16px; right: 16px; top: 300px; box-sizing: border-box; padding: 24px 20px; border-radius: 24px; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center">
+    <span style="width: 64px; height: 64px; border-radius: 32px; background: linear-gradient(135deg, rgba(46, 196, 182, 0.4), rgba(255, 159, 28, 0.3)); display: flex; align-items: center; justify-content: center"><svg class="i" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg></span>
+    <h1 id="np-title" style="margin: 0; font-size: 26px; line-height: 1.15">Want to know when [Stage name] goes live?</h1>
+    <p style="margin: 0; font-size: 17px; line-height: 1.45; color: rgba(1, 22, 39, 0.82)">Shows are live, so they are easy to miss. We will send one notification when they start, and nothing else.</p>
+
+    <div style="width: 100%; display: flex; flex-direction: column; gap: 10px; padding-top: 4px">
+      <button style="height: 52px; border-radius: 26px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 18px; font-weight: 700">Yes, tell me</button>
+      <button style="height: 52px; border-radius: 26px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 700">Not now</button>
+    </div>
+    <span style="font-size: 15px; line-height: 1.4; color: rgba(1, 22, 39, 0.78)">You choose exactly what you hear about in Settings.</span>
+  </section>
+
+  <p style="position: absolute; left: 24px; right: 24px; bottom: 40px; margin: 0; font-size: 14px; line-height: 1.45; text-align: center; color: rgba(253, 255, 252, 0.75)">Shown after the first follow, never on first launch. Tapping "Yes" then opens the system permission box.</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

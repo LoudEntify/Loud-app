@@ -1,0 +1,35 @@
+name: ci
+
+# Runs on every pull request into staging or main. No secrets are used here —
+# `npm run check` was verified to pass with a completely empty environment
+# (next build does not touch Supabase/LiveKit env vars at build time), so a
+# forked PR can run this safely. Live-environment checks (smoke, probes) run
+# in staging.yml after deploy, where real staging credentials exist.
+
+on:
+  pull_request:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # npm run check == check:tdz && check:undef && check:routes &&
+      # window-tests.mjs && check:build. Deliberately not `next lint` —
+      # this repo has no committed eslintrc, so `next lint` opens an
+      # interactive "how would you like to configure ESLint?" prompt and
+      # hangs forever in CI. The check:* scripts call eslint directly with
+      # --no-eslintrc, so they never hit that prompt.
+      - run: npm run check

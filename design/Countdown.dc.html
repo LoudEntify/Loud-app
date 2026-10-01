@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Going live</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <span style="position: absolute; top: 120px; left: 0; right: 0; text-align: center; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.7)">[Main camera view]</span>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 52px; display: flex; align-items: center; justify-content: space-between">
+    <span style="display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8.5 15.5a5 5 0 0 1 0-7"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M5.6 18.4a9 9 0 0 1 0-12.8"></path><path d="M18.4 5.6a9 9 0 0 1 0 12.8"></path></svg>Going live</span>
+    <span style="height: 32px; padding: 0 12px; border-radius: 16px; background: rgba(253, 255, 252, 0.12); font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 6px"><span style="width: 18px; height: 18px; border-radius: 9px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>Kit check passed</span>
+  </div>
+
+  <a href="Console.dc.html" role="timer" aria-label="60 seconds until you go live" style="position: absolute; left: 0; right: 0; top: 250px; display: flex; flex-direction: column; align-items: center; gap: 4px">
+    <span style="font-size: 190px; font-weight: 700; line-height: 1; color: rgba(253, 255, 252, 0.5)">60</span>
+    <span style="font-size: 22px; font-weight: 700">seconds to live</span>
+    <span style="max-width: 280px; margin-top: 8px; text-align: center; font-size: 17px; line-height: 1.35; color: rgba(253, 255, 252, 0.85)">Stay on this screen. Your show starts on its own at zero.</span>
+  </a>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; gap: 28px">
+    <button aria-label="Microphone on" style="width: 64px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="width: 56px; height: 56px; border-radius: 28px; background: rgba(253, 255, 252, 0.14); display: flex; align-items: center; justify-content: center"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></span><span style="font-size: 14px">Mic</span></button>
+    <button aria-label="Cameras" style="width: 64px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="width: 56px; height: 56px; border-radius: 28px; background: rgba(253, 255, 252, 0.14); display: flex; align-items: center; justify-content: center"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span><span style="font-size: 14px">Cameras</span></button>
+    <a href="FixSheet.dc.html" aria-label="Fix something" style="width: 64px; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 6px"><span style="width: 56px; height: 56px; border-radius: 28px; background: #ff9f1c; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4a5 5 0 0 0-4.6 6.9L4 17.3V20h2.7l6.4-6.4A5 5 0 0 0 20 9l-3 1-2-2 1-3z"></path></svg></span><span style="font-size: 14px; font-weight: 700">Fix</span></a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

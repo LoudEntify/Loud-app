@@ -1,0 +1,107 @@
+name: promote
+
+# Manual only. Korey runs this from the Actions tab when staging has been
+# tested and approved. It merges staging into main, applies the same
+# migration files to the production Supabase project, deploys production,
+# and smoke tests it.
+#
+# Two separate gates, deliberately not combined into one:
+#
+#   1. `check-protected-paths` runs immediately, no human needed, and fails
+#      the whole run if any protected-path change (money, identity, RLS,
+#      the audit log — see docs/CLAUDE.md §2) is still waiting on a
+#      recorded human approval in docs/NEEDS_KOREY.md. This is the content
+#      check CLAUDE.md requires: "the promote workflow must check for the
+#      approval and refuse if it is missing."
+#   2. `promote` depends on it and runs under the `production` GitHub
+#      Environment, which is where the actual manual-approval click lives
+#      (configured in repo settings as a required reviewer on that
+#      environment — see docs/NEEDS_KOREY.md, this isn't set up yet). If
+#      gate 1 were inside the gated job, the reviewer would be asked to
+#      approve before the protected-path check had even run.
+#
+# Production credentials exist only as secrets on the `production`
+# environment and are never used anywhere else in this repo.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check-protected-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse if a protected-path change is unapproved
+        run: |
+          if grep -qE '^- \[ \]' docs/NEEDS_KOREY.md && \
+             awk '/## Reviews needed before promotion/,0' docs/NEEDS_KOREY.md | grep -qE '^- \[ \]'; then
+            echo "::error::An item under 'Reviews needed before promotion' in docs/NEEDS_KOREY.md is still unchecked. Get Ugo or Korey's approval, tick it, commit, then re-run promote."
+            exit 1
+          fi
+          echo "No outstanding protected-path approvals. Continuing."
+
+  promote:
+    needs: check-protected-paths
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: staging
+
+      - name: Merge staging into main (fast-forward only)
+        run: |
+          git config user.name "loudentify-promote-bot"
+          git config user.email "noreply@loudentify.invalid"
+          git fetch origin main
+          git checkout main
+          git merge --ff-only origin/staging
+          git push origin main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Apply the same migration files to production
+        working-directory: supabase
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PRODUCTION_PROJECT_REF }}" \
+            --password "${{ secrets.SUPABASE_PRODUCTION_DB_PASSWORD }}"
+          supabase db push
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy production
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test production
+        env:
+          SMOKE_URL: ${{ steps.deploy.outputs.url }}
+          SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
+        run: |
+          npx playwright install --with-deps chromium
+          npm run smoke

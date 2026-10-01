@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 88px; overflow: hidden; box-sizing: border-box; padding: 52px 16px 24px; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="Main.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+      <h1 style="margin: 0; font-size: 30px">Inbox</h1>
+    </div>
+    <div role="tablist" aria-label="Inbox" style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)">
+      <button role="tab" aria-selected="true" style="flex: 1; height: 40px; border-radius: 20px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 17px; font-weight: 700">Notifications</button>
+      <a href="Thread.dc.html" role="tab" aria-selected="false" style="flex: 1; height: 40px; border-radius: 20px; color: #011627; font-size: 17px; display: flex; align-items: center; justify-content: center; gap: 6px">Messages<span style="min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #e71d36; color: #ffffff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center">[n]</span></a>
+    </div>
+
+    <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Today</h2>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: #ff9f1c; color: #011627; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; letter-spacing: 0.08em">VS</span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px"><strong>[Artist A]</strong> invited you to a Versus show</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[Day, time]</span></span>
+        <a href="VersusInvite.dc.html" style="height: 36px; padding: 0 14px; flex-shrink: 0; border-radius: 18px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); font-size: 16px; font-weight: 700; display: flex; align-items: center">View</a>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px"><strong>[Stage name]</strong> is live now</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[Show title]</span></span>
+        <a href="Show.dc.html" style="height: 36px; padding: 0 14px; flex-shrink: 0; border-radius: 18px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); font-size: 16px; font-weight: 700; display: flex; align-items: center">Join</a>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(255, 159, 28, 0.3); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px"><strong>[Show title]</strong> starts in 30 minutes</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">You set a reminder</span></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(46, 196, 182, 0.3); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px"><strong>[Stage name]</strong> replied to your comment</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">"[reply]"</span></span>
+      </div>
+    </div>
+
+    <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Earlier</h2>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="fill: currentColor; stroke: none"><path d="M8 5l11 7-11 7z"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px">Recording of <strong>[Show title]</strong> is ready</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">From [Stage name]</span></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.72)">
+        <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px"><strong>[username]</strong> followed you</span></span>
+      </div>
+    </div>
+  </div>
+  <nav aria-label="Main" style="position: absolute; left: 0; right: 0; bottom: 0; height: 88px; box-sizing: border-box; padding: 8px 8px 0; background: rgba(253, 255, 252, 0.82); backdrop-filter: blur(18px); border-top: 1px solid rgba(1, 22, 39, 0.1); display: flex; align-items: flex-start">
+    <a href="Main.dc.html" aria-current="page" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: #011627"><span style="display: flex; padding: 2px 14px; border-radius: 15px; background: rgba(46, 196, 182, 0.3)"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg></span><span style="font-size: 13px; font-weight: 700">Discover</span></a>
+    <a href="Live.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: rgba(1, 22, 39, 0.68)"><span style="display: flex; padding: 2px 14px; border-radius: 15px"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8.5 15.5a5 5 0 0 1 0-7"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M5.6 18.4a9 9 0 0 1 0-12.8"></path><path d="M18.4 5.6a9 9 0 0 1 0 12.8"></path></svg></span><span style="font-size: 13px">Live</span></a>
+    <a href="Create.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: rgba(1, 22, 39, 0.68)"><span style="width: 52px; height: 30px; border-radius: 15px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M12 5v14M5 12h14"></path></svg></span><span style="font-size: 13px">Create</span></a>
+    <a href="Profile-Owner.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: rgba(1, 22, 39, 0.68)"><span style="display: flex; padding: 2px 14px; border-radius: 15px"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span><span style="font-size: 13px">Profile</span></a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

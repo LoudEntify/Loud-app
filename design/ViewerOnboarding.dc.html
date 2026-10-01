@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pick your genres</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 0; box-sizing: border-box; padding: 52px 16px 36px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <img src="/_blob/9658016a1be49e5f96b7f76311298e3e" alt="Loudentify" style="height: 24px; width: auto; display: block">
+      <a href="Main.dc.html" style="padding: 8px 4px; font-size: 17px; font-weight: 700; text-decoration: underline">Skip</a>
+    </div>
+    <div role="progressbar" aria-label="Step 1 of 2" aria-valuemin="1" aria-valuemax="2" aria-valuenow="1" style="height: 6px; border-radius: 3px; background: rgba(1, 22, 39, 0.07); overflow: hidden"><div style="width: 50%; height: 100%; border-radius: 3px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%)"></div></div>
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <h1 style="margin: 0; font-size: 34px; line-height: 1.05">What do you love to hear?</h1>
+      <p style="margin: 0; font-size: 18px; color: rgba(1, 22, 39, 0.75)">Pick three or more. You can change this later.</p>
+    </div>
+
+    <div role="group" aria-label="Genres" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+      <button aria-pressed="true" style="position: relative; height: 72px; border-radius: 18px; border: 2px solid #011627; background: linear-gradient(135deg, rgba(46, 196, 182, 0.45), rgba(255, 255, 255, 0.8)); color: #011627; font-size: 20px; font-weight: 700; text-align: left; padding: 0 16px">Afrobeats<span style="position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 11px; background: #011627; color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></button>
+      <button aria-pressed="true" style="position: relative; height: 72px; border-radius: 18px; border: 2px solid #011627; background: linear-gradient(135deg, rgba(255, 159, 28, 0.4), rgba(255, 255, 255, 0.8)); color: #011627; font-size: 20px; font-weight: 700; text-align: left; padding: 0 16px">R&amp;B<span style="position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 11px; background: #011627; color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></button>
+      <button aria-pressed="true" style="position: relative; height: 72px; border-radius: 18px; border: 2px solid #011627; background: linear-gradient(135deg, rgba(231, 29, 54, 0.26), rgba(255, 255, 255, 0.8)); color: #011627; font-size: 20px; font-weight: 700; text-align: left; padding: 0 16px">Gospel<span style="position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 11px; background: #011627; color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Hip-hop</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Soul</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Jazz</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Amapiano</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Indie</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Highlife</button>
+      <button aria-pressed="false" style="height: 72px; border-radius: 18px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 20px; text-align: left; padding: 0 16px">Rock</button>
+    </div>
+
+    <div style="flex: 1"></div>
+    <a href="Main.dc.html" style="height: 52px; border-radius: 26px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 19px; font-weight: 700; display: flex; align-items: center; justify-content: center">Continue with 3 picked</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wallet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 88px; overflow: hidden; box-sizing: border-box; padding: 52px 16px 24px; display: flex; flex-direction: column; gap: 16px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="ViewerProfile.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+      <h1 style="margin: 0; font-size: 30px">Wallet</h1>
+    </div>
+
+    <div style="padding: 20px; border-radius: 22px; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; display: flex; flex-direction: column; gap: 6px">
+      <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.1em; color: rgba(253, 255, 252, 0.85)">YOUR BALANCE</span>
+      <span style="font-size: 44px; font-weight: 700; line-height: 1">[n] tokens</span>
+      <span style="font-size: 16px; color: rgba(253, 255, 252, 0.85)">Use them to support artists during a show.</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: rgba(255, 255, 255, 0.72)">
+      <a href="#" style="display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 0 16px"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.5a2.5 2.5 0 0 1 4.8.9c0 1.6-2.3 2-2.3 3.6M12 17h.01"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">How tokens work</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">Plain answers, no small print</span></span><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>
+      <a href="#" style="display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">My spending limit</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[Not set]</span></span><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>
+    </div>
+
+    <h2 style="margin: 4px 0 0; font-size: 20px">History</h2>
+    <div style="display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: rgba(255, 255, 255, 0.72)">
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px"><span style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; background: rgba(255, 159, 28, 0.3); display: flex; align-items: center; justify-content: center"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Supported [Stage name]</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[Show title] · [date]</span></span><span style="font-size: 17px; font-weight: 700">−[n]</span></div>
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; background: rgba(255, 159, 28, 0.3); display: flex; align-items: center; justify-content: center"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Supported [Stage name]</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[Show title] · [date]</span></span><span style="font-size: 17px; font-weight: 700">−[n]</span></div>
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; background: rgba(46, 196, 182, 0.3); display: flex; align-items: center; justify-content: center"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Tokens added</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">[date]</span></span><span style="font-size: 17px; font-weight: 700">+[n]</span></div>
+    </div>
+  </div>
+  <nav aria-label="Main" style="position: absolute; left: 0; right: 0; bottom: 0; height: 88px; box-sizing: border-box; padding: 8px 8px 0; background: rgba(253, 255, 252, 0.82); backdrop-filter: blur(18px); border-top: 1px solid rgba(1, 22, 39, 0.1); display: flex; align-items: flex-start">
+    <a href="Main.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: rgba(1, 22, 39, 0.68)"><span style="display: flex; padding: 2px 14px; border-radius: 15px"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg></span><span style="font-size: 13px">Discover</span></a>
+    <a href="Live.dc.html" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: rgba(1, 22, 39, 0.68)"><span style="display: flex; padding: 2px 14px; border-radius: 15px"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"></circle><path d="M8.5 15.5a5 5 0 0 1 0-7"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M5.6 18.4a9 9 0 0 1 0-12.8"></path><path d="M18.4 5.6a9 9 0 0 1 0 12.8"></path></svg></span><span style="font-size: 13px">Live</span></a>
+    <a href="ViewerProfile.dc.html" aria-current="page" style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; color: #011627"><span style="display: flex; padding: 2px 14px; border-radius: 15px; background: rgba(46, 196, 182, 0.3)"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span><span style="font-size: 13px; font-weight: 700">Profile</span></a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

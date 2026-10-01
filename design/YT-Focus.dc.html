@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Show, picture at full size (YouTube viewer)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></div>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.4)"></div>
+  <div style="position: absolute; left: 0; right: 0; top: 0; padding: 52px 12px 0; display: flex; align-items: center; gap: 10px">
+    <a href="Live.dc.html" aria-label="Leave show" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.5); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+    <a href="Profile-Public.dc.html" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px">
+      <span style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; background: #1d4a66; display: flex; align-items: center; justify-content: center"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+      <span style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <span style="font-size: 19px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[Stage name]</span>
+        <span style="display: flex; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="display: flex; align-items: center; gap: 5px; font-size: 14px"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>[n] watching</span></span>
+      </span>
+    </a>
+    <button style="flex-shrink: 0; height: 44px; padding: 0 18px; border-radius: 22px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700">Follow</button>
+  </div>
+  <div role="img" aria-label="YouTube player area" style="position: absolute; left: 25px; top: 104px; width: 340px; height: 604px; outline: 1px solid rgba(253, 255, 252, 0.28); background: radial-gradient(90% 60% at 70% 20%, rgba(46, 196, 182, 0.22), rgba(46, 196, 182, 0) 70%), radial-gradient(80% 50% at 20% 85%, rgba(231, 29, 54, 0.2), rgba(231, 29, 54, 0) 70%), #0a1f2e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: rgba(253, 255, 252, 0.7)">
+    <svg class="i" width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>
+    <div style="font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; padding: 0 12px">[YouTube player]</div>
+    <div style="font-size: 13px">340 x 604, 9:16</div>
+  </div>
+  <div style="position: absolute; left: 12px; right: 12px; top: 712px; height: 36px; display: flex; align-items: center; gap: 10px; font-size: 16px">
+    <span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [latest comment]</span>
+    <button style="height: 44px; padding: 0 4px; border: none; background: none; color: #2ec4b6; font-size: 16px; font-weight: 700">Open chat</button>
+  </div>
+  <div style="position: absolute; left: 12px; right: 12px; top: 754px; display: flex; align-items: center; justify-content: space-between; gap: 8px">
+    <a href="SupportSheet.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: #ff9f1c; color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg>Support</a>
+    <a href="YT-Prompt.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center">Vote, 0:42</a>
+    <a href="YT-Show.dc.html" aria-label="Smaller picture" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(1, 22, 39, 0.55); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"></path></svg></a>
+    <button aria-label="Share or report" style="width: 44px; height: 44px; border-radius: 22px; border: none; background: rgba(1, 22, 39, 0.55); color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

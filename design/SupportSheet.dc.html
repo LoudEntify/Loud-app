@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Support the artist</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 12px; right: 12px; top: 52px; display: flex; align-items: center; gap: 8px">
+    <span style="padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">LIVE</span>
+    <span style="font-size: 18px; font-weight: 700">[Stage name]</span>
+  </div>
+  <div style="position: absolute; inset: 0; top: 96px; background: rgba(1, 22, 39, 0.45)"></div>
+
+  <section aria-labelledby="support-title" style="position: absolute; left: 0; right: 0; bottom: 0; top: 268px; box-sizing: border-box; padding: 10px 16px 36px; border-radius: 24px 24px 0 0; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; display: flex; flex-direction: column; gap: 16px">
+    <div style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: rgba(1, 22, 39, 0.2)"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+      <h1 id="support-title" style="margin: 0; font-size: 28px">Support [Stage name]</h1>
+      <a href="Show.dc.html" aria-label="Close" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+    </div>
+    <span style="display: flex; align-items: center; gap: 8px; font-size: 17px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4z"></path><path d="M4 7V6a2 2 0 0 1 2-2h10"></path><circle cx="16" cy="13.5" r="1"></circle></svg>You have <strong>[n] tokens</strong></span>
+
+    <div role="radiogroup" aria-label="Amount" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+      <button role="radio" aria-checked="false" style="height: 64px; border-radius: 16px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size: 22px; font-weight: 700">10</span><span style="font-size: 13px">tokens</span></button>
+      <button role="radio" aria-checked="true" style="height: 64px; border-radius: 16px; border: 2px solid #011627; background: #ffffff; color: #011627; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size: 22px; font-weight: 700">25</span><span style="font-size: 13px">tokens</span></button>
+      <button role="radio" aria-checked="false" style="height: 64px; border-radius: 16px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size: 22px; font-weight: 700">50</span><span style="font-size: 13px">tokens</span></button>
+      <button role="radio" aria-checked="false" style="height: 64px; border-radius: 16px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size: 22px; font-weight: 700">100</span><span style="font-size: 13px">tokens</span></button>
+    </div>
+
+    <label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; font-weight: 700">Add a message (optional)<input placeholder="The artist sees this on screen" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 17px; font-weight: 400"></label>
+
+    <p style="margin: 0; font-size: 15px; line-height: 1.35; color: rgba(1, 22, 39, 0.78)">Most of it goes straight to the artist. No odds, no prizes, just support.</p>
+
+    <div style="flex: 1"></div>
+    <a href="Show.dc.html" style="height: 52px; border-radius: 26px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 19px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg>Send 25 tokens</a>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

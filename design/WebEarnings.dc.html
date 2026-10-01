@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Earnings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <header style="height: 76px; box-sizing: border-box; padding: 0 40px; display: flex; align-items: center; gap: 32px; border-bottom: 1px solid rgba(1, 22, 39, 0.1); background: rgba(253, 255, 252, 0.8)">
+    <img src="/_blob/9658016a1be49e5f96b7f76311298e3e" alt="Loudentify" style="height: 28px; width: auto; display: block">
+    <nav aria-label="Main" style="flex: 1; display: flex; gap: 26px; font-size: 17px">
+      <a href="#">Discover</a><a href="#">Live and upcoming</a><a href="#">My shows</a><a href="#" aria-current="page" style="font-weight: 700; text-decoration: underline">Earnings</a>
+    </nav>
+    <span style="width: 44px; height: 44px; border-radius: 22px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+  </header>
+
+  <div style="box-sizing: border-box; padding: 40px; display: flex; gap: 32px; align-items: flex-start">
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 24px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 40px; line-height: 1.05">Earnings</h1>
+        <p style="margin: 0; font-size: 19px; color: rgba(1, 22, 39, 0.75)">You keep 72.5% of the tokens fans send you.</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+        <div style="padding: 22px; border-radius: 20px; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 16px; color: rgba(253, 255, 252, 0.85)">Ready to cash out</span><span style="font-size: 38px; font-weight: 700; line-height: 1.1">£[amount]</span></div>
+        <div style="padding: 22px; border-radius: 20px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 4px"><span style="font-size: 16px; color: rgba(1, 22, 39, 0.75)">Pending</span><span style="font-size: 38px; font-weight: 700; line-height: 1.1">£[amount]</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">Clears [n] days after each show</span></div>
+        <div style="padding: 22px; border-radius: 20px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 4px"><span style="font-size: 16px; color: rgba(1, 22, 39, 0.75)">Paid out so far</span><span style="font-size: 38px; font-weight: 700; line-height: 1.1">£[amount]</span></div>
+      </div>
+
+      <section style="padding: 24px; border-radius: 22px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 22px">Where it came from</h2>
+        <div style="display: flex; flex-direction: column">
+          <div style="display: flex; align-items: center; gap: 16px; min-height: 60px; border-bottom: 1px solid rgba(1, 22, 39, 0.08); font-size: 15px; font-weight: 700; letter-spacing: 0.06em; color: rgba(1, 22, 39, 0.72); text-transform: uppercase"><span style="flex: 2">Show</span><span style="width: 130px">Date</span><span style="width: 120px">Tokens</span><span style="width: 110px; text-align: right">Your share</span></div>
+          <div style="display: flex; align-items: center; gap: 16px; min-height: 60px; border-bottom: 1px solid rgba(1, 22, 39, 0.08); font-size: 17px"><span style="flex: 2; font-weight: 700">[Show title]</span><span style="width: 130px">[date]</span><span style="width: 120px">[n]</span><span style="width: 110px; text-align: right; font-weight: 700">£[amount]</span></div>
+          <div style="display: flex; align-items: center; gap: 16px; min-height: 60px; border-bottom: 1px solid rgba(1, 22, 39, 0.08); font-size: 17px"><span style="flex: 2; font-weight: 700">[Show title]</span><span style="width: 130px">[date]</span><span style="width: 120px">[n]</span><span style="width: 110px; text-align: right; font-weight: 700">£[amount]</span></div>
+          <div style="display: flex; align-items: center; gap: 16px; min-height: 60px; font-size: 17px"><span style="flex: 2; display: flex; align-items: center; gap: 8px; font-weight: 700"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0z"></path><path d="M8 6H4a3 3 0 0 0 4 4M16 6h4a3 3 0 0 1-4 4M12 13v4M8 20h8"></path></svg>Competition prize</span><span style="width: 130px">[date]</span><span style="width: 120px">—</span><span style="width: 110px; text-align: right; font-weight: 700">£[amount]</span></div>
+        </div>
+      </section>
+    </main>
+
+    <aside style="width: 380px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px">
+      <section style="padding: 22px; border-radius: 22px; background: linear-gradient(140deg, rgba(255, 159, 28, 0.32) 0%, rgba(255, 255, 255, 0.85) 60%); display: flex; flex-direction: column; gap: 12px">
+        <h2 style="margin: 0; font-size: 22px">Cash out</h2>
+        <span style="display: flex; align-items: center; gap: 10px; font-size: 17px"><span style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 13px; background: #ff9f1c; color: #011627; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700">1</span>Identity check, not done yet</span>
+        <span style="display: flex; align-items: center; gap: 10px; font-size: 17px; color: rgba(1, 22, 39, 0.72)"><span style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 13px; background: rgba(1, 22, 39, 0.12); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700">2</span>Add a payout account</span>
+        <span style="display: flex; align-items: center; gap: 10px; font-size: 17px; color: rgba(1, 22, 39, 0.72)"><span style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 13px; background: rgba(1, 22, 39, 0.12); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700">3</span>Request your payout</span>
+        <a href="WebIdentity.dc.html" style="margin-top: 4px; height: 52px; border-radius: 26px; background: linear-gradient(135deg, #011627 0%, #123f57 55%, #011627 100%); color: #fdfffc; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center">Start identity check</a>
+      </section>
+      <section style="padding: 22px; border-radius: 22px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 20px">Payout history</h2>
+        <span style="font-size: 16px; color: rgba(1, 22, 39, 0.8)">No payouts yet. Each one will show here with its status.</span>
+      </section>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
