@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blocking and filters</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 900px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="box-sizing: border-box; padding: 52px 16px 32px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="PrivacySettings.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+      <h1 style="margin: 0; font-size: 28px">Blocking and filters</h1>
+    </div>
+
+    <div role="tablist" aria-label="Sections" style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)">
+      <button role="tab" aria-selected="true" style="flex: 1; height: 40px; border-radius: 20px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 17px; font-weight: 700">Hidden words</button>
+      <button role="tab" aria-selected="false" style="flex: 1; height: 40px; border-radius: 20px; border: none; background: transparent; color: #011627; font-size: 17px">Blocked</button>
+    </div>
+
+    <section style="padding: 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h2 style="margin: 0; font-size: 19px">Words you never want to see</h2>
+        <span style="font-size: 16px; line-height: 1.4; color: rgba(1, 22, 39, 0.8)">Comments containing these are hidden from your shows and your chat. The person who wrote it is not told.</span>
+      </div>
+      <label style="display: flex; align-items: center; gap: 8px; height: 50px; padding: 0 6px 0 14px; border-radius: 12px; background: rgba(1, 22, 39, 0.07)">
+        <input aria-label="Add a word" placeholder="Add a word or phrase" style="flex: 1; min-width: 0; border: none; background: transparent; color: #011627; font-size: 17px; outline: none">
+        <button style="height: 38px; padding: 0 16px; border-radius: 19px; border: none; background: linear-gradient(135deg, #011627 0%, #123f57 55%, #011627 100%); color: #fdfffc; font-size: 15px; font-weight: 700">Add</button>
+      </label>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <span style="height: 38px; padding: 0 8px 0 14px; border-radius: 19px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; gap: 6px; font-size: 16px">[word]<button aria-label="Remove [word]" style="width: 26px; height: 26px; border-radius: 13px; border: none; background: rgba(1, 22, 39, 0.12); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></span>
+        <span style="height: 38px; padding: 0 8px 0 14px; border-radius: 19px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; gap: 6px; font-size: 16px">[word]<button aria-label="Remove [word]" style="width: 26px; height: 26px; border-radius: 13px; border: none; background: rgba(1, 22, 39, 0.12); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></span>
+        <span style="height: 38px; padding: 0 8px 0 14px; border-radius: 19px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; gap: 6px; font-size: 16px">[phrase]<button aria-label="Remove [phrase]" style="width: 26px; height: 26px; border-radius: 13px; border: none; background: rgba(1, 22, 39, 0.12); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding-top: 4px"><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Also hide common abuse</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">Our own list, kept up to date</span></span><button role="switch" aria-checked="true" aria-label="Also hide common abuse" style="width: 52px; height: 32px; flex-shrink: 0; box-sizing: border-box; padding: 3px; border-radius: 16px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; justify-content: flex-end"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff; box-shadow: 0 1px 3px rgba(1, 22, 39, 0.3)"></span></button></div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; padding: 0 4px; font-size: 19px">Blocked accounts</h2>
+      <div style="border-radius: 18px; overflow: hidden; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 0 16px"><span style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">@[username]</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">Blocked [date]</span></span><button style="height: 38px; padding: 0 14px; border-radius: 19px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 15px; font-weight: 700">Unblock</button></div>
+        <div style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">@[username]</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">Blocked [date]</span></span><button style="height: 38px; padding: 0 14px; border-radius: 19px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 15px; font-weight: 700">Unblock</button></div>
+      </div>
+      <span style="padding: 0 4px; font-size: 15px; line-height: 1.4; color: rgba(1, 22, 39, 0.78)">Blocked people cannot message you, comment on your shows, or see your profile.</span>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

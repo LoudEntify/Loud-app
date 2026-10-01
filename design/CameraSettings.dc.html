@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Camera settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 1320px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="box-sizing: border-box; padding: 52px 16px 32px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="Settings.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+      <h1 style="margin: 0; font-size: 30px">Camera</h1>
+    </div>
+
+    <div role="tablist" aria-label="Cameras" style="display: flex; gap: 8px">
+      <button role="tab" aria-selected="true" style="height: 36px; padding: 0 16px; border-radius: 18px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 16px; font-weight: 700">Main</button>
+      <button role="tab" aria-selected="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">Side</button>
+      <button style="height: 36px; padding: 0 14px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px; display: flex; align-items: center; gap: 4px"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add camera</button>
+    </div>
+
+    <div style="position: relative; height: 240px; border-radius: 20px; overflow: hidden; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; color: #fdfffc">
+      <div style="position: absolute; left: 33.3%; top: 0; bottom: 0; width: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+      <div style="position: absolute; left: 66.6%; top: 0; bottom: 0; width: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+      <div style="position: absolute; top: 33.3%; left: 0; right: 0; height: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+      <div style="position: absolute; top: 66.6%; left: 0; right: 0; height: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+      <span style="position: absolute; top: 12px; left: 12px; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.75)">[Main camera view]</span>
+      <span style="position: absolute; bottom: 12px; right: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(1, 22, 39, 0.72); font-size: 15px; font-weight: 700">1.1x</span>
+    </div>
+
+    <section style="border-radius: 18px; overflow: hidden; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column">
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">Exposure lock</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">Stops brightness jumping when lights change</span></span><button role="switch" aria-checked="true" aria-label="Exposure lock" style="width: 52px; height: 32px; flex-shrink: 0; box-sizing: border-box; padding: 3px; border-radius: 16px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; justify-content: flex-end"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff; box-shadow: 0 1px 3px rgba(1, 22, 39, 0.3)"></span></button></div>
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">Focus lock</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">Keeps focus on where you stand</span></span><button role="switch" aria-checked="true" aria-label="Focus lock" style="width: 52px; height: 32px; flex-shrink: 0; box-sizing: border-box; padding: 3px; border-radius: 16px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; justify-content: flex-end"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff; box-shadow: 0 1px 3px rgba(1, 22, 39, 0.3)"></span></button></div>
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"></path></svg><span style="flex: 1; font-size: 18px; font-weight: 700">White balance</span>
+        <span style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)"><button aria-pressed="true" style="height: 32px; padding: 0 12px; border-radius: 16px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 15px; font-weight: 700">Auto</button><button aria-pressed="false" style="height: 32px; padding: 0 12px; border-radius: 16px; border: none; background: transparent; color: #011627; font-size: 15px">Lock</button></span></div>
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)">
+        <label for="zoom" style="display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 700"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5M11 8v6M8 11h6"></path></svg>Zoom</label>
+        <span style="font-size: 15px; line-height: 1.35; color: rgba(1, 22, 39, 0.8)">Uses this camera's own lens, never digital crop, so nothing is lost from the picture.</span>
+        <input id="zoom" type="range" min="10" max="30" step="1" style="width: 100%; accent-color: #011627">
+        <div style="display: flex; align-items: center; justify-content: space-between"><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">1.0x</span><span style="padding: 4px 12px; border-radius: 999px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700">1.2x</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">[max for this lens]</span></div>
+        <span style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: rgba(1, 22, 39, 0.8)"><span style="width: 20px; height: 20px; border-radius: 10px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; align-items: center; justify-content: center"><svg class="i" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>Full sensor quality at this setting</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)">
+        <div style="display: flex; align-items: center; gap: 12px"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"></path><path d="M20 4v5h-5"></path><path d="M20 12a8 8 0 0 1-14 5.3L4 15"></path><path d="M4 20v-5h5"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">Moving zoom</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">A slow push in or out during a shot</span></span><button role="switch" aria-checked="true" aria-label="Moving zoom" style="width: 52px; height: 32px; flex-shrink: 0; box-sizing: border-box; padding: 3px; border-radius: 16px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; justify-content: flex-end"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff; box-shadow: 0 1px 3px rgba(1, 22, 39, 0.3)"></span></button></div>
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 92px; flex-shrink: 0; font-size: 16px">How long</span><div style="flex: 1; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)"><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: #011627; font-size: 15px">2s</button><button aria-pressed="true" style="flex: 1; height: 34px; border-radius: 17px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 15px; font-weight: 700">4s</button><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: #011627; font-size: 15px">8s</button><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: #011627; font-size: 15px">Custom</button></div></div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)">
+        <div style="display: flex; align-items: center; gap: 12px"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 18px; font-weight: 700">Pan</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.75)">A slow sweep across the room</span></span><button role="switch" aria-checked="false" aria-label="Pan" style="width: 52px; height: 32px; flex-shrink: 0; box-sizing: border-box; padding: 3px; border-radius: 16px; border: none; background: rgba(1, 22, 39, 0.18); display: flex; justify-content: flex-start"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff; box-shadow: 0 1px 3px rgba(1, 22, 39, 0.3)"></span></button></div>
+        <div style="display: flex; align-items: center; gap: 10px"><span style="width: 92px; flex-shrink: 0; font-size: 16px">How long</span><div style="flex: 1; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)"><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: rgba(1, 22, 39, 0.6); font-size: 15px">2s</button><button aria-pressed="true" style="flex: 1; height: 34px; border-radius: 17px; border: 2px solid rgba(1, 22, 39, 0.35); background: rgba(255, 255, 255, 0.6); color: rgba(1, 22, 39, 0.6); font-size: 15px; font-weight: 700">6s</button><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: rgba(1, 22, 39, 0.6); font-size: 15px">10s</button><button aria-pressed="false" style="flex: 1; height: 34px; border-radius: 17px; border: none; background: transparent; color: rgba(1, 22, 39, 0.6); font-size: 15px">Custom</button></div></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"></path><path d="M20 4v5h-5"></path><path d="M20 12a8 8 0 0 1-14 5.3L4 15"></path><path d="M4 20v-5h5"></path></svg><span style="flex: 1; font-size: 18px; font-weight: 700">Orientation</span>
+        <span style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)"><button aria-pressed="true" style="height: 32px; padding: 0 12px; border-radius: 16px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 15px; font-weight: 700">Portrait</button><button aria-pressed="false" style="height: 32px; padding: 0 12px; border-radius: 16px; border: none; background: transparent; color: #011627; font-size: 15px">Landscape</button></span></div>
+    </section>
+
+    <section style="padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; align-items: center; gap: 12px">
+      <svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><h2 style="margin: 0; font-size: 18px">Room and light check</h2><span style="font-size: 15px; line-height: 1.3; color: rgba(1, 22, 39, 0.75)">Checks light and framing for this place</span></div>
+      <button style="height: 40px; padding: 0 14px; flex-shrink: 0; border-radius: 20px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px; font-weight: 700">Run check</button>
+    </section>
+
+    <button style="height: 52px; border-radius: 26px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 18px; font-weight: 700">Save for this camera</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

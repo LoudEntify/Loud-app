@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vote sheet (YouTube viewer)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></div>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.4)"></div>
+  <div style="position: absolute; left: 0; right: 0; top: 0; padding: 52px 12px 0; display: flex; align-items: center; gap: 10px">
+    <a href="Live.dc.html" aria-label="Leave show" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.5); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+    <a href="Profile-Public.dc.html" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px">
+      <span style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 18px; background: #1d4a66; display: flex; align-items: center; justify-content: center"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+      <span style="display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <span style="font-size: 19px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">[Stage name]</span>
+        <span style="display: flex; align-items: center; gap: 8px"><span style="padding: 2px 8px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="display: flex; align-items: center; gap: 5px; font-size: 14px"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>[n] watching</span></span>
+      </span>
+    </a>
+    <button style="flex-shrink: 0; height: 44px; padding: 0 18px; border-radius: 22px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700">Follow</button>
+  </div>
+  <div role="img" aria-label="YouTube player area" style="position: absolute; left: 12px; top: 104px; width: 270px; height: 480px; outline: 1px solid rgba(253, 255, 252, 0.28); background: radial-gradient(90% 60% at 70% 20%, rgba(46, 196, 182, 0.22), rgba(46, 196, 182, 0) 70%), radial-gradient(80% 50% at 20% 85%, rgba(231, 29, 54, 0.2), rgba(231, 29, 54, 0) 70%), #0a1f2e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: rgba(253, 255, 252, 0.7)">
+    <svg class="i" width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>
+    <div style="font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; padding: 0 12px">[YouTube player]</div>
+    <div style="font-size: 13px">270 x 480, 9:16</div>
+  </div>
+  <div style="position: absolute; left: 288px; top: 104px; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 10px">
+    <a href="SupportSheet.dc.html" aria-label="Support" style="width: 56px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; line-height: 1"><span style="width: 44px; height: 44px; border-radius: 22px; background: #ff9f1c; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg></span><span>Support</span></a><button aria-label="Share" style="width: 56px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; line-height: 1"><span style="width: 44px; height: 44px; border-radius: 22px; background: rgba(1, 22, 39, 0.55); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="M7 8l5-5 5 5"></path><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"></path></svg></span><span>Share</span></button><a href="YT-Focus.dc.html" aria-label="Bigger" style="width: 56px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; line-height: 1"><span style="width: 44px; height: 44px; border-radius: 22px; background: rgba(1, 22, 39, 0.55); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg></span><span>Bigger</span></a><button aria-label="Report" style="width: 56px; padding: 0; border: none; background: none; color: #fdfffc; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; line-height: 1"><span style="width: 44px; height: 44px; border-radius: 22px; background: rgba(1, 22, 39, 0.55); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4"></path><path d="M5 4h12l-2.5 4L17 12H5"></path></svg></span><span>Report</span></button>
+  </div>
+  <section aria-label="Artist prompt" style="position: absolute; left: 0; right: 0; top: 596px; bottom: 0; box-sizing: border-box; padding: 12px 16px 24px; border-radius: 24px 24px 0 0; background: rgba(1, 22, 39, 0.94); border-top: 1px solid rgba(253, 255, 252, 0.14); display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; align-items: center; justify-content: space-between; height: 24px">
+      <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: #2ec4b6">THE ARTIST ASKS</span>
+      <span style="display: flex; align-items: center; gap: 12px"><span style="font-size: 14px; font-weight: 700; color: #ff9f1c">Closes in 0:42</span><a href="YT-Show.dc.html" aria-label="Close" style="width: 44px; height: 44px; margin: -10px -12px -10px 0; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a></span>
+    </div>
+    <div style="font-size: 22px; font-weight: 700; line-height: 1.15">[Prompt from the artist]</div>
+    <button aria-pressed="true" style="height: 48px; box-sizing: border-box; padding: 0 16px; border-radius: 24px; border: 2px solid #2ec4b6; background: rgba(46, 196, 182, 0.2); color: #fdfffc; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: space-between">[Option A]<span style="color: #2ec4b6; display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></span></button>
+    <button aria-pressed="false" style="height: 48px; box-sizing: border-box; padding: 0 16px; border-radius: 24px; border: 2px solid transparent; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 18px; font-weight: 700; text-align: left">[Option B]</button>
+    <div style="font-size: 14px; color: #c9cfd1">One vote each. You can change it until voting closes.</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

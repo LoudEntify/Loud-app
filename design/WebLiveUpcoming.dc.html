@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Website: what's on</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1200px; position: relative; overflow: hidden; background: #fdfffc; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <header style="height: 84px; box-sizing: border-box; padding: 0 56px; display: flex; align-items: center; gap: 36px">
+    <img src="/_blob/9658016a1be49e5f96b7f76311298e3e" alt="Loudentify" style="height: 30px; width: auto; display: block">
+    <nav aria-label="Main" style="flex: 1; display: flex; gap: 28px; font-size: 17px">
+      <a href="#" aria-current="page" style="font-weight: 700; text-decoration: underline">Live and upcoming</a><a href="WebForArtists.dc.html">For artists</a><a href="WebForFans.dc.html">For fans</a><a href="WebPricing.dc.html">Pricing</a><a href="WebGetApp.dc.html">Get the app</a>
+    </nav>
+    <a href="Login.dc.html" style="height: 46px; padding: 0 20px; border-radius: 23px; font-size: 17px; font-weight: 700; display: flex; align-items: center">Log in</a>
+    <a href="#" style="height: 46px; padding: 0 22px; border-radius: 23px; background: linear-gradient(135deg, #011627 0%, #123f57 55%, #011627 100%); color: #fdfffc; font-size: 17px; font-weight: 700; display: flex; align-items: center">Sign up free</a>
+  </header>
+
+  <div style="box-sizing: border-box; padding: 40px 56px; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 32px">
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <h1 style="margin: 0; font-size: 48px; line-height: 1.05">What's on</h1>
+        <p style="margin: 0; font-size: 19px; color: rgba(1, 22, 39, 0.78)">Every public show on Loudentify. Times shown in your own time zone.</p>
+      </div>
+      <div style="display: flex; gap: 10px">
+        <button aria-pressed="true" style="height: 44px; padding: 0 18px; border-radius: 22px; border: 2px solid #011627; background: #ffffff; color: #011627; font-size: 16px; font-weight: 700">All genres</button>
+        <button aria-pressed="false" style="height: 44px; padding: 0 18px; border-radius: 22px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">Solo</button>
+        <button aria-pressed="false" style="height: 44px; padding: 0 18px; border-radius: 22px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">Versus</button>
+      </div>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 30px; display: flex; align-items: center; gap: 12px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #e71d36"></span>Live now</h2>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px">
+        <a href="WebShowPage.dc.html" style="display: flex; flex-direction: column; gap: 10px"><span style="position: relative; height: 230px; border-radius: 18px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: block"><span style="position: absolute; top: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="position: absolute; bottom: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(1, 22, 39, 0.7); color: #fdfffc; font-size: 13px">[n] watching</span></span><span style="font-size: 19px; font-weight: 700">[Stage name]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Show title] · Afrobeats</span></a>
+        <a href="WebShowPage.dc.html" style="display: flex; flex-direction: column; gap: 10px"><span style="position: relative; height: 230px; border-radius: 18px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: block"><span style="position: absolute; top: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="position: absolute; top: 12px; right: 12px; padding: 4px 10px; border-radius: 999px; background: #ff9f1c; color: #011627; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">VERSUS</span></span><span style="font-size: 19px; font-weight: 700">[Artist A] vs [Artist B]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Show title] · Gospel</span></a>
+        <a href="WebShowPage.dc.html" style="display: flex; flex-direction: column; gap: 10px"><span style="position: relative; height: 230px; border-radius: 18px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: block"><span style="position: absolute; top: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span></span><span style="font-size: 19px; font-weight: 700">[Stage name]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Show title] · R&amp;B</span></a>
+        <a href="WebShowPage.dc.html" style="display: flex; flex-direction: column; gap: 10px"><span style="position: relative; height: 230px; border-radius: 18px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: block"><span style="position: absolute; top: 12px; left: 12px; padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 12px; font-weight: 700; letter-spacing: 0.1em">LIVE</span></span><span style="font-size: 19px; font-weight: 700">[Stage name]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Show title] · Soul</span></a>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 30px">Today</h2>
+      <div style="border-radius: 22px; overflow: hidden; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 0 24px"><span style="width: 92px; flex-shrink: 0; font-size: 20px; font-weight: 700">[Time]</span><span style="width: 76px; height: 56px; flex-shrink: 0; border-radius: 10px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 700">[Show title]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Stage name] · Afrobeats · [length]</span></span><a href="WebShowPage.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>Remind me</a></div>
+        <div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 0 24px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 92px; flex-shrink: 0; font-size: 20px; font-weight: 700">[Time]</span><span style="width: 76px; height: 56px; flex-shrink: 0; border-radius: 10px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 700">[Show title]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Stage name] · Gospel · [length]</span></span><a href="WebShowPage.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>Remind me</a></div>
+        <div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 0 24px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 92px; flex-shrink: 0; font-size: 20px; font-weight: 700">[Time]</span><span style="width: 76px; height: 56px; flex-shrink: 0; border-radius: 10px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 700">[Show title]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Artist A] vs [Artist B] · Versus · [length]</span></span><a href="WebShowPage.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>Remind me</a></div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 16px">
+      <h2 style="margin: 0; font-size: 30px">Tomorrow</h2>
+      <div style="border-radius: 22px; overflow: hidden; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 0 24px"><span style="width: 92px; flex-shrink: 0; font-size: 20px; font-weight: 700">[Time]</span><span style="width: 76px; height: 56px; flex-shrink: 0; border-radius: 10px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 700">[Show title]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Stage name] · Jazz · [length]</span></span><a href="WebShowPage.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>Remind me</a></div>
+        <div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 0 24px; border-top: 1px solid rgba(1, 22, 39, 0.08)"><span style="width: 92px; flex-shrink: 0; font-size: 20px; font-weight: 700">[Time]</span><span style="width: 76px; height: 56px; flex-shrink: 0; border-radius: 10px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 19px; font-weight: 700">[Show title]</span><span style="font-size: 16px; color: rgba(1, 22, 39, 0.72)">[Stage name] · Indie · [length]</span></span><a href="WebShowPage.dc.html" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(1, 22, 39, 0.07); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>Remind me</a></div>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

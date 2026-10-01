@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Live show on the web</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <header style="height: 72px; box-sizing: border-box; padding: 0 28px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid rgba(253, 255, 252, 0.12)">
+    <a href="WebDiscover.dc.html" aria-label="Leave show" style="width: 44px; height: 44px; border-radius: 22px; background: rgba(253, 255, 252, 0.12); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+    <img src="/_blob/2946b7f26279d9d1bdfdabc030756454" alt="Loudentify" style="height: 24px; width: auto; display: block">
+    <span style="flex: 1"></span>
+    <a href="#" style="height: 44px; padding: 0 18px; border-radius: 22px; background: rgba(253, 255, 252, 0.12); font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg>[n] tokens</a>
+    <span style="width: 44px; height: 44px; border-radius: 22px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+  </header>
+
+  <div style="box-sizing: border-box; padding: 24px 28px; display: flex; gap: 24px; align-items: flex-start">
+    <main style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+      <div style="position: relative; height: 540px; border-radius: 20px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: flex; align-items: center; justify-content: center">
+        <span style="font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.7)">[Directed live feed]</span>
+        <span style="position: absolute; top: 16px; left: 16px; display: flex; align-items: center; gap: 10px"><span style="padding: 5px 12px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: rgba(1, 22, 39, 0.65); font-size: 15px"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>[n] watching</span></span>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 16px">
+        <span style="width: 56px; height: 56px; flex-shrink: 0; border-radius: 28px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: flex; align-items: center; justify-content: center"><svg class="i" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; font-weight: 700">[Stage name]</span><span style="font-size: 17px; color: rgba(253, 255, 252, 0.85)">[Show title] · Afrobeats</span></span>
+        <button style="height: 48px; padding: 0 22px; border-radius: 24px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700">Follow</button>
+        <button style="height: 48px; padding: 0 20px; border-radius: 24px; border: none; background: #ff9f1c; color: #011627; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5"></path></svg>Support</button>
+        <button aria-label="Share show" style="width: 48px; height: 48px; border-radius: 24px; border: none; background: rgba(253, 255, 252, 0.14); color: #fdfffc; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="M7 8l5-5 5 5"></path><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"></path></svg></button>
+      </div>
+    </main>
+
+    <aside style="width: 380px; flex-shrink: 0; height: 724px; box-sizing: border-box; padding: 16px; border-radius: 20px; background: rgba(253, 255, 252, 0.1); display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; gap: 6px">
+        <button aria-pressed="true" style="height: 36px; padding: 0 18px; border-radius: 18px; border: 2px solid #fdfffc; background: transparent; color: #fdfffc; font-size: 16px; font-weight: 700">Chat</button>
+        <button aria-pressed="false" style="height: 36px; padding: 0 18px; border-radius: 18px; border: none; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 16px; display: flex; align-items: center; gap: 6px"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"></path><path d="M9 9.5h.01M15 9.5h.01"></path></svg>Emoji</button>
+      </div>
+
+      <div style="padding: 14px; border-radius: 16px; background: rgba(1, 22, 39, 0.55); display: flex; flex-direction: column; gap: 10px">
+        <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; color: #2ec4b6">THE ARTIST ASKS</span>
+        <span style="font-size: 18px; font-weight: 700; line-height: 1.25">[Prompt from the artist]</span>
+        <button style="height: 42px; border-radius: 21px; border: none; background: rgba(253, 255, 252, 0.16); color: #fdfffc; font-size: 16px; font-weight: 700">[Option A]</button>
+        <button style="height: 42px; border-radius: 21px; border: none; background: rgba(253, 255, 252, 0.16); color: #fdfffc; font-size: 16px; font-weight: 700">[Option B]</button>
+      </div>
+
+      <div role="log" aria-label="Comments" style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; font-size: 16px; line-height: 1.3">
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+        <div><span style="font-weight: 700; color: #ff9f1c">[viewer]</span> [comment]</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px">
+        <input aria-label="Write a comment" placeholder="Say something to the artist" style="flex: 1; min-width: 0; height: 48px; box-sizing: border-box; padding: 0 18px; border: none; border-radius: 24px; background: rgba(253, 255, 252, 0.16); color: #fdfffc; font-size: 17px">
+        <button aria-label="Send" style="width: 48px; height: 48px; flex-shrink: 0; border-radius: 24px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2.5-6.5z"></path></svg></button>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

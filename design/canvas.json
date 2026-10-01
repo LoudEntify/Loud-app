@@ -1,0 +1,1118 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AccountSettings.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Account settings",
+      "w": 390,
+      "x": 3290,
+      "y": 4318
+    },
+    "Allowance.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Allowance and packs",
+      "w": 390,
+      "x": 3760,
+      "y": 4318
+    },
+    "ArtistAgreement.dc.html": {
+      "h": 980,
+      "is_interactive": true,
+      "title": "Artist agreement",
+      "w": 390,
+      "x": 2350,
+      "y": 18700
+    },
+    "ArtistOnboarding.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Artist onboarding",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "AudioSettings.dc.html": {
+      "h": 1010,
+      "is_interactive": true,
+      "title": "Audio settings",
+      "w": 390,
+      "x": 940,
+      "y": 4318
+    },
+    "BecomeArtist.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Become an artist",
+      "w": 390,
+      "x": 1880,
+      "y": 18700
+    },
+    "BlockedWords.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Blocking and filters",
+      "w": 390,
+      "x": 2820,
+      "y": 18700
+    },
+    "CameraMode.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Camera phone (on air)",
+      "w": 390,
+      "x": 0,
+      "y": 8416
+    },
+    "CameraSettings.dc.html": {
+      "h": 1320,
+      "is_interactive": true,
+      "title": "Camera settings",
+      "w": 390,
+      "x": 1410,
+      "y": 4318
+    },
+    "ClipEditor.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Clip editor",
+      "w": 390,
+      "x": 470,
+      "y": 8416
+    },
+    "CompetitionDetail.dc.html": {
+      "h": 1000,
+      "is_interactive": true,
+      "title": "Competition detail",
+      "w": 390,
+      "x": 3760,
+      "y": 18700
+    },
+    "Competitions.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Competitions (coming soon)",
+      "w": 390,
+      "x": 1410,
+      "y": 8416
+    },
+    "Console.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Live console (artist)",
+      "w": 390,
+      "x": 1880,
+      "y": 2528
+    },
+    "Countdown.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "60-second countdown",
+      "w": 390,
+      "x": 1410,
+      "y": 2528
+    },
+    "Create.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Create sheet",
+      "w": 390,
+      "x": 0,
+      "y": 2528
+    },
+    "DesignSystem.dc.html": {
+      "h": 1400,
+      "is_interactive": true,
+      "title": "Design system",
+      "w": 1440,
+      "x": 3080,
+      "y": 20000
+    },
+    "DevicesSettings.dc.html": {
+      "h": 760,
+      "is_interactive": true,
+      "title": "Devices",
+      "w": 390,
+      "x": 0,
+      "y": 9680
+    },
+    "DirectionSettings.dc.html": {
+      "h": 1250,
+      "is_interactive": true,
+      "title": "Direction settings",
+      "w": 390,
+      "x": 2350,
+      "y": 4318
+    },
+    "Discover-Preview.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Discover, 50 seconds in",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "DiscoverEmpty.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Discover: nothing live",
+      "w": 390,
+      "x": 1360,
+      "y": 17600
+    },
+    "EndCard.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "End card",
+      "w": 390,
+      "x": 1410,
+      "y": 5888
+    },
+    "FixSheet.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Fix sheet",
+      "w": 390,
+      "x": 2350,
+      "y": 2528
+    },
+    "FoldDiscover.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Fold open: Discover",
+      "w": 768,
+      "x": 1360,
+      "y": 16000
+    },
+    "FoldShow.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Fold open: show",
+      "w": 768,
+      "x": 2248,
+      "y": 16000
+    },
+    "ForgotPassword.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Forgot password",
+      "w": 390,
+      "x": 1410,
+      "y": 18700
+    },
+    "Inbox.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Inbox",
+      "w": 390,
+      "x": 0,
+      "y": 7152
+    },
+    "Insights.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Insights",
+      "w": 390,
+      "x": 940,
+      "y": 8416
+    },
+    "KitCheck.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Kit check",
+      "w": 390,
+      "x": 940,
+      "y": 2528
+    },
+    "Launch.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Launch screen",
+      "w": 390,
+      "x": -470,
+      "y": 0
+    },
+    "Live.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Live tab",
+      "w": 390,
+      "x": 0,
+      "y": 1264
+    },
+    "LiveLoading.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Live: loading",
+      "w": 390,
+      "x": 2890,
+      "y": 17600
+    },
+    "Login.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Log in",
+      "w": 390,
+      "x": 2350,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Discover (guest)",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "Menu.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Menu",
+      "w": 390,
+      "x": 0,
+      "y": 4318
+    },
+    "NotificationPrompt.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Notification prompt",
+      "w": 390,
+      "x": 3290,
+      "y": 18700
+    },
+    "NotificationSettings.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Notifications",
+      "w": 390,
+      "x": 470,
+      "y": 9680
+    },
+    "OperatorInvite.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web: operator invite",
+      "w": 1440,
+      "x": 1540,
+      "y": 20000
+    },
+    "PostShow.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "After the show",
+      "w": 390,
+      "x": 2820,
+      "y": 2528
+    },
+    "PrivacySettings.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Privacy and safety",
+      "w": 390,
+      "x": 940,
+      "y": 9680
+    },
+    "Profile-Owner.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Artist profile, owner",
+      "w": 390,
+      "x": 1410,
+      "y": 1264
+    },
+    "Profile-Public.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Artist profile, public",
+      "w": 390,
+      "x": 940,
+      "y": 1264
+    },
+    "ProfileEmpty.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Profile: no shows yet",
+      "w": 390,
+      "x": 1870,
+      "y": 17600
+    },
+    "Recording.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Recording playback",
+      "w": 390,
+      "x": 1880,
+      "y": 5888
+    },
+    "RegionSettings.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Region",
+      "w": 390,
+      "x": 1410,
+      "y": 9680
+    },
+    "ResponsiveRules.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Layout rules",
+      "w": 1240,
+      "x": 0,
+      "y": 16000
+    },
+    "Schedule.dc.html": {
+      "h": 1370,
+      "is_interactive": true,
+      "title": "Schedule a show",
+      "w": 390,
+      "x": 470,
+      "y": 2528
+    },
+    "Search.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Search",
+      "w": 390,
+      "x": 1880,
+      "y": 4318
+    },
+    "SearchNoResults.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Search: no results",
+      "w": 390,
+      "x": 470,
+      "y": 18700
+    },
+    "SearchResults.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Search results",
+      "w": 390,
+      "x": 0,
+      "y": 18700
+    },
+    "Settings.dc.html": {
+      "h": 1150,
+      "is_interactive": true,
+      "title": "Settings home",
+      "w": 390,
+      "x": 470,
+      "y": 4318
+    },
+    "Show.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Show screen (solo)",
+      "w": 390,
+      "x": 470,
+      "y": 1264
+    },
+    "ShowOffline.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Show: reconnecting",
+      "w": 390,
+      "x": 2380,
+      "y": 17600
+    },
+    "SignUp.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Sign-up page over the show",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "StatesPatterns.dc.html": {
+      "h": 980,
+      "is_interactive": true,
+      "title": "Five states",
+      "w": 1240,
+      "x": 0,
+      "y": 17600
+    },
+    "StudioLibrary.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Studio library",
+      "w": 390,
+      "x": 2820,
+      "y": 4318
+    },
+    "SupportSheet.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Support sheet",
+      "w": 390,
+      "x": 940,
+      "y": 5888
+    },
+    "TabletConsole.dc.html": {
+      "h": 768,
+      "is_interactive": true,
+      "title": "Tablet: live console",
+      "w": 1024,
+      "x": 4280,
+      "y": 16000
+    },
+    "TabletSettings.dc.html": {
+      "h": 768,
+      "is_interactive": true,
+      "title": "Tablet: settings",
+      "w": 1024,
+      "x": 3136,
+      "y": 16000
+    },
+    "Thread.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Message thread",
+      "w": 390,
+      "x": 470,
+      "y": 7152
+    },
+    "UnderAge.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Under 18 stop",
+      "w": 390,
+      "x": 940,
+      "y": 18700
+    },
+    "Versus.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus show",
+      "w": 390,
+      "x": 470,
+      "y": 5888
+    },
+    "VersusInvite.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus invite",
+      "w": 390,
+      "x": 3290,
+      "y": 2528
+    },
+    "ViewerOnboarding.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Viewer onboarding",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "ViewerProfile.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Viewer profile",
+      "w": 390,
+      "x": 1410,
+      "y": 7152
+    },
+    "WaitingRoom.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Waiting room",
+      "w": 390,
+      "x": 0,
+      "y": 5888
+    },
+    "Wallet.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Wallet (fan)",
+      "w": 390,
+      "x": 940,
+      "y": 7152
+    },
+    "WalletPayouts.dc.html": {
+      "h": 780,
+      "is_interactive": true,
+      "title": "Wallet and payouts (artist)",
+      "w": 390,
+      "x": 1880,
+      "y": 9680
+    },
+    "WebAbout.dc.html": {
+      "h": 1200,
+      "is_interactive": true,
+      "title": "Website: about",
+      "w": 1440,
+      "x": 7700,
+      "y": 13500
+    },
+    "WebBuyTokens.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web: get tokens",
+      "w": 1440,
+      "x": 3080,
+      "y": 11100
+    },
+    "WebContact.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Website: contact",
+      "w": 1440,
+      "x": 12320,
+      "y": 13500
+    },
+    "WebDiscover.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Discover",
+      "w": 1440,
+      "x": 0,
+      "y": 11100
+    },
+    "WebEarnings.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web: earnings",
+      "w": 1440,
+      "x": 4620,
+      "y": 11100
+    },
+    "WebForArtists.dc.html": {
+      "h": 1500,
+      "is_interactive": true,
+      "title": "Website: for artists",
+      "w": 1440,
+      "x": 4620,
+      "y": 13500
+    },
+    "WebForFans.dc.html": {
+      "h": 1320,
+      "is_interactive": true,
+      "title": "Website: for fans",
+      "w": 1440,
+      "x": 6160,
+      "y": 13500
+    },
+    "WebGetApp.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Website: get the app",
+      "w": 1440,
+      "x": 9240,
+      "y": 13500
+    },
+    "WebHelp.dc.html": {
+      "h": 1100,
+      "is_interactive": true,
+      "title": "Website: help",
+      "w": 1440,
+      "x": 10780,
+      "y": 13500
+    },
+    "WebHome.dc.html": {
+      "h": 1800,
+      "is_interactive": true,
+      "title": "Website: home",
+      "w": 1440,
+      "x": 0,
+      "y": 13500
+    },
+    "WebIdentity.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web: identity check",
+      "w": 1440,
+      "x": 6160,
+      "y": 11100
+    },
+    "WebKitCheck.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Kit check",
+      "w": 1440,
+      "x": 10780,
+      "y": 11100
+    },
+    "WebLegal.dc.html": {
+      "h": 1100,
+      "is_interactive": true,
+      "title": "Website: legal",
+      "w": 1440,
+      "x": 13860,
+      "y": 13500
+    },
+    "WebLiveUpcoming.dc.html": {
+      "h": 1200,
+      "is_interactive": true,
+      "title": "Website: what's on",
+      "w": 1440,
+      "x": 0,
+      "y": 20000
+    },
+    "WebOperator.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web: operator console",
+      "w": 1440,
+      "x": 7700,
+      "y": 11100
+    },
+    "WebPricing.dc.html": {
+      "h": 1200,
+      "is_interactive": true,
+      "title": "Website: pricing",
+      "w": 1440,
+      "x": 3080,
+      "y": 13500
+    },
+    "WebShow.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: live show",
+      "w": 1440,
+      "x": 1540,
+      "y": 11100
+    },
+    "WebShowPage.dc.html": {
+      "h": 1100,
+      "is_interactive": true,
+      "title": "Website: show page",
+      "w": 1440,
+      "x": 1540,
+      "y": 13500
+    },
+    "WebVersus.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Versus",
+      "w": 1440,
+      "x": 9240,
+      "y": 11100
+    },
+    "YT-Waiting.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "YT viewer: waiting room",
+      "w": 390,
+      "x": 0,
+      "y": 21500
+    },
+    "YT-Show.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "YT viewer: show",
+      "w": 390,
+      "x": 470,
+      "y": 21500
+    },
+    "YT-Focus.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "YT viewer: picture at 2/3",
+      "w": 390,
+      "x": 940,
+      "y": 21500
+    },
+    "YT-Prompt.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "YT viewer: vote sheet",
+      "w": 390,
+      "x": 1410,
+      "y": 21500
+    },
+    "YT-Versus.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus, Artist A performing (YouTube viewer)",
+      "w": 390,
+      "x": 470,
+      "y": 22800
+    },
+    "YT-GuestSignUp.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "YT viewer: guest sign-up",
+      "w": 390,
+      "x": 2350,
+      "y": 21500
+    },
+    "YT-VersusTalk.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus, conversation (YouTube viewer)",
+      "w": 390,
+      "x": 0,
+      "y": 22800
+    },
+    "YT-VersusB.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus, Artist B performing (YouTube viewer)",
+      "w": 390,
+      "x": 940,
+      "y": 22800
+    },
+    "YT-ArtistTalk.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus console, conversation (artist)",
+      "w": 390,
+      "x": 1410,
+      "y": 22800
+    },
+    "YT-ArtistPerform.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus console, you are performing (artist)",
+      "w": 390,
+      "x": 2820,
+      "y": 22800
+    },
+    "YT-KitCheck.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Kit check, your camera in the broadcast frames",
+      "w": 390,
+      "x": 3290,
+      "y": 22800
+    },
+    "YT-FoldShow.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Fold open: show (YouTube viewer)",
+      "w": 768,
+      "x": 0,
+      "y": 24064
+    },
+    "YT-FoldVersus.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Fold open: Versus, conversation (YouTube viewer)",
+      "w": 768,
+      "x": 888,
+      "y": 24064
+    },
+    "WebYT-Show.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: show (YouTube viewer)",
+      "w": 1440,
+      "x": 0,
+      "y": 25328
+    },
+    "WebYT-VersusTalk.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Versus, conversation (YouTube viewer)",
+      "w": 1440,
+      "x": 1540,
+      "y": 25328
+    },
+    "WebYT-VersusA.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Versus, Artist A performing (YouTube viewer)",
+      "w": 1440,
+      "x": 3080,
+      "y": 25328
+    },
+    "WebYT-Artist.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Web app: Versus console (artist on a laptop)",
+      "w": 1440,
+      "x": 4620,
+      "y": 25328
+    },
+    "WebYT-ShowPage.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "Website: show page (YouTube viewer)",
+      "w": 1440,
+      "x": 6160,
+      "y": 25328
+    },
+    "YT-ArtistRequest.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus console, asking to perform (artist B)",
+      "w": 390,
+      "x": 1880,
+      "y": 22800
+    },
+    "YT-ArtistHandover.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "Versus console, stage request (artist A)",
+      "w": 390,
+      "x": 2350,
+      "y": 22800
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-29T20:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "row1": {
+      "kind": "title1",
+      "maxW": 3210,
+      "text": "First minute: open, watch, sign up, get set up",
+      "w": 240,
+      "x": -470,
+      "y": -300
+    },
+    "row10": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "The website",
+      "w": 240,
+      "x": 0,
+      "y": 13200
+    },
+    "row11": {
+      "kind": "title1",
+      "maxW": 5424,
+      "text": "Fold phones and tablets",
+      "w": 240,
+      "x": 0,
+      "y": 15700
+    },
+    "row12": {
+      "kind": "title1",
+      "maxW": 3400,
+      "text": "The other four states",
+      "w": 240,
+      "x": 0,
+      "y": 17300
+    },
+    "row13": {
+      "kind": "title1",
+      "maxW": 4230,
+      "text": "Screens that were missing",
+      "w": 240,
+      "x": 0,
+      "y": 18400
+    },
+    "row14": {
+      "kind": "title1",
+      "maxW": 4520,
+      "text": "Public schedule, operator invite, and the design system",
+      "w": 240,
+      "x": 0,
+      "y": 19700
+    },
+    "row2": {
+      "kind": "title1",
+      "maxW": 1800,
+      "text": "The three doors and the show",
+      "w": 240,
+      "x": 0,
+      "y": 964
+    },
+    "row3": {
+      "kind": "title1",
+      "maxW": 3680,
+      "text": "Artist show flow: schedule to after the show",
+      "w": 240,
+      "x": 0,
+      "y": 2228
+    },
+    "row4": {
+      "kind": "title1",
+      "maxW": 4150,
+      "text": "Menu, Settings and Search",
+      "w": 240,
+      "x": 0,
+      "y": 4018
+    },
+    "row5": {
+      "kind": "title1",
+      "maxW": 2270,
+      "text": "Watching: waiting room to the end card",
+      "w": 240,
+      "x": 0,
+      "y": 5588
+    },
+    "row6": {
+      "kind": "title1",
+      "maxW": 1800,
+      "text": "Inbox, wallet and your own profile",
+      "w": 240,
+      "x": 0,
+      "y": 6852
+    },
+    "row7": {
+      "kind": "title1",
+      "maxW": 1800,
+      "text": "Artist tools: camera phone, clips, insights, competitions",
+      "w": 240,
+      "x": 0,
+      "y": 8116
+    },
+    "row8": {
+      "kind": "title1",
+      "maxW": 2270,
+      "text": "More settings: devices, notifications, privacy, region, payouts",
+      "w": 240,
+      "x": 0,
+      "y": 9380
+    },
+    "row9": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "On a computer: the web app and account pages",
+      "w": 240,
+      "x": 0,
+      "y": 10800
+    },
+    "row15": {
+      "kind": "title1",
+      "maxW": 2740,
+      "text": "YouTube viewer flow: the video is never covered",
+      "w": 240,
+      "x": 0,
+      "y": 21200
+    },
+    "row16": {
+      "kind": "title1",
+      "maxW": 3680,
+      "text": "YouTube Versus: three views, artist controls, kit check",
+      "w": 240,
+      "x": 0,
+      "y": 22500
+    },
+    "row17": {
+      "kind": "title1",
+      "maxW": 1656,
+      "text": "YouTube viewer on a Fold or tablet",
+      "w": 240,
+      "x": 0,
+      "y": 23764
+    },
+    "row18": {
+      "kind": "title1",
+      "maxW": 7600,
+      "text": "YouTube on a computer: viewer, artist and the website",
+      "w": 240,
+      "x": 0,
+      "y": 25028
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Discover-Preview.dc.html",
+    "SignUp.dc.html",
+    "Live.dc.html",
+    "Show.dc.html",
+    "Profile-Public.dc.html",
+    "Profile-Owner.dc.html",
+    "Create.dc.html",
+    "Schedule.dc.html",
+    "KitCheck.dc.html",
+    "Countdown.dc.html",
+    "Console.dc.html",
+    "FixSheet.dc.html",
+    "PostShow.dc.html",
+    "Menu.dc.html",
+    "Settings.dc.html",
+    "AudioSettings.dc.html",
+    "CameraSettings.dc.html",
+    "Search.dc.html",
+    "Launch.dc.html",
+    "ViewerOnboarding.dc.html",
+    "ArtistOnboarding.dc.html",
+    "WaitingRoom.dc.html",
+    "Versus.dc.html",
+    "SupportSheet.dc.html",
+    "EndCard.dc.html",
+    "Recording.dc.html",
+    "Inbox.dc.html",
+    "Thread.dc.html",
+    "Wallet.dc.html",
+    "ViewerProfile.dc.html",
+    "DirectionSettings.dc.html",
+    "StudioLibrary.dc.html",
+    "AccountSettings.dc.html",
+    "Allowance.dc.html",
+    "CameraMode.dc.html",
+    "ClipEditor.dc.html",
+    "Insights.dc.html",
+    "Competitions.dc.html",
+    "Login.dc.html",
+    "VersusInvite.dc.html",
+    "DevicesSettings.dc.html",
+    "NotificationSettings.dc.html",
+    "PrivacySettings.dc.html",
+    "RegionSettings.dc.html",
+    "WalletPayouts.dc.html",
+    "WebDiscover.dc.html",
+    "WebShow.dc.html",
+    "WebBuyTokens.dc.html",
+    "WebEarnings.dc.html",
+    "WebIdentity.dc.html",
+    "WebOperator.dc.html",
+    "WebHome.dc.html",
+    "WebShowPage.dc.html",
+    "WebPricing.dc.html",
+    "WebForArtists.dc.html",
+    "WebAbout.dc.html",
+    "WebKitCheck.dc.html",
+    "WebForFans.dc.html",
+    "WebHelp.dc.html",
+    "WebVersus.dc.html",
+    "WebContact.dc.html",
+    "WebGetApp.dc.html",
+    "WebLegal.dc.html",
+    "FoldDiscover.dc.html",
+    "FoldShow.dc.html",
+    "ResponsiveRules.dc.html",
+    "TabletConsole.dc.html",
+    "TabletSettings.dc.html",
+    "StatesPatterns.dc.html",
+    "DiscoverEmpty.dc.html",
+    "ProfileEmpty.dc.html",
+    "ShowOffline.dc.html",
+    "LiveLoading.dc.html",
+    "SearchResults.dc.html",
+    "SearchNoResults.dc.html",
+    "UnderAge.dc.html",
+    "ForgotPassword.dc.html",
+    "BecomeArtist.dc.html",
+    "ArtistAgreement.dc.html",
+    "BlockedWords.dc.html",
+    "NotificationPrompt.dc.html",
+    "CompetitionDetail.dc.html",
+    "WebLiveUpcoming.dc.html",
+    "OperatorInvite.dc.html",
+    "DesignSystem.dc.html",
+    "YT-Waiting.dc.html",
+    "YT-Show.dc.html",
+    "YT-Focus.dc.html",
+    "YT-Prompt.dc.html",
+    "YT-Versus.dc.html",
+    "YT-GuestSignUp.dc.html",
+    "YT-VersusTalk.dc.html",
+    "YT-VersusB.dc.html",
+    "YT-ArtistTalk.dc.html",
+    "YT-ArtistPerform.dc.html",
+    "YT-KitCheck.dc.html",
+    "YT-FoldShow.dc.html",
+    "YT-FoldVersus.dc.html",
+    "WebYT-Show.dc.html",
+    "WebYT-VersusTalk.dc.html",
+    "WebYT-VersusA.dc.html",
+    "WebYT-Artist.dc.html",
+    "WebYT-ShowPage.dc.html",
+    "YT-ArtistRequest.dc.html",
+    "YT-ArtistHandover.dc.html"
+  ],
+  "pages": [],
+  "title": "Loudentify App UI"
+}

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Show: reconnecting</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.55)"></div>
+
+  <div role="status" style="position: absolute; left: 12px; right: 12px; top: 52px; padding: 12px 16px; border-radius: 999px; background: #011627; display: flex; align-items: center; gap: 10px">
+    <svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"></path><path d="M12 19.5h.01"></path></svg><span style="flex: 1; font-size: 16px; font-weight: 700">No connection. Trying to reconnect.</span>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; top: 300px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center">
+    <span style="width: 72px; height: 72px; border-radius: 36px; background: rgba(253, 255, 252, 0.14); display: flex; align-items: center; justify-content: center"><svg class="i" width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 5v5h-5"></path><path d="M20 10a8 8 0 1 0 1 5"></path></svg></span>
+    <h1 style="margin: 0; font-size: 28px; line-height: 1.15">Hold on, we're getting you back in</h1>
+    <p style="margin: 0; font-size: 17px; line-height: 1.45; color: rgba(253, 255, 252, 0.88)">[Stage name] is still playing. We will drop you back into the show the moment your connection returns.</p>
+    <div aria-hidden="true" style="display: flex; gap: 6px; padding-top: 4px">
+      <span style="width: 9px; height: 9px; border-radius: 5px; background: #2ec4b6"></span>
+      <span style="width: 9px; height: 9px; border-radius: 5px; background: rgba(253, 255, 252, 0.4)"></span>
+      <span style="width: 9px; height: 9px; border-radius: 5px; background: rgba(253, 255, 252, 0.4)"></span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 120px; padding: 14px 16px; border-radius: 18px; background: rgba(253, 255, 252, 0.1); display: flex; align-items: center; gap: 12px">
+    <span style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+    <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">[Stage name]</span><span style="font-size: 15px; color: rgba(253, 255, 252, 0.82)">[Show title] · still live</span></span>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 36px; display: flex; gap: 10px">
+    <button style="flex: 1; height: 52px; border-radius: 26px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 17px; font-weight: 700">Try again now</button>
+    <a href="Main.dc.html" style="flex: 1; height: 52px; border-radius: 26px; background: rgba(253, 255, 252, 0.14); font-size: 17px; font-weight: 700; display: flex; align-items: center; justify-content: center">Leave show</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

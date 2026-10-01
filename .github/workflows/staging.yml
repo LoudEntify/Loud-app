@@ -1,0 +1,91 @@
+name: staging
+
+# Runs on every push to `staging` (i.e. every PR merge, since ci.yml already
+# gated the merge on `npm run check` passing). Applies migrations to the
+# staging Supabase project through the Supabase CLI, deploys the app to the
+# staging Vercel environment, then runs the live smoke/probe checks against
+# the real deployed URL — the thing `npm run check` cannot verify because it
+# never talks to a running server.
+#
+# Secrets used here exist ONLY in this repo's "staging" GitHub environment.
+# See docs/NEEDS_KOREY.md for what each one is and how to create it — none
+# of them exist yet, so this workflow cannot run end-to-end until Korey adds
+# them.
+
+on:
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false # never cancel a migration mid-flight
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Apply migrations to staging
+        working-directory: supabase
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_STAGING_PROJECT_REF }}" \
+            --password "${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}"
+          supabase db push
+
+      - name: Verify migrations landed
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        working-directory: supabase
+        run: supabase migration list --linked
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy to the staging Vercel environment
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel build --token="$VERCEL_TOKEN"
+          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Point the staging alias at this deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel alias set "${{ steps.deploy.outputs.url }}" "${{ secrets.STAGING_ALIAS_DOMAIN }}" --token="$VERCEL_TOKEN"
+
+      - name: Smoke test the deployed staging app
+        env:
+          SMOKE_URL: https://${{ secrets.STAGING_ALIAS_DOMAIN }}
+          SMOKE_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
+        run: |
+          npx playwright install --with-deps chromium
+          npm run smoke
+          npm run probe:auth
+          npm run probe:authz

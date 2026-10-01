@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Web: operator invite</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <header style="height: 76px; box-sizing: border-box; padding: 0 40px; display: flex; align-items: center; border-bottom: 1px solid rgba(253, 255, 252, 0.12)">
+    <img src="/_blob/2946b7f26279d9d1bdfdabc030756454" alt="Loudentify" style="height: 26px; width: auto; display: block">
+  </header>
+
+  <div style="box-sizing: border-box; padding: 48px 40px; display: flex; gap: 40px; align-items: flex-start; justify-content: center">
+    <main style="width: 700px; display: flex; flex-direction: column; gap: 24px">
+      <div style="display: flex; align-items: center; gap: 18px">
+        <span style="width: 72px; height: 72px; flex-shrink: 0; border-radius: 36px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40; display: flex; align-items: center; justify-content: center"><svg class="i" width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg></span>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h1 style="margin: 0; font-size: 38px; line-height: 1.1">[Stage name] wants you to run their show</h1>
+          <span style="font-size: 18px; color: rgba(253, 255, 252, 0.85)">[Show title] · [Day, date], [start time]</span>
+        </div>
+      </div>
+
+      <section style="padding: 24px; border-radius: 22px; background: rgba(253, 255, 252, 0.1); display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font-size: 22px">What you will be able to do</h2>
+        <div style="display: flex; align-items: center; gap: 14px; font-size: 17px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg><span style="flex: 1">Cut between their cameras while they play</span><span style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></div>
+        <div style="display: flex; align-items: center; gap: 14px; font-size: 17px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg><span style="flex: 1">Push prompts and votes to viewers</span><span style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></div>
+        <div style="display: flex; align-items: center; gap: 14px; font-size: 17px; color: rgba(253, 255, 252, 0.7)"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg><span style="flex: 1">End the show</span><span style="font-size: 15px">Not granted</span></div>
+        <div style="display: flex; align-items: center; gap: 14px; font-size: 17px; color: rgba(253, 255, 252, 0.7)"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4z"></path><path d="M4 7V6a2 2 0 0 1 2-2h10"></path><circle cx="16" cy="13.5" r="1"></circle></svg><span style="flex: 1">Anything to do with their money or account</span><span style="font-size: 15px">Never</span></div>
+      </section>
+
+      <section style="padding: 20px 24px; border-radius: 22px; background: rgba(255, 159, 28, 0.2); display: flex; gap: 14px">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18h.01"></path></svg>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 18px; font-weight: 700">You will need a laptop and a steady connection</span>
+          <span style="font-size: 16px; line-height: 1.4">Open this page again 15 minutes before the show. The console only works on a computer.</span>
+        </div>
+      </section>
+
+      <div style="display: flex; align-items: center; gap: 16px">
+        <a href="WebOperator.dc.html" style="height: 56px; padding: 0 32px; border-radius: 28px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 19px; font-weight: 700; display: flex; align-items: center">Accept and set up</a>
+        <a href="#" style="height: 56px; padding: 0 26px; border-radius: 28px; background: rgba(253, 255, 252, 0.14); font-size: 18px; font-weight: 700; display: flex; align-items: center">Decline</a>
+      </div>
+      <span style="font-size: 16px; color: rgba(253, 255, 252, 0.8)">[Stage name] can withdraw this at any time, and it ends when the show does.</span>
+    </main>
+
+    <aside style="width: 340px; flex-shrink: 0; padding: 24px; border-radius: 22px; background: rgba(253, 255, 252, 0.1); display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-size: 20px">New to this?</h2>
+      <p style="margin: 0; font-size: 16px; line-height: 1.45; color: rgba(253, 255, 252, 0.88)">The console shows every camera at once. Click one to cut to it. Leave it alone and the auto director keeps working on its own.</p>
+      <a href="WebHelp.dc.html" style="height: 48px; border-radius: 24px; background: rgba(253, 255, 252, 0.14); font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: center">Read the operator guide</a>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kit check</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 16px; right: 16px; top: 52px; display: flex; align-items: center; gap: 12px">
+    <a href="Profile-Owner.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(253, 255, 252, 0.12); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+      <h1 style="margin: 0; font-size: 24px; line-height: 1.1">Kit check</h1>
+      <span style="font-size: 15px; color: rgba(253, 255, 252, 0.78)">Rehearsal. Nothing is streaming.</span>
+    </div>
+    <button style="height: 36px; padding: 0 12px; border-radius: 18px; border: none; background: rgba(253, 255, 252, 0.12); color: #fdfffc; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 4px"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg>[Saved place]</button>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 108px; height: 220px; border-radius: 20px; overflow: hidden; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40">
+    <div style="position: absolute; left: 33.3%; top: 0; bottom: 0; width: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+    <div style="position: absolute; left: 66.6%; top: 0; bottom: 0; width: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+    <div style="position: absolute; top: 33.3%; left: 0; right: 0; height: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+    <div style="position: absolute; top: 66.6%; left: 0; right: 0; height: 1px; background: rgba(253, 255, 252, 0.22)"></div>
+    <span style="position: absolute; top: 12px; left: 12px; font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.75)">[Main camera view]</span>
+    <span style="position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 12px 6px 6px; border-radius: 999px; background: rgba(1, 22, 39, 0.72); font-size: 15px; font-weight: 700; white-space: nowrap"><span style="width: 24px; height: 24px; border-radius: 12px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>Framing looks good</span>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 340px; display: flex; gap: 8px">
+    <button aria-pressed="true" style="height: 36px; padding: 0 16px; border-radius: 18px; border: 2px solid #fdfffc; background: transparent; color: #fdfffc; font-size: 16px; font-weight: 700">Main</button>
+    <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(253, 255, 252, 0.12); color: #fdfffc; font-size: 16px">Side</button>
+    <button style="height: 36px; padding: 0 14px; border-radius: 18px; border: none; background: rgba(253, 255, 252, 0.12); color: #fdfffc; font-size: 16px; display: flex; align-items: center; gap: 4px"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add camera</button>
+  </div>
+
+  <ul aria-label="Checks" style="position: absolute; left: 16px; right: 16px; top: 388px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column">
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Mic signal</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Real signal from your voice</span></span>
+      <span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 3px; height: 20px"><span style="width: 4px; height: 6px; border-radius: 2px; background: #2ec4b6"></span><span style="width: 4px; height: 11px; border-radius: 2px; background: #2ec4b6"></span><span style="width: 4px; height: 16px; border-radius: 2px; background: #2ec4b6"></span><span style="width: 4px; height: 20px; border-radius: 2px; background: #2ec4b6"></span><span style="width: 4px; height: 13px; border-radius: 2px; background: rgba(253, 255, 252, 0.3)"></span></span>
+      <span role="img" aria-label="Ready" style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Main camera</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Held frames for 2 minutes</span></span>
+      <span role="img" aria-label="Ready" style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Side camera</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Checking, [n] of 2 minutes</span></span>
+      <span role="img" aria-label="Checking" style="width: 26px; height: 26px; border-radius: 13px; background: #ff9f1c; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></span>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"></path><path d="M12 19.5h.01"></path></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Connection</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Strong enough to stream</span></span>
+      <span role="img" aria-label="Ready" style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="16" height="10" rx="2"></rect><path d="M21 11v2M6 10v4M9 10v4"></path></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Charging</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Every device plugged in</span></span>
+      <span role="img" aria-label="Ready" style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px; border-bottom: 1px solid rgba(253, 255, 252, 0.1)">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"></path></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Do Not Disturb</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Calls could interrupt your show</span></span>
+      <button style="height: 32px; padding: 0 12px; border-radius: 16px; border: none; background: #e71d36; color: #ffffff; font-size: 15px; font-weight: 700">Turn on</button>
+    </li>
+    <li style="display: flex; align-items: center; gap: 12px; height: 46px">
+      <span style="color: rgba(253, 255, 252, 0.8); display: flex"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17v-4a8 8 0 0 1 16 0v4"></path><rect x="3" y="15" width="4" height="6" rx="1.5"></rect><rect x="17" y="15" width="4" height="6" rx="1.5"></rect></svg></span>
+      <span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Headphones</span><span style="font-size: 14px; color: rgba(253, 255, 252, 0.75)">Wired, no delay</span></span>
+      <span role="img" aria-label="Ready" style="width: 26px; height: 26px; border-radius: 13px; background: #2ec4b6; color: #011627; display: flex; align-items: center; justify-content: center"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 3"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+    </li>
+  </ul>
+
+  <a href="Countdown.dc.html" style="position: absolute; left: 16px; right: 16px; bottom: 36px; padding: 14px 16px; border-radius: 18px; background: rgba(253, 255, 252, 0.1); display: flex; align-items: center; gap: 12px">
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+      <span style="font-size: 18px; font-weight: 700">5 of 7 ready, 1 to fix</span>
+      <span style="font-size: 15px; color: rgba(253, 255, 252, 0.8)">Stay here and you go live on your own at [start time].</span>
+    </div>
+  </a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

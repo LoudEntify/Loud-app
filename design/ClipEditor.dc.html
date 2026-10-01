@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New clip</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#c9cfd1;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627; color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; left: 12px; right: 12px; top: 52px; display: flex; align-items: center; gap: 10px">
+    <a href="PostShow.dc.html" aria-label="Close" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(253, 255, 252, 0.12); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+    <h1 style="flex: 1; margin: 0; font-size: 22px">New clip</h1>
+    <button style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 6px"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="M7 8l5-5 5 5"></path><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"></path></svg>Share</button>
+  </div>
+
+  <div style="position: absolute; left: 50%; top: 112px; width: 216px; height: 384px; margin-left: -108px; border-radius: 18px; overflow: hidden; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40">
+    <div style="position: absolute; left: 12px; right: 12px; top: 40px; bottom: 64px; border: 1px dashed rgba(253, 255, 252, 0.45); border-radius: 10px"></div>
+    <span style="position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(253, 255, 252, 0.75)">[Clip preview 9:16]</span>
+    <span style="position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px"><img src="/_blob/2946b7f26279d9d1bdfdabc030756454" alt="Loudentify" style="height: 14px; width: auto; display: block"><span style="font-size: 13px; font-weight: 700">@[stage name]</span></span>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 516px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; justify-content: space-between; font-size: 15px"><span style="font-weight: 700">[0:45] selected</span><span style="color: rgba(253, 255, 252, 0.8)">90 seconds max</span></div>
+    <div aria-label="Trim" style="position: relative; height: 56px; border-radius: 10px; background: repeating-linear-gradient(90deg, rgba(253, 255, 252, 0.16) 0 40px, rgba(253, 255, 252, 0.08) 40px 42px)">
+      <div style="position: absolute; left: 22%; right: 30%; top: 0; bottom: 0; border: 3px solid #2ec4b6; border-radius: 10px; box-sizing: border-box"></div>
+      <button aria-label="Trim start" style="position: absolute; left: calc(22% - 10px); top: 8px; width: 20px; height: 40px; border-radius: 6px; border: none; background: #2ec4b6"></button>
+      <button aria-label="Trim end" style="position: absolute; right: calc(30% - 10px); top: 8px; width: 20px; height: 40px; border-radius: 6px; border: none; background: #2ec4b6"></button>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 620px; display: flex; flex-direction: column; gap: 12px">
+    <label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; font-weight: 700">Title<input placeholder="Say what this moment is" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 17px; font-weight: 400"></label>
+    <span style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: rgba(253, 255, 252, 0.85)"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>Your handle and the Loudentify mark are added to every clip.</span>
+    <button style="height: 48px; border-radius: 24px; border: none; background: rgba(253, 255, 252, 0.14); color: #fdfffc; font-size: 17px; font-weight: 700">Save to phone</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

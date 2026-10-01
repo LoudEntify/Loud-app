@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design system</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1400px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="box-sizing: border-box; padding: 44px 48px; display: flex; flex-direction: column; gap: 26px">
+    <div style="display: flex; align-items: center; gap: 18px">
+      <img src="/_blob/9658016a1be49e5f96b7f76311298e3e" alt="Loudentify" style="height: 30px; width: auto; display: block">
+      <h1 style="margin: 0; font-size: 36px">Design system</h1>
+      <span style="flex: 1"></span>
+      <span style="font-size: 16px; color: rgba(1, 22, 39, 0.75)">The rules behind every screen on this canvas</span>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 26px">Colour</h2>
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 84px; border-radius: 14px; background: #011627"></span><span style="font-size: 17px; font-weight: 700">Ink Black</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">#011627 · all text, dark screens</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 84px; border-radius: 14px; background: #fdfffc; border: 1px solid rgba(1, 22, 39, 0.15); box-sizing: border-box"></span><span style="font-size: 17px; font-weight: 700">Porcelain</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">#fdfffc · light screens</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 84px; border-radius: 14px; background: #2ec4b6"></span><span style="font-size: 17px; font-weight: 700">Teal</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">#2ec4b6 · main actions, ready</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 84px; border-radius: 14px; background: #e71d36"></span><span style="font-size: 17px; font-weight: 700">Red</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">#e71d36 · live, errors, stop</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 84px; border-radius: 14px; background: #ff9f1c"></span><span style="font-size: 17px; font-weight: 700">Orange</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">#ff9f1c · attention, Versus, tokens</span></div>
+      </div>
+      <div style="padding: 16px 20px; border-radius: 16px; background: rgba(255, 159, 28, 0.18); display: flex; gap: 12px">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18h.01"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45">Teal and orange are fills, never text on a light background: both fail contrast against Porcelain at roughly 2:1 where 4.5:1 is needed. Ink text on a teal or orange fill is fine, and so is teal text on Ink.</span>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 26px">Surfaces</h2>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 80px; border-radius: 14px; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; border: 1px solid rgba(1, 22, 39, 0.12); box-sizing: border-box"></span><span style="font-size: 16px; font-weight: 700">Light page</span><span style="font-size: 14px; line-height: 1.4; color: rgba(1, 22, 39, 0.75)">Porcelain with soft teal and orange washes</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 80px; border-radius: 14px; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></span><span style="font-size: 16px; font-weight: 700">Dark page</span><span style="font-size: 14px; line-height: 1.4; color: rgba(1, 22, 39, 0.75)">Video screens and anything live</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 80px; border-radius: 14px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(1, 22, 39, 0.1); box-sizing: border-box"></span><span style="font-size: 16px; font-weight: 700">Card</span><span style="font-size: 14px; line-height: 1.4; color: rgba(1, 22, 39, 0.75)">White at 72% over the page wash</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px"><span style="height: 80px; border-radius: 14px; background: radial-gradient(90% 60% at 80% 10%, rgba(46, 196, 182, 0.45), rgba(46, 196, 182, 0) 65%), radial-gradient(90% 60% at 10% 90%, rgba(231, 29, 54, 0.32), rgba(231, 29, 54, 0) 65%), #0a2a40"></span><span style="font-size: 16px; font-weight: 700">Media tile</span><span style="font-size: 14px; line-height: 1.4; color: rgba(1, 22, 39, 0.75)">Placeholder behind video and covers</span></div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 26px">Type</h2>
+      <div style="padding: 20px 24px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 10px">
+        <span style="font-size: 16px; color: rgba(1, 22, 39, 0.75)">PT Sans Narrow, with Arial Narrow as the fallback. Two weights only: 400 and 700.</span>
+        <span style="font-size: 34px; font-weight: 700; line-height: 1.05">Screen title · 30 to 36</span>
+        <span style="font-size: 22px; font-weight: 700">Section heading · 20 to 22</span>
+        <span style="font-size: 18px; font-weight: 700">Row title · 17 to 19</span>
+        <span style="font-size: 17px">Body · 16 to 17</span>
+        <span style="font-size: 15px; color: rgba(1, 22, 39, 0.75)">Supporting · 14 to 15, never below 14</span>
+        <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em">LABEL · 13, UPPERCASE, WIDE</span>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 26px">Parts</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px">
+        <div style="padding: 20px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 12px">
+          <span style="font-size: 18px; font-weight: 700">Buttons · 52 high, fully round</span>
+          <span style="height: 52px; border-radius: 26px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center">Main action</span>
+          <span style="height: 52px; border-radius: 26px; background: linear-gradient(135deg, #011627 0%, #123f57 55%, #011627 100%); color: #fdfffc; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center">Strong action</span>
+          <span style="height: 52px; border-radius: 26px; background: rgba(1, 22, 39, 0.07); font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center">Quiet action</span>
+          <span style="height: 52px; border-radius: 26px; background: #e71d36; color: #ffffff; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center">Destructive</span>
+        </div>
+        <div style="padding: 20px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 12px">
+          <span style="font-size: 18px; font-weight: 700">Chips, toggles, badges</span>
+          <span style="display: flex; gap: 8px"><span style="height: 36px; padding: 0 16px; border-radius: 18px; border: 2px solid #011627; box-sizing: border-box; font-size: 16px; font-weight: 700; display: flex; align-items: center">Chosen</span><span style="height: 36px; padding: 0 16px; border-radius: 18px; background: rgba(1, 22, 39, 0.07); font-size: 16px; display: flex; align-items: center">Not chosen</span></span>
+          <span style="display: flex; align-items: center; gap: 12px"><span style="width: 52px; height: 32px; box-sizing: border-box; padding: 3px; border-radius: 16px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); display: flex; justify-content: flex-end"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff"></span></span><span style="width: 52px; height: 32px; box-sizing: border-box; padding: 3px; border-radius: 16px; background: rgba(1, 22, 39, 0.18); display: flex; justify-content: flex-start"><span style="width: 26px; height: 26px; border-radius: 13px; background: #ffffff"></span></span></span>
+          <span style="display: flex; gap: 8px"><span style="padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">LIVE</span><span style="padding: 4px 10px; border-radius: 999px; background: #ff9f1c; color: #011627; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">VERSUS</span><span style="padding: 4px 10px; border-radius: 999px; background: rgba(1, 22, 39, 0.75); color: #fdfffc; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">SOON</span></span>
+        </div>
+        <div style="padding: 20px; border-radius: 18px; background: rgba(255, 255, 255, 0.72); display: flex; flex-direction: column; gap: 12px">
+          <span style="font-size: 18px; font-weight: 700">Shape and space</span>
+          <span style="font-size: 16px; line-height: 1.5">Corners: 12 on inputs, 14 to 18 on cards, 20 to 24 on panels and sheets, fully round on buttons and chips.</span>
+          <span style="font-size: 16px; line-height: 1.5">Spacing steps: 4, 8, 10, 12, 16, 20, 24. Screen edge is 16 on a phone, 28 to 56 on the web.</span>
+          <span style="font-size: 16px; line-height: 1.5">Nothing tappable under 44 by 44. Icons are stroked at 1.8, in 20, 22, 24 or 26.</span>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 26px">Rules that are easy to break by accident</h2>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>Dark for video, light for everything else.</strong> A screen showing a performance is dark. Lists, settings and forms are light.</span></div>
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>One main action per screen.</strong> If two things look equally important, neither reads as the thing to do.</span></div>
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>Red means live or danger.</strong> Never use it for decoration, or the LIVE badge stops meaning anything.</span></div>
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>Gradients stay soft.</strong> They sit behind content, never under small text, and never as a button's only cue.</span></div>
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>Write like a person.</strong> Short sentences, no jargon, no exclamation marks, and never blame the user.</span></div>
+        <div style="padding: 18px 20px; border-radius: 16px; background: rgba(255, 255, 255, 0.72); display: flex; gap: 12px"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span style="flex: 1; font-size: 16px; line-height: 1.45"><strong>Respect reduced motion.</strong> Every animation, including the launch whale, has a still fallback.</span></div>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

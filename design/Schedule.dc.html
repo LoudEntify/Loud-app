@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Schedule a show</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#f6f9f6}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 1370px; position: relative; overflow: hidden; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="box-sizing: border-box; padding: 52px 16px 32px; display: flex; flex-direction: column; gap: 20px">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <a href="Profile-Owner.dc.html" aria-label="Back" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a>
+      <h1 style="margin: 0; font-size: 28px">Schedule a show</h1>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Show type</h2>
+      <div style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)">
+        <button aria-pressed="true" style="flex: 1; height: 40px; border-radius: 20px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 17px; font-weight: 700">Solo</button>
+        <button aria-pressed="false" style="flex: 1; height: 40px; border-radius: 20px; border: none; background: transparent; color: #011627; font-size: 17px">Versus</button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">When</h2>
+      <div style="display: flex; gap: 10px">
+        <button style="flex: 1; height: 64px; box-sizing: border-box; padding: 0 14px; border-radius: 14px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px"><span style="font-size: 14px; font-weight: 700">Date</span><span style="font-size: 17px">Choose a date</span></button>
+        <button style="flex: 1; height: 64px; box-sizing: border-box; padding: 0 14px; border-radius: 14px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px"><span style="font-size: 14px; font-weight: 700">Start time</span><span style="font-size: 17px">Choose a time</span></button>
+      </div>
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 15px; color: rgba(1, 22, 39, 0.8)"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>The earliest start is 30 minutes from now.</span>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Length</h2>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">15 min</button>
+        <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">30 min</button>
+        <button aria-pressed="true" style="height: 36px; padding: 0 16px; border-radius: 18px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 16px; font-weight: 700">45 min</button>
+        <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">1 hour</button>
+        <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">1 hr 30</button>
+        <button aria-pressed="false" style="height: 36px; padding: 0 16px; border-radius: 18px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px">Custom</button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 12px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Details</h2>
+      <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">Show title<input placeholder="Give your show a name" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 17px; font-weight: 400"></label>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span style="font-size: 14px; font-weight: 700">Genre</span>
+        <button style="height: 48px; box-sizing: border-box; padding: 0 14px; border-radius: 12px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; font-size: 17px; display: flex; align-items: center; justify-content: space-between">Afrobeats<svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+      </div>
+      <button style="height: 120px; border-radius: 16px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 17px; font-weight: 700"><svg class="i" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="M21 16l-5-5-9 9"></path></svg>Add a cover image</button>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">Place</h2>
+      <button style="height: 68px; box-sizing: border-box; padding: 0 14px; border-radius: 16px; border: none; background: rgba(255, 255, 255, 0.72); color: #011627; display: flex; align-items: center; gap: 12px; text-align: left">
+        <span style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; background: rgba(1, 22, 39, 0.07); display: flex; align-items: center; justify-content: center"><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle></svg></span>
+        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 18px; font-weight: 700">[Saved place]</span><span style="font-size: 15px; color: rgba(1, 22, 39, 0.72)">Loads its mic, preset and cameras</span></span>
+        <svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+      </button>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(1, 22, 39, 0.72)">From your Studio library (optional)</h2>
+      <div style="display: flex; align-items: center; gap: 12px; height: 60px; box-sizing: border-box; padding: 0 8px 0 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.72)">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12"></path><circle cx="6.5" cy="18" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Backing tracks</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">None added</span></span>
+        <button style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px; font-weight: 700">Add</button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; height: 60px; box-sizing: border-box; padding: 0 8px 0 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.72)">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"></path><circle cx="4.5" cy="6" r="1"></circle><circle cx="4.5" cy="12" r="1"></circle><circle cx="4.5" cy="18" r="1"></circle></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">Cue sheet</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">None added</span></span>
+        <button style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px; font-weight: 700">Add</button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; height: 60px; box-sizing: border-box; padding: 0 8px 0 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.72)">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 9h18M3 15h18M8 5v14M16 5v14"></path></svg><span style="flex: 1; display: flex; flex-direction: column"><span style="font-size: 17px; font-weight: 700">B-roll</span><span style="font-size: 14px; color: rgba(1, 22, 39, 0.72)">None added</span></span>
+        <button style="height: 40px; padding: 0 16px; border-radius: 20px; border: none; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 16px; font-weight: 700">Add</button>
+      </div>
+    </section>
+
+    <div style="padding: 16px; border-radius: 18px; background: linear-gradient(135deg, rgba(46, 196, 182, 0.28) 0%, rgba(255, 255, 255, 0.7) 60%, rgba(255, 159, 28, 0.18) 100%); display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 18px; font-weight: 700">Uses 1 of your [n] show slots this month</span>
+      <span style="font-size: 16px; line-height: 1.35">You have [n] viewer-hours left. Anyone can join, and if the hours run out mid-show, the show carries on.</span>
+    </div>
+
+    <a href="Profile-Owner.dc.html" style="height: 52px; border-radius: 26px; background: linear-gradient(135deg, #2ec4b6 0%, #8fe6dd 48%, #2ec4b6 100%); color: #011627; font-size: 19px; font-weight: 700; display: flex; align-items: center; justify-content: center">Book show</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1370}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

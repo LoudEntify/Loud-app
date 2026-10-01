@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign up</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'PT Sans Narrow','Arial Narrow',sans-serif;background:#011627}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+input::placeholder{color:#4e5a64;opacity:1}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; background: linear-gradient(135deg, #011627 0%, #123f57 55%, #011627 100%); color: #fdfffc; font-family: 'PT Sans Narrow', 'Arial Narrow', sans-serif">
+  <div style="position: absolute; inset: 0; background: radial-gradient(80% 45% at 88% 8%, rgba(46, 196, 182, 0.38), rgba(46, 196, 182, 0) 65%), radial-gradient(75% 45% at 8% 52%, rgba(231, 29, 54, 0.26), rgba(231, 29, 54, 0) 65%), radial-gradient(95% 55% at 55% 100%, rgba(255, 159, 28, 0.24), rgba(255, 159, 28, 0) 62%), linear-gradient(125deg, rgba(253, 255, 252, 0) 30%, rgba(253, 255, 252, 0.07) 46%, rgba(253, 255, 252, 0) 58%), #011627"></div>
+  <div style="position: absolute; inset: 0; background: rgba(1, 22, 39, 0.5)"></div>
+
+  <div style="position: absolute; left: 16px; right: 16px; top: 56px; display: flex; align-items: center; gap: 10px">
+    <span style="padding: 4px 10px; border-radius: 999px; background: #e71d36; color: #ffffff; font-size: 13px; font-weight: 700; letter-spacing: 0.1em">LIVE</span>
+    <span style="font-size: 19px; font-weight: 700">[Stage name]</span>
+  </div>
+
+  <section aria-labelledby="signup-title" style="position: absolute; left: 0; right: 0; top: 124px; bottom: 0; box-sizing: border-box; padding: 10px 20px 28px; border-radius: 24px 24px 0 0; background: radial-gradient(110% 55% at 100% 0%, rgba(46, 196, 182, 0.26), rgba(46, 196, 182, 0) 62%), radial-gradient(90% 45% at 0% 40%, rgba(255, 159, 28, 0.16), rgba(255, 159, 28, 0) 60%), radial-gradient(100% 50% at 70% 100%, rgba(46, 196, 182, 0.16), rgba(46, 196, 182, 0) 60%), linear-gradient(118deg, rgba(255, 255, 255, 0) 28%, rgba(255, 255, 255, 0.7) 44%, rgba(255, 255, 255, 0) 60%), #f6f9f6; color: #011627; display: flex; flex-direction: column; gap: 14px">
+    <div style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: rgba(1, 22, 39, 0.2)"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between"><img src="/_blob/9658016a1be49e5f96b7f76311298e3e" alt="Loudentify" style="height: 24px; width: auto; display: block"><a href="Login.dc.html" style="padding: 6px 4px; font-size: 16px; font-weight: 700; text-decoration: underline">Log in</a></div>
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <h1 id="signup-title" style="margin: 0; font-size: 30px; line-height: 1.05">Keep watching, free</h1>
+      <p style="margin: 0; font-size: 17px; color: rgba(1, 22, 39, 0.72)">Under a minute. The show keeps playing behind this.</p>
+    </div>
+
+    <div style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(1, 22, 39, 0.07)">
+      <button aria-pressed="true" style="flex: 1; height: 40px; border-radius: 20px; border: 2px solid #011627; background: #fdfffc; color: #011627; font-size: 16px; font-weight: 700">I'm here to watch</button>
+      <button aria-pressed="false" style="flex: 1; height: 40px; border-radius: 20px; border: none; background: transparent; color: #011627; font-size: 16px">I'm here to perform</button>
+    </div>
+
+    <div style="display: flex; gap: 10px">
+      <label style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">First name<input autocomplete="given-name" placeholder="First name" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 400"></label>
+      <label style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">Last name<input autocomplete="family-name" placeholder="Last name" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 400"></label>
+    </div>
+    <label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">Username<input autocomplete="username" placeholder="@yourname" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 400"></label>
+    <div style="display: flex; gap: 10px">
+      <label style="width: 150px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">Date of birth<input inputmode="numeric" placeholder="DD / MM / YYYY" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 400"></label>
+      <label style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 700">Location<input placeholder="[City, country]" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: none; border-radius: 12px; background: rgba(1, 22, 39, 0.07); color: #011627; font-size: 17px; font-weight: 400"></label>
+    </div>
+
+    <p style="margin: 0; font-size: 14px; line-height: 1.35; color: rgba(1, 22, 39, 0.8)">By continuing you confirm you are 18 or over and agree to the <a href="#" style="font-weight: 700; text-decoration: underline">Terms and Conditions</a> and <a href="#" style="font-weight: 700; text-decoration: underline">Community Guidelines</a>.</p>
+
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <a href="Show.dc.html" aria-label="Continue with Apple" style="height: 50px; border-radius: 25px; background: #000000; color: #ffffff; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif; font-size: 17px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px"><span aria-hidden="true" title="Apple logo from Sign in with Apple" style="width: 18px; height: 18px; border-radius: 4px; border: 1.5px dashed rgba(255, 255, 255, 0.7); box-sizing: border-box"></span>Continue with Apple</a>
+      <a href="Show.dc.html" aria-label="Continue with Google" style="height: 50px; box-sizing: border-box; border-radius: 25px; background: #ffffff; border: 1px solid #747775; color: #1f1f1f; font-family: Roboto, 'Helvetica Neue', sans-serif; font-size: 16px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 10px"><span aria-hidden="true" title="Google G logo from Google Sign-In" style="width: 18px; height: 18px; border-radius: 4px; border: 1.5px dashed #747775; box-sizing: border-box"></span>Continue with Google</a>
+      <a href="#" style="align-self: center; padding: 6px 10px; font-size: 16px; font-weight: 700; text-decoration: underline">Use email instead</a>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
