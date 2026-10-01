@@ -17,4 +17,4 @@ Claude Code adds blockers here with exact steps. Tick them off, then tell Claude
 
 ## Still open from the Phase 1 foundations work (separate branch, `staging`)
 
-- [ ] `git push` authentication was unresolved as of the last Phase 1 session — see the commit history on the local `staging`/`feature/phase1-foundations` branches, which had not reached GitHub as of then. Fix: generate a GitHub personal access token with `repo` scope and either push yourself or hand the token to a future session. (Whether `feature/privacy-page` pushed successfully this session is noted further down, once attempted.)
+- [x] `git push` authentication — fixed. You ran `gh auth login` between sessions, which reconfigured git's credential helper; `feature/privacy-page` pushed cleanly on the first try this session, and the earlier-blocked `staging`/`feature/phase1-foundations` branches have now been pushed too (see below) — nothing left local-only.
