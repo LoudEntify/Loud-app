@@ -1,7 +1,7 @@
-// /artist/onboarding — the five steps to a first show, including the
-// YouTube connection. Built in Phase 3; until then a performer lands on
-// the viewer onboarding (genres, follows) and the pilot console.
-import { redirect } from 'next/navigation';
-export default function ArtistOnboardingPage({ searchParams }) {
-  redirect(`/onboarding?next=${encodeURIComponent(searchParams?.next || '/artist/create')}`);
+import { Suspense } from 'react';
+import ViewerShell from '../../../components/viewer/ViewerShell';
+import ArtistOnboardingScreen from '../../../components/artist/ArtistOnboardingScreen';
+export const metadata = { title: 'Set up your stage · Loudentify' };
+export default function Page({ searchParams }) {
+  return <ViewerShell tabs={false}><Suspense><ArtistOnboardingScreen next={searchParams?.next || '/profile'} youtubeResult={searchParams?.youtube || null} /></Suspense></ViewerShell>;
 }

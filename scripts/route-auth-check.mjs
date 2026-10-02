@@ -73,6 +73,16 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  // ── Phase 3 artist routes (2 Oct 2026) ───────────────────────
+  'artist/youtube/callback/route.js': {
+    status: 'settled',
+    reason:
+      'Google redirects the artist here after consent; there is no session header on a cross-site ' +
+      'redirect. The caller is identified by the signed OAuth `state` (user id + HMAC with the token ' +
+      'key, lib/youtube/oauth.js signState), which only /api/artist/youtube/connect (artist-auth) ' +
+      'issues. The code is exchanged server-side; nothing token-shaped reaches the browser; the ' +
+      'only outcome is a redirect back to onboarding.',
+  },
   // ── Phase 2 viewer routes (2 Oct 2026) ───────────────────────
   'viewer/show/[id]/route.js': {
     status: 'settled',

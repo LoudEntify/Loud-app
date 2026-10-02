@@ -171,7 +171,10 @@ async function handleAuth(req, res, url) {
     const body = await readJson(req);
     if (url.searchParams.get('grant_type') !== 'password') return send(res, 400, { error: 'unsupported_grant_type' });
     const { rows } = await pool.query('select * from auth.users where lower(email) = lower($1)', [body.email || '']);
-    if (!rows.length || !checkPassword(body.password || '', rows[0].encrypted_password)) {
+    // Seeded synthetic accounts (scripts/db/seed-synthetic.sql) have no
+    // password hash; the fixed test password opens them. LOCAL ONLY.
+    const synthetic = rows.length && !rows[0].encrypted_password && /@synthetic\.loudentify\.invalid$/.test(rows[0].email || '') && body.password === 'synthetic-pass';
+    if (!rows.length || (!synthetic && !checkPassword(body.password || '', rows[0].encrypted_password))) {
       return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials' });
     }
     await pool.query('update auth.users set last_sign_in_at = now() where id = $1', [rows[0].id]);

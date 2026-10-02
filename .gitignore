@@ -70,3 +70,8 @@ interruption-probe-*.csv
 
 # local tool cache (PostgREST binary for the e2e stack)
 .cache/
+
+# store credentials for EAS submit — never committed
+native/google-play-service-account.json
+native/.expo/
+native/dist/

@@ -10,6 +10,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 export DATABASE_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/loudentify_e2e}"
 export NEXT_PUBLIC_PLAYER_SOURCE_OVERRIDE=""
+export NEXT_PUBLIC_KITCHECK_HOLD_MS="${NEXT_PUBLIC_KITCHECK_HOLD_MS:-4000}"   # two minutes in real life; seconds in the suite
+export YOUTUBE_TOKEN_KEY="${YOUTUBE_TOKEN_KEY:-local-only-youtube-token-key-for-the-e2e-suite-0000}"
+rm -rf .cache/egress
 PORT="${PORT:-3000}"
 # Refuse to run against a server we did not start (a stale one answers the
 # health check and every result would be about the wrong build).
@@ -38,3 +41,4 @@ curl -sf "http://localhost:$PORT/api/build-info" > /dev/null || { echo "app did 
 # otherwise Playwright's own download (CI runs `npx playwright install chromium`).
 if [ -z "${PLAYWRIGHT_CHROMIUM_EXECUTABLE:-}" ] && [ -x /opt/pw-browsers/chromium ]; then export PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium; fi
 BASE_URL="http://localhost:$PORT" node tests/e2e/viewer.e2e.mjs
+BASE_URL="http://localhost:$PORT" NEXT_PUBLIC_KITCHECK_HOLD_MS=4000 node tests/e2e/artist.e2e.mjs

@@ -32,8 +32,9 @@ begin
   select count(*) into n from profiles;
   if n <> 0 then raise exception 'anon can read % profiles rows directly', n; end if;
   -- anon: the view shows public columns for live accounts only
-  select count(*) into n from public_profiles;
-  if n <> 3 then raise exception 'public_profiles returned % rows for anon, expected 3 (deactivated hidden)', n; end if;
+  select count(*) into n from public_profiles where username in ('artist_a', 'fan_x', 'fan_y', 'gone');
+  if n <> 3 then raise exception 'public_profiles returned % of the 4 fixture rows for anon, expected 3 (deactivated hidden)', n; end if;
+  if exists (select 1 from public_profiles where username = 'gone') then raise exception 'deactivated account visible in public_profiles'; end if;
   reset role;
   select array_agg(column_name::text order by column_name) into cols
     from information_schema.columns where table_name = 'public_profiles';
