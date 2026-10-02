@@ -55,6 +55,10 @@ begin
   execute format('grant anon, authenticated, service_role to %I', current_user);
 end $$;
 
+-- ── graphql_public (exposed by PostgREST on Supabase; empty here) ──
+create schema if not exists graphql_public;
+grant usage on schema graphql_public to anon, authenticated, service_role;
+
 -- ── extensions schema (Supabase puts extensions here; we just need it to exist) ──
 create schema if not exists extensions;
 grant usage on schema extensions to anon, authenticated, service_role;
@@ -162,10 +166,11 @@ grant execute on all functions in schema storage to anon, authenticated, service
 -- supabase/config.toml); until then our migrations must assume it is ON
 -- and rely on RLS, and must explicitly lock down anything that is NOT
 -- supposed to be reachable (see the audit log).
+-- Only DEFAULT privileges, never a blanket `grant all on all ... in schema
+-- public`: this file is re-run before every apply, and a blanket grant on an
+-- existing database would silently re-open a function a migration had
+-- deliberately revoked (it did, once — caught by audit_log_access.sql).
 grant usage on schema public to anon, authenticated, service_role;
-grant all on all tables in schema public to anon, authenticated, service_role;
-grant all on all sequences in schema public to anon, authenticated, service_role;
-grant all on all functions in schema public to anon, authenticated, service_role;
 do $$
 begin
   execute format('alter default privileges for role %I in schema public grant all on tables to anon, authenticated, service_role', current_user);
