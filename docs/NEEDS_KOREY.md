@@ -28,6 +28,7 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
 - [ ] The append-only, hash-chained audit log — risk if wrong: the one system meant to prove nothing was tampered with becomes the thing that's wrong. Reviewer: _____
 - [ ] Extending the ledger to true double-entry pairs — risk if wrong: this is money; a bug here can create or lose balance silently. Reviewer: _____
 - [ ] Consent / training-data-choice records and their audit trail — risk if wrong: the legal basis for AI-director training depends on this being recorded correctly and changeable at any time. Reviewer: _____
+- [ ] `20261002000100_audit_log_lockdown.sql` — explicit REVOKEs on the audit schema and the one service-role-only write function (`record_audit_event`). Risk if wrong: either the app cannot write audit entries at all (we would be operating blind and the alert in ARCHITECTURE.md should fire), or the function is callable by a signed-in user, who could then write fake audit rows. Both cases are covered by `supabase/tests/audit_log_access.sql`, which CI runs on every push. Reviewer: _____
 
 ## Blocking Phase 3 (YouTube delivery)
 
