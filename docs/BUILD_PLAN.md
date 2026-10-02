@@ -42,6 +42,8 @@
 
 ## Phase 3 — Artist experience and live pipeline
 
+**Status (2 Oct 2026): built against test doubles (mock YouTube API, file-writing egress) and tested locally (unit, SQL, browser e2e); on the session branch for review. See `docs/PHASE_3_HANDOFF.md`.** Real YouTube and LiveKit credentials are NEEDS_KOREY items; the swap is configuration.
+
 **PRD rows:** pending export. Stand-in: `design/README.md`'s artist Versus group (`YT-ArtistTalk`, `YT-ArtistRequest`, `YT-ArtistHandover`, `YT-ArtistPerform`, `YT-KitCheck`, `WebYT-Artist`) plus the existing artist show-flow boards (`Create`, `Schedule`, `KitCheck`, `Countdown`, `Console`, `FixSheet`, `PostShow`, `ClipEditor`, `Insights`, `CameraMode`), and `docs/ARCHITECTURE.md`'s "The path (v2)" and "YouTube delivery rules (v2)".
 
 **Scaling area:** Real-time media, Background jobs (broadcast create/end, stream-key rotation), Auth (third-party OAuth grants).
@@ -55,6 +57,8 @@
 ---
 
 ## Phase 4 — Native apps (iOS and Android)
+
+**Status (2 Oct 2026): Expo app scaffolded in `native/` with the viewer flows, camera mode and EAS build profiles; shared modules proven DOM-free; nothing installed on a device (needs Korey's Apple and Google accounts, NEEDS_KOREY). See `docs/PHASE_4_HANDOFF.md`.**
 
 **PRD rows:** pending export. Stand-in: the whole product surface, since `docs/REPO_AUDIT.md` confirms nothing native exists today — this is a Next.js web app only.
 

@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Loudentify",
+    "slug": "loudentify",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "loudentify",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#011627",
+    "splash": { "backgroundColor": "#011627", "resizeMode": "contain" },
+    "ios": {
+      "bundleIdentifier": "app.loudentify.ios",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Loudentify uses the camera so this phone can be a camera for your show.",
+        "NSMicrophoneUsageDescription": "Loudentify uses the microphone for your show's sound.",
+        "UIBackgroundModes": ["audio"]
+      },
+      "associatedDomains": ["applinks:loudentify.app"]
+    },
+    "android": {
+      "package": "app.loudentify.android",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET", "WAKE_LOCK"],
+      "intentFilters": [
+        { "action": "VIEW", "autoVerify": true, "data": [{ "scheme": "https", "host": "loudentify.app", "pathPrefix": "/show" }, { "scheme": "https", "host": "loudentify.app", "pathPrefix": "/@" }, { "scheme": "https", "host": "loudentify.app", "pathPrefix": "/clip" }], "category": ["BROWSABLE", "DEFAULT"] }
+      ]
+    },
+    "plugins": ["expo-router", ["expo-camera", { "cameraPermission": "Loudentify uses the camera so this phone can be a camera for your show." }], "expo-font"],
+    "extra": {
+      "apiBase": "https://loudentify.app",
+      "supabaseUrl": "",
+      "supabaseAnonKey": "",
+      "eas": { "projectId": "SET-BY-EAS-INIT" }
+    },
+    "experiments": { "typedRoutes": false }
+  }
+}
