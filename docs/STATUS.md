@@ -19,7 +19,7 @@ Phases 2 to 5 are built on one branch, each a commit, each with tests that ran. 
 | Browser e2e, artist | 8 of 8 | same run, fake camera, fake egress to files |
 | Browser e2e, website | 11 of 11 | `E2E_SUITES=site scripts/dev/e2e.sh` after three fixes the suite found |
 | Native | `npm install`, `expo config`, `expo install --check` pass | nothing installed on a device |
-| CI on GitHub | `check` job (migrations from scratch, SQL tests, lint, unit tests, build) **green** on the final commits after a Node 22 fix; it had failed on the Phase 3/4 push because Node 20 could not expand the test glob. The `e2e` job was still running when this was written; its result is on the PR's Checks tab | `.github/workflows/ci.yml` |
+| CI on GitHub | **All green on the final commit**: the `check` job (migrations from scratch, SQL tests, lint, unit tests, build) and the `e2e` job (viewer 20/20, artist 8/8, site 11/11 on GitHub's own runner). It had failed on the Phase 2–5 pushes because Node 20 could not expand the test glob; fixed by moving CI to Node 22 | `.github/workflows/ci.yml` |
 | Staging database | **not verified** | the staging database password is wrong (NEEDS_KOREY, day one) |
 
 ## Per PRD row
@@ -167,7 +167,7 @@ From `docs/Loudentify_PRD_User_Stories (4).xlsx`, column "Build plan phase (v2)"
 3. **Money is test mode only.** Token purchase is a stub; payouts, identity checks and refunds need a provider. The ledger and Support logic are real and tested.
 4. **Staging has not been migrated.** Every migration is proven from scratch locally and in CI, but the staging password is wrong, so nothing was applied there. Until it is, the Vercel preview of the branch talks to a staging database without the new tables and the new screens will show their error states.
 5. **The native app has never run on a device.** Expect first-run surprises in the WebView player, camera permissions and the tab bar.
-6. **CI's unit tests did not run on GitHub for the Phase 3 and 4 pushes** (the Node 20 glob problem). The final commits run them and the `check` job is green; the browser `e2e` job on GitHub was still in progress at the time of writing, so read the Checks tab for its result.
+6. **CI's unit and browser tests did not run on GitHub for the Phase 2 to 5 pushes** (the Node 20 glob problem). The final commits run them and both jobs are green on GitHub's runner, so the local results above are confirmed independently.
 7. **Legal pages are drafts** written by me, not a lawyer, and say so on the page.
 8. **Pricing figures are not set**; the page prints "to be set" rather than a number.
 9. **The website becomes the front door (`/`) when promoted**; the pilot's doors moved to `/pilot`. Promotion is your decision.
@@ -175,7 +175,7 @@ From `docs/Loudentify_PRD_User_Stories (4).xlsx`, column "Build plan phase (v2)"
 
 ## Morning checklist (in order)
 
-1. Open [pull request #3](https://github.com/LoudEntify/Loud-app/pull/3) and look at the Checks tab on the last two commits. Green means the whole suite ran on GitHub. If the `check` job is red, open it and send me the last 40 lines.
+1. Open [pull request #3](https://github.com/LoudEntify/Loud-app/pull/3). Both CI jobs were green on the final commit when I stopped; if anything has turned red since, open the job and send me the last 40 lines.
 2. Fix the staging database password (NEEDS_KOREY, top section, click-by-click). Then in Supabase → SQL Editor on staging, run nothing by hand: instead tell me it is fixed and I apply the migrations through the harness and run the verification queries, or run `DATABASE_URL=... scripts/db/apply-migrations.sh` yourself from a laptop with Node and psql.
 3. Open the Vercel preview for the branch (link in the Vercel comment on the PR). Click through: `/` (website), `/whats-on`, `/discover` (app), a show, `/artist/onboarding` with a test account. Until step 2 is done, screens that need the new tables will show their error states; that is expected.
 4. Read `docs/NEEDS_KOREY.md` top to bottom. Each item has the exact clicks. The ones that unblock the most: the staging password, the Google Cloud project for YouTube, a payment provider decision, the Expo/Apple/Google accounts.
