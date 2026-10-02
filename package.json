@@ -19,7 +19,10 @@
     "check:lint": "npm run check:tdz && npm run check:undef && npm run check:routes",
     "test": "node --test \"tests/**/*.test.mjs\"",
     "test:sql": "scripts/db/run-sql-tests.sh",
-    "db:migrate": "scripts/db/apply-migrations.sh"
+    "db:migrate": "scripts/db/apply-migrations.sh",
+    "e2e": "scripts/dev/e2e.sh",
+    "dev:stack": "node scripts/dev/local-stack.mjs --write-env",
+    "db:seed": "scripts/db/seed.sh"
   },
   "dependencies": {
     "@livekit/components-react": "^2.5.0",

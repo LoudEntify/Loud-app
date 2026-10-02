@@ -28,7 +28,26 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
 - [ ] The append-only, hash-chained audit log — risk if wrong: the one system meant to prove nothing was tampered with becomes the thing that's wrong. Reviewer: _____
 - [ ] Extending the ledger to true double-entry pairs — risk if wrong: this is money; a bug here can create or lose balance silently. Reviewer: _____
 - [ ] Consent / training-data-choice records and their audit trail — risk if wrong: the legal basis for AI-director training depends on this being recorded correctly and changeable at any time. Reviewer: _____
+- [ ] `20261002010200_phase2_support_events.sql` and `lib/support.js` — Support with tokens (money). Risk if wrong: a viewer could be charged twice, the artist share could be mis-recorded, or tokens could be created. Covered by `tests/support.test.mjs` (double tap pays once; legs sum to zero; 72.5%; limits) and the browser e2e. Reviewer: _____
+- [ ] `20261002010400_phase2_public_profiles.sql` — replaces the pilot's public-artists policy with the `public_profiles` view (RLS/permissions). Risk if wrong: either artists vanish from Discover (view too strict) or owner fields leak (view too wide). Covered by `supabase/tests/phase2_access.sql`. Reviewer: _____
+- [ ] `app/api/viewer/signup/route.js` — account creation, consent records, organisation of one, audit entry (identity). Risk if wrong: an under-18 account, or an account without its consent record. Covered by `tests/signup.test.mjs` and the e2e under-18 check. Reviewer: _____
 - [ ] `20261002000100_audit_log_lockdown.sql` — explicit REVOKEs on the audit schema and the one service-role-only write function (`record_audit_event`). Risk if wrong: either the app cannot write audit entries at all (we would be operating blind and the alert in ARCHITECTURE.md should fire), or the function is callable by a signed-in user, who could then write fake audit rows. Both cases are covered by `supabase/tests/audit_log_access.sql`, which CI runs on every push. Reviewer: _____
+
+## Phase 2 (viewer web app) — things only you can do
+
+- [ ] **Apple and Google sign-in.** The sign-up sheet shows both buttons disabled. Apple: developer.apple.com → Certificates, Identifiers & Profiles → Identifiers → add a Services ID for `loudentify.app`, enable "Sign in with Apple", set the return URL to `https://htepkxumrwtpbkahdric.supabase.co/auth/v1/callback`; then in the Supabase dashboard → Authentication → Providers → Apple → paste the Services ID, Team ID, Key ID and the private key. Google: console.cloud.google.com → APIs & Services → Credentials → Create OAuth client (Web) with the same callback URL; Supabase → Providers → Google → paste client id and secret. Tell Claude Code "Apple and Google providers are on" and the buttons get wired (about an hour of work).
+- [ ] **Payment provider.** Token purchase runs in test mode until one is chosen (Stripe is what `lib/paymentProvider.js` already supports; set `STRIPE_SECRET_KEY` on Vercel staging and it switches over). Decide, and the webhook/secret steps follow.
+- [ ] **A real YouTube video id for the staging demo.** The seeded "Amapiano late set" show uses a public YouTube video as a stand-in. Any public, embeddable video id works for the demo until an artist's own broadcast exists (Phase 3). Set it in the Supabase table editor on the `shows` row (`youtube_video_id`), or leave it.
+- [ ] **Device checklist for this build** (docs/CLAUDE.md §7 — your gate, on real phones, against the staging URL once migrations are applied):
+  1. Open `/discover` signed out on your phone. Does the first card show a live show and does "Join the show" open it?
+  2. On the show: is the picture fully visible with nothing over it? Tap Bigger, then "Open chat" — still nothing over it?
+  3. Tap Vote while signed out: does the sign-up sheet rise with the picture still playing beside it?
+  4. Sign up with a throwaway email. Enter a date of birth that makes you 17: do you get the kind stop screen?
+  5. Signed in: vote, send a comment, tap Follow, tap Support (go to `/wallet` first and get test tokens). Did the thank-you appear once, and did the wallet go down once?
+  6. Open the Versus show: A vs B at the top, "Who moved you this round?" with both names. Tap one.
+  7. Open the starting-soon show: countdown, "Chat is open early", Remind me.
+  8. Turn on airplane mode mid-show: an orange bar at the top, the screen still readable; turn it off: the bar goes.
+  9. On a tablet or a laptop: chat sits beside the picture, nothing over it.
 
 ## Blocking Phase 3 (YouTube delivery)
 

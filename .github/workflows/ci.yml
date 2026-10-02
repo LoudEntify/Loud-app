@@ -68,3 +68,38 @@ jobs:
 
       - name: Build
         run: npm run check:build
+
+  e2e:
+    # The viewer experience in a real browser against the real migrations:
+    # scripts/dev/e2e.sh (throwaway database, PostgREST + a fake GoTrue,
+    # `next start`, Playwright). No secrets.
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/loudentify_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Keep the logs if it failed
+        if: failure()
+        run: for f in /tmp/e2e-*.log; do echo "=== $f"; tail -60 "$f"; done

@@ -36,7 +36,7 @@ async function fetchPublicRecording(id) {
     let artist = null;
     if (data.artist_id) {
       const { data: p } = await supabase
-        .from('profiles')
+        .from('public_profiles')
         .select('display_name, username, avatar_url')
         .eq('id', data.artist_id)
         .maybeSingle();

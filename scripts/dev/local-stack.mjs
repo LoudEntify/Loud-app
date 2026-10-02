@@ -138,8 +138,14 @@ function readJson(req) {
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } });
   });
 }
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version, prefer, accept-profile, content-profile, range, x-correlation-id',
+  'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+  'access-control-expose-headers': 'content-range, x-correlation-id',
+};
 function send(res, status, body, headers = {}) {
-  res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*', ...headers });
+  res.writeHead(status, { 'content-type': 'application/json', ...CORS, ...headers });
   res.end(body === undefined ? '' : JSON.stringify(body));
 }
 function bearer(req) {
@@ -211,6 +217,7 @@ function proxyRest(req, res, url) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   try {
+    if (req.method === 'OPTIONS' && !url.pathname.startsWith('/rest/v1')) return send(res, 204);
     if (url.pathname.startsWith('/auth/v1')) return await handleAuth(req, res, url);
     if (url.pathname.startsWith('/rest/v1')) return proxyRest(req, res, url);
     if (url.pathname.startsWith('/realtime/v1')) return send(res, 404, { message: 'realtime not available in the local stack' });

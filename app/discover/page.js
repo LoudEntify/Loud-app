@@ -1,15 +1,6 @@
-import DiscoverFeed from '../../components/DiscoverFeed';
-import PageShell from '../../components/PageShell';
-
-export const metadata = {
-  title: 'Discover · Loudentify pilot',
-  description: 'Live shows and artists to follow',
-};
-
+import ViewerShell from '../../components/viewer/ViewerShell';
+import Discover from '../../components/viewer/Discover';
+export const metadata = { title: 'Discover · Loudentify' };
 export default function DiscoverPage() {
-  return (
-    <PageShell active="discover">
-      <DiscoverFeed />
-    </PageShell>
-  );
+  return <ViewerShell variant="dark"><Discover /></ViewerShell>;
 }
