@@ -19,7 +19,7 @@ Phases 2 to 5 are built on one branch, each a commit, each with tests that ran. 
 | Browser e2e, artist | 8 of 8 | same run, fake camera, fake egress to files |
 | Browser e2e, website | 11 of 11 | `E2E_SUITES=site scripts/dev/e2e.sh` after three fixes the suite found |
 | Native | `npm install`, `expo config`, `expo install --check` pass | nothing installed on a device |
-| CI on GitHub | **failed on the first Phase 3 push** (Node 20 could not expand the test glob); fixed in the last commit before this one; the result for that push is yours to read in the morning | `.github/workflows/ci.yml` |
+| CI on GitHub | `check` job (migrations from scratch, SQL tests, lint, unit tests, build) **green** on the final commits after a Node 22 fix; it had failed on the Phase 3/4 push because Node 20 could not expand the test glob. The `e2e` job was still running when this was written; its result is on the PR's Checks tab | `.github/workflows/ci.yml` |
 | Staging database | **not verified** | the staging database password is wrong (NEEDS_KOREY, day one) |
 
 ## Per PRD row
@@ -167,7 +167,7 @@ From `docs/Loudentify_PRD_User_Stories (4).xlsx`, column "Build plan phase (v2)"
 3. **Money is test mode only.** Token purchase is a stub; payouts, identity checks and refunds need a provider. The ledger and Support logic are real and tested.
 4. **Staging has not been migrated.** Every migration is proven from scratch locally and in CI, but the staging password is wrong, so nothing was applied there. Until it is, the Vercel preview of the branch talks to a staging database without the new tables and the new screens will show their error states.
 5. **The native app has never run on a device.** Expect first-run surprises in the WebView player, camera permissions and the tab bar.
-6. **CI only went green at the very end**, if it did: the Node 20 glob problem meant the unit tests did not run on GitHub for the Phase 3 and 4 pushes. Local runs covered them; read the Actions tab for the last two commits.
+6. **CI's unit tests did not run on GitHub for the Phase 3 and 4 pushes** (the Node 20 glob problem). The final commits run them and the `check` job is green; the browser `e2e` job on GitHub was still in progress at the time of writing, so read the Checks tab for its result.
 7. **Legal pages are drafts** written by me, not a lawyer, and say so on the page.
 8. **Pricing figures are not set**; the page prints "to be set" rather than a number.
 9. **The website becomes the front door (`/`) when promoted**; the pilot's doors moved to `/pilot`. Promotion is your decision.
