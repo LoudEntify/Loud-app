@@ -18,7 +18,7 @@ Phases 2 to 5 are built on one branch, each a commit, each with tests that ran. 
 | Browser e2e, viewer | 20 of 20 | `scripts/dev/e2e.sh` (real PostgREST, fake GoTrue, fixture player) |
 | Browser e2e, artist | 8 of 8 | same run, fake camera, fake egress to files |
 | Browser e2e, website | 11 of 11 | `E2E_SUITES=site scripts/dev/e2e.sh` after three fixes the suite found |
-| Native | `npm install`, `expo config`, `expo install --check` pass | nothing installed on a device |
+| Native | Expo SDK 57: `npm ci`, `expo install --check`, `expo-doctor`, `expo export` (iOS + Android bundles) pass, in CI too | nothing installed on a device; Expo Go test is in NEEDS_KOREY |
 | CI on GitHub | **All green on the final commit**: the `check` job (migrations from scratch, SQL tests, lint, unit tests, build) and the `e2e` job (viewer 20/20, artist 8/8, site 11/11 on GitHub's own runner). It had failed on the Phase 2–5 pushes because Node 20 could not expand the test glob; fixed by moving CI to Node 22 | `.github/workflows/ci.yml` |
 | Staging database | **not verified** | the staging database password is wrong (NEEDS_KOREY, day one) |
 

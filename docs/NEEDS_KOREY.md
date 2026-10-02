@@ -82,6 +82,27 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
 
 The app is in `native/` (Expo). Cloud builds happen on Expo's EAS service; nothing is built on your laptop.
 
+### Test the app on your phone with Expo Go (no Apple or Google account needed)
+
+`native/` is now on Expo SDK 57, the same SDK as the Expo Go app from the App Store / Play Store, so it opens directly. Everything the app uses today is inside Expo Go; nothing needs a development build yet (the three things that will, later, are the LiveKit camera publishing, push notifications and Apple/Google sign-in).
+
+- [ ] On a computer with Node 22 and this repo checked out on `staging`: create the file `native/.env` (it is git-ignored) with these three lines, then run `cd native && npm install && npx expo start`:
+  ```
+  EXPO_PUBLIC_SUPABASE_URL=https://htepkxumrwtpbkahdric.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_ocRnAxMgflUq-u4DtmRFSQ_2xQOtLec
+  EXPO_PUBLIC_API_BASE=https://loud-app-git-staging-korey-alashe.vercel.app
+  ```
+  (The key is the staging project's *publishable* key, the one meant to live in client apps; it is not a secret. The app also opens with no `.env` at all, as a signed-out guest, so the first two lines only matter for log in and sign up.) Phone and computer on the same Wi-Fi; open Expo Go, scan the QR code the terminal shows. If the phone cannot see the computer, stop and run `npx expo start --tunnel` instead.
+- [ ] **What to look at** (Discover and Live will show their "We couldn't load" error screens with a Try again button until the staging web deploy is reachable without Vercel's own login; that is expected, and the error state itself is one of the five states to check):
+  1. The app opens on Discover with no red error box from Expo; the status bar text is light on the ink background.
+  2. The bottom tab bar: Discover, Live, Profile (Create only appears for artist accounts); labels fully visible above the phone's home bar or navigation buttons, nothing clipped (this is the one layout change in the upgrade: Android is edge-to-edge now).
+  3. Profile → "Sign up free" → the sign-up form. Enter a date of birth that makes you 17: the "You need to be 18" stop screen appears without any network call, and "I entered the wrong date" clears it. Enter nothing and press Continue: field errors appear under the fields.
+  4. Profile → Log in → with the `.env` set, a wrong password shows "That email and password don't match." (that proves the phone reaches the staging Supabase project).
+  5. Camera mode lives behind the Create tab, which only artist accounts see, and you cannot create an artist account from the phone until the staging web deploy is reachable. Until then open the screen directly: in Expo Go's home screen tap "Enter URL manually" and paste the `exp://...:8081` address the terminal shows with `/--/camera` on the end (for example `exp://192.168.1.20:8081/--/camera`). Then: the permission prompt uses our wording ("Loudentify uses the camera so this phone can be a camera for your show"), the viewfinder shows, Flip switches cameras, pointing at any QR code tries to pair (and shows "That code did not work" for a random code), and switching to another app and back shows the orange "Keep Loudentify in front" warning.
+  6. Rotate the phone: the app stays portrait.
+- [ ] Tell Claude Code what you saw (a screenshot of anything odd is ideal). Nothing in this list needs your Apple or Google accounts; the EAS steps below are still needed for a build you can install without Expo Go.
+
+
 - [ ] **Expo account and project**: sign up at expo.dev (free), then on any computer with Node: `npm i -g eas-cli`, `cd native && npm install && eas login && eas init` (it writes the project id into `native/app.json` → `extra.eas.projectId`; commit that change).
 - [ ] **Apple**: enrol in the Apple Developer Program (developer.apple.com, £79/yr, takes a day or two). Then `eas build --profile preview --platform ios` and answer "yes" when EAS offers to create the certificates and the App Store Connect app for bundle id `app.loudentify.ios` (EAS does it with your Apple ID). For TestFlight: `eas submit --platform ios` after filling `native/eas.json` → `submit.production.ios` (Apple ID, team id, the App Store Connect app id it created).
 - [ ] **Google**: create a Google Play Console developer account (play.google.com/console, one-off fee). `eas build --profile preview --platform android` produces an APK you can install directly on an Android phone (Settings → allow installs from this source). For Play internal testing: create the app in the console with package `app.loudentify.android`, create a service account with Play Console access, download its JSON key as `native/google-play-service-account.json` (never commit it; it is gitignored), then `eas submit --platform android`.
