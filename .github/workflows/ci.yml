@@ -17,6 +17,13 @@ name: ci
 #                    prompt and hang) and the node test files.
 #   3. build       — `next build`, with missing-import warnings treated as
 #                    errors (check:build).
+#   4. native      — the Expo app in native/ (separate job, no secrets):
+#                    `npm ci` from its own lockfile, `expo install --check`
+#                    (every dependency at the version the installed Expo SDK
+#                    expects), `expo-doctor`, then `expo export` for iOS and
+#                    Android, which compiles the real JS bundles through
+#                    Metro. A broken import, config plugin or lockfile fails
+#                    here instead of on Korey's phone.
 
 on:
   push:
@@ -103,3 +110,33 @@ jobs:
       - name: Keep the logs if it failed
         if: failure()
         run: for f in /tmp/e2e-*.log; do echo "=== $f"; tail -60 "$f"; done
+
+  native:
+    # The Expo app. Nothing here needs a device, an Expo account or a secret.
+    runs-on: ubuntu-latest
+    env:
+      CI: 1
+      EXPO_NO_TELEMETRY: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            native/package-lock.json
+      # native/src/shared.js imports lib/ from the web repo through a Metro
+      # alias, so the web dependencies must exist for the bundle to compile.
+      - run: npm ci
+      - run: npm ci
+        working-directory: native
+      - name: Every dependency at the version the Expo SDK expects
+        run: npx expo install --check
+        working-directory: native
+      - name: Expo doctor
+        run: npx expo-doctor
+        working-directory: native
+      - name: Compile the iOS and Android bundles
+        run: npx expo export --platform ios --platform android --output-dir /tmp/expo-export
+        working-directory: native
