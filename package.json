@@ -17,7 +17,7 @@
     "probe:auth": "node scripts/api-auth-probe.mjs",
     "probe:authz": "node scripts/api-authz-probe.mjs",
     "check:lint": "npm run check:tdz && npm run check:undef && npm run check:routes",
-    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test": "node --test tests/*.test.mjs",
     "test:sql": "scripts/db/run-sql-tests.sh",
     "db:migrate": "scripts/db/apply-migrations.sh",
     "e2e": "scripts/dev/e2e.sh",
