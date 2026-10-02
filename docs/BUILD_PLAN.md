@@ -74,6 +74,8 @@
 
 ## Phase 5 — Website
 
+**Status (2 Oct 2026): the public website is built in the same Next.js app (home with the animated hero and live strip, What's on, the share page `/s/:id` with Open Graph and a calendar file, For artists, For fans, Pricing, About, Contact with a working form, Help with search and articles, Get the app, the legal pages marked DRAFT, cookie notice with live choices, app-link files) and tested locally (unit, SQL, browser e2e incl. reduced motion, phone width and basic accessibility); on the session branch for review. See `docs/PHASE_5_HANDOFF.md`.** Not done: the figures on Pricing (an open v2 decision), the social handles, contact addresses and store links (NEEDS_KOREY), and the production domain cut-over, which changes how loudentify.app runs and is Korey's call.
+
 **PRD rows:** pending export. Stand-in: `design/README.md`'s "computer app (Web*)" and "website" groups — `WebHome`, `WebForArtists`, `WebForFans`, `WebPricing`, `WebAbout`, `WebContact`, `WebLegal`, `WebGetApp`, `WebHelp`, `WebIdentity`, `WebDiscover`, `WebLiveUpcoming`, `WebShowPage`, `WebOperator`, `WebEarnings`, `WebBuyTokens`, `WebVersus`, `WebKitCheck`.
 
 **Scaling area:** Stateless hosting.

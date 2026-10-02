@@ -3,7 +3,7 @@
 #   1. migrations from scratch + synthetic seed into DATABASE_URL
 #   2. the local Supabase stand-in (PostgREST + fake auth) on :54321
 #   3. the Next.js app (production build, `next start`) on :3000
-#   4. tests/e2e/viewer.e2e.mjs in headless Chromium
+#   4. tests/e2e/{viewer,artist,site}.e2e.mjs in headless Chromium
 # Everything is torn down at the end. Exit code is the test result.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -40,5 +40,7 @@ curl -sf "http://localhost:$PORT/api/build-info" > /dev/null || { echo "app did 
 # A preinstalled Chromium (this sandbox: /opt/pw-browsers/chromium) is used when present;
 # otherwise Playwright's own download (CI runs `npx playwright install chromium`).
 if [ -z "${PLAYWRIGHT_CHROMIUM_EXECUTABLE:-}" ] && [ -x /opt/pw-browsers/chromium ]; then export PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium; fi
-BASE_URL="http://localhost:$PORT" node tests/e2e/viewer.e2e.mjs
-BASE_URL="http://localhost:$PORT" NEXT_PUBLIC_KITCHECK_HOLD_MS=4000 node tests/e2e/artist.e2e.mjs
+# E2E_SUITES="site" runs one suite while iterating; default is all three in order.
+for suite in ${E2E_SUITES:-viewer artist site}; do
+  BASE_URL="http://localhost:$PORT" NEXT_PUBLIC_KITCHECK_HOLD_MS=4000 node "tests/e2e/$suite.e2e.mjs"
+done

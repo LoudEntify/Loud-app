@@ -73,6 +73,16 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  // ── Phase 5 website routes (2 Oct 2026) ──────────────────────
+  'site/contact/route.js': {
+    status: 'settled',
+    reason:
+      'The public contact form: nobody has an account before they write in. Rate-limited per ' +
+      'client (5 per 10 minutes), fields validated (lib/site/contact.js), a honeypot field, and ' +
+      'the row written with the service role into site_messages, which has RLS on and zero ' +
+      'policies so nothing can be read back through the Data API. A bearer token, if present, ' +
+      'only attaches the sender\'s user id for follow-up.',
+  },
   // ── Phase 3 artist routes (2 Oct 2026) ───────────────────────
   'artist/youtube/callback/route.js': {
     status: 'settled',
