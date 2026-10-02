@@ -109,11 +109,17 @@ export default function ProfileSurface({ artistId }) {
       // NAMING a column that does not exist yet 400s the whole query
       // instead of returning null for it. The same reasoning is why
       // lib/discoveryFeed.js's fetchLiveShows uses select('*').
-      const { data } = await supabase
+      // The owner reads their own full row (profiles_select_own). Anyone
+      // else gets the public view, which carries no owner fields at all —
+      // the server decides the mode, not this screen.
+      let { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', artistId)
         .maybeSingle();
+      if (!data) {
+        ({ data } = await supabase.from('public_profiles').select('*').eq('id', artistId).maybeSingle());
+      }
       if (cancelled) return;
       setProfile(data || null);
 

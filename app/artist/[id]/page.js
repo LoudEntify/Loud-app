@@ -18,15 +18,14 @@ async function fetchPublicArtist(id) {
     const supabase = createClient(url, key);
     // select('*') so `deactivated_at` can be read before its migration
     // has run — naming it would 400 the query rather than returning null.
+    // public_profiles: public columns only, closed accounts already hidden.
     const { data } = await supabase
-      .from('profiles')
+      .from('public_profiles')
       .select('*')
       .eq('id', id)
       .eq('role', 'artist')
       .maybeSingle();
     if (!data) return null;
-    // A closed account has no storefront, so it has no share card either.
-    if (data.deactivated_at) return null;
     return data;
   } catch {
     return null;
