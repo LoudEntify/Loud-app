@@ -42,3 +42,8 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
 - [ ] When the company is registered, update the Who we are paragraph on `/privacy`, the Google consent screen branding, and the terms.
 - [ ] **`docs/Loudentify_PRD_User_Stories.xlsx` is still missing.** `docs/USER_JOURNEY.md` and `docs/SCREEN_INVENTORY.md` have landed (thank you) — `docs/EXPORT_THESE_HERE.md` is still here as a reminder to export the PRD spreadsheet too and then delete that file. Every PR is supposed to cite PRD rows from it (`docs/CLAUDE.md` §1) and still can't.
 - [ ] **What's in the `loudentify-build-pack (1)` folder at the repo root?** Looks like leftover source material `design/`/`docs/CLAUDE.md`/etc. were originally copied from — safe to delete if it's no longer needed.
+## Privacy page (`/privacy`) — live on loudentify.app
+
+- [ ] **A solicitor must review the privacy policy before launch.** `/privacy` is temporary, plain-English content used as written — not legal advice and not yet checked by a lawyer. `docs/ARCHITECTURE.md` already flags the training-data section for legal sign-off; this page goes to the same review before Loudentify relies on it in front of real users or regulators.
+- [x] Merged `feature/privacy-page` into `main` (PR #1) — the page is live. This overnight branch carries the same page so staging keeps it too.
+
