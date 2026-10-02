@@ -1,12 +1,25 @@
 name: ci
 
-# Runs on every pull request into staging or main. No secrets are used here —
-# `npm run check` was verified to pass with a completely empty environment
-# (next build does not touch Supabase/LiveKit env vars at build time), so a
-# forked PR can run this safely. Live-environment checks (smoke, probes) run
-# in staging.yml after deploy, where real staging credentials exist.
+# Runs on every push and every pull request. No secrets are used here —
+# everything below runs against a throwaway Postgres started by the job
+# itself and against a build that touches no Supabase/LiveKit env vars.
+#
+# Order matters and is deliberate:
+#   1. migrations  — apply supabase/migrations from scratch to an empty
+#                    Postgres 16 (scripts/db/apply-migrations.sh, with the
+#                    scripts/db/supabase-stub.sql stand-in for a Supabase
+#                    project), then run supabase/tests/*.sql (permission,
+#                    ledger and audit tests). A migration that only works on
+#                    a database that already has yesterday's state fails
+#                    here, before it can fail on staging.
+#   2. lint/tests  — the check:* scripts (eslint rules called directly with
+#                    --no-eslintrc; `next lint` would open an interactive
+#                    prompt and hang) and the node test files.
+#   3. build       — `next build`, with missing-import warnings treated as
+#                    errors (check:build).
 
 on:
+  push:
   pull_request:
     branches: [staging, main]
 
@@ -16,20 +29,77 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/loudentify_ci
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+
+      - name: Install psql client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Apply every migration from scratch
+        run: scripts/db/apply-migrations.sh --fresh
+
+      - name: Run SQL tests (permissions, ledger, audit)
+        run: scripts/db/run-sql-tests.sh
 
       - run: npm ci
 
-      # npm run check == check:tdz && check:undef && check:routes &&
-      # window-tests.mjs && check:build. Deliberately not `next lint` —
-      # this repo has no committed eslintrc, so `next lint` opens an
-      # interactive "how would you like to configure ESLint?" prompt and
-      # hangs forever in CI. The check:* scripts call eslint directly with
-      # --no-eslintrc, so they never hit that prompt.
-      - run: npm run check
+      - name: Lint and unit tests
+        run: npm run check:lint && npm run test
+
+      - name: Build
+        run: npm run check:build
+
+  e2e:
+    # The viewer experience in a real browser against the real migrations:
+    # scripts/dev/e2e.sh (throwaway database, PostgREST + a fake GoTrue,
+    # `next start`, Playwright). No secrets.
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/loudentify_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Keep the logs if it failed
+        if: failure()
+        run: for f in /tmp/e2e-*.log; do echo "=== $f"; tail -60 "$f"; done

@@ -1,21 +1,6 @@
-import { Suspense } from 'react';
-import TokenWallet from '../../components/TokenWallet';
-import PageShell from '../../components/PageShell';
-
-export const metadata = {
-  title: 'Wallet · Loudentify',
-  description: 'Token balance, purchases and transaction history',
-};
-
-// Suspense is required, not optional: TokenWallet reads useSearchParams()
-// (to notice the ?purchase=complete return from a checkout), and the app
-// router refuses to prerender a page that does so without a boundary.
+import ViewerShell from '../../components/viewer/ViewerShell';
+import WalletScreen from '../../components/viewer/WalletScreen';
+export const metadata = { title: 'Wallet · Loudentify' };
 export default function WalletPage() {
-  return (
-    <PageShell active="wallet">
-      <Suspense fallback={null}>
-        <TokenWallet />
-      </Suspense>
-    </PageShell>
-  );
+  return <ViewerShell><WalletScreen /></ViewerShell>;
 }

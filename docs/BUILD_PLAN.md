@@ -2,11 +2,15 @@
 
 1 October 2026. Step 2 of the Loudentify rebuild, following `docs/REPO_AUDIT.md`. Six phases. `docs/ARCHITECTURE.md` v2 wins on any detail; this plan sequences work against it and against `docs/YOUTUBE_ADDENDUM.md`.
 
-**PRD rows, up front, once:** `docs/CLAUDE.md` §1 requires every PR to name the PRD rows it touches from `docs/Loudentify_PRD_User_Stories.xlsx`. That file has never been exported into this repo (`docs/EXPORT_THESE_HERE.md` has been asking for it since before this session). It is in `docs/NEEDS_KOREY.md` as a day-one blocker. Until it lands, every phase below cites `design/README.md`'s screen groups and `docs/ARCHITECTURE.md` sections as the closest thing to requirements rows that actually exists in the repo, and flags itself as "PRD rows: pending export" rather than inventing row numbers that would need reconciling later.
+**PRD rows (updated 2 Oct):** the spreadsheet is now in the repo as `docs/Loudentify_PRD_User_Stories (4).xlsx` with a "Build plan phase (v2)" column; from Phase 2 on, PRs cite its row ids. The paragraph below is kept as history.
+
+**PRD rows, up front, once (1 Oct):** `docs/CLAUDE.md` §1 requires every PR to name the PRD rows it touches from `docs/Loudentify_PRD_User_Stories.xlsx`. That file had never been exported into this repo (`docs/EXPORT_THESE_HERE.md` has been asking for it since before this session). It is in `docs/NEEDS_KOREY.md` as a day-one blocker. Until it lands, every phase below cites `design/README.md`'s screen groups and `docs/ARCHITECTURE.md` sections as the closest thing to requirements rows that actually exists in the repo, and flags itself as "PRD rows: pending export" rather than inventing row numbers that would need reconciling later.
 
 ---
 
 ## Phase 1 — Foundations
+
+**Status (2 Oct 2026): done locally and in CI; waiting on the staging database password to land on staging.** Every migration applies from an empty Postgres in CI; the audit log is locked down explicitly (`20261002000100`).
 
 **PRD rows:** pending export. Stand-in: `docs/ARCHITECTURE.md` "What to do in what order → Do first" (the eight-item list), `docs/CLAUDE.md` §§2–4 in full.
 
@@ -22,6 +26,8 @@
 
 ## Phase 2 — Viewer experience (web)
 
+**Status (2 Oct 2026): built and tested locally (unit, SQL, browser e2e); on the session branch for review. See `docs/PHASE_2_HANDOFF.md`.** Not yet exercised against real YouTube playback (no outbound access from the build sandbox).
+
 **PRD rows:** pending export. Stand-in: `design/README.md`'s "YouTube viewer variant" group (`YT-Waiting`, `YT-Show`, `YT-Focus`, `YT-Prompt`, `YT-GuestSignUp`, `YT-VersusTalk`, `YT-Versus`, `YT-VersusB`, `YT-FoldShow`, `YT-FoldVersus`, `WebYT-Show`, `WebYT-VersusTalk`, `WebYT-VersusA`, `WebYT-ShowPage`) plus `docs/YOUTUBE_ADDENDUM.md` in full.
 
 **Scaling area:** Real-time media (the embed, not our own media path), Rate limiting (the open/no-account viewer endpoints the audit confirmed — `reactions`, `show-comments`, `prompt-responses`, `viewer-session`), Database (votes/reactions need playback-position stamps, which `docs/REPO_AUDIT.md` confirms don't exist yet — today they're wall-clock).
@@ -35,6 +41,8 @@
 ---
 
 ## Phase 3 — Artist experience and live pipeline
+
+**Status (2 Oct 2026): built against test doubles (mock YouTube API, file-writing egress) and tested locally (unit, SQL, browser e2e); on the session branch for review. See `docs/PHASE_3_HANDOFF.md`.** Real YouTube and LiveKit credentials are NEEDS_KOREY items; the swap is configuration.
 
 **PRD rows:** pending export. Stand-in: `design/README.md`'s artist Versus group (`YT-ArtistTalk`, `YT-ArtistRequest`, `YT-ArtistHandover`, `YT-ArtistPerform`, `YT-KitCheck`, `WebYT-Artist`) plus the existing artist show-flow boards (`Create`, `Schedule`, `KitCheck`, `Countdown`, `Console`, `FixSheet`, `PostShow`, `ClipEditor`, `Insights`, `CameraMode`), and `docs/ARCHITECTURE.md`'s "The path (v2)" and "YouTube delivery rules (v2)".
 
@@ -50,6 +58,8 @@
 
 ## Phase 4 — Native apps (iOS and Android)
 
+**Status (2 Oct 2026): Expo app scaffolded in `native/` with the viewer flows, camera mode and EAS build profiles; shared modules proven DOM-free; nothing installed on a device (needs Korey's Apple and Google accounts, NEEDS_KOREY). See `docs/PHASE_4_HANDOFF.md`.**
+
 **PRD rows:** pending export. Stand-in: the whole product surface, since `docs/REPO_AUDIT.md` confirms nothing native exists today — this is a Next.js web app only.
 
 **Scaling area:** Stateless hosting (the native apps are clients of the same API, not a second backend), Auth (passkeys, Apple/Google sign-in, per `docs/ARCHITECTURE.md`'s identity section).
@@ -63,6 +73,8 @@
 ---
 
 ## Phase 5 — Website
+
+**Status (2 Oct 2026): the public website is built in the same Next.js app (home with the animated hero and live strip, What's on, the share page `/s/:id` with Open Graph and a calendar file, For artists, For fans, Pricing, About, Contact with a working form, Help with search and articles, Get the app, the legal pages marked DRAFT, cookie notice with live choices, app-link files) and tested locally (unit, SQL, browser e2e incl. reduced motion, phone width and basic accessibility); on the session branch for review. See `docs/PHASE_5_HANDOFF.md`.** Not done: the figures on Pricing (an open v2 decision), the social handles, contact addresses and store links (NEEDS_KOREY), and the production domain cut-over, which changes how loudentify.app runs and is Korey's call.
 
 **PRD rows:** pending export. Stand-in: `design/README.md`'s "computer app (Web*)" and "website" groups — `WebHome`, `WebForArtists`, `WebForFans`, `WebPricing`, `WebAbout`, `WebContact`, `WebLegal`, `WebGetApp`, `WebHelp`, `WebIdentity`, `WebDiscover`, `WebLiveUpcoming`, `WebShowPage`, `WebOperator`, `WebEarnings`, `WebBuyTokens`, `WebVersus`, `WebKitCheck`.
 

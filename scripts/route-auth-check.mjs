@@ -47,6 +47,7 @@ const API_DIR = join(ROOT, 'app', 'api');
 const AUTH_MARKERS = [
   'verifyArtistAuth',   // bearer -> service-role getUser -> profiles.role==='artist'
   'verifySession',      // bearer -> service-role getUser (no role requirement)
+  'requireSession',     // lib/viewerAuth.js: bearer -> getUser, 401 without; closed accounts refused
   'WebhookReceiver',    // LiveKit signature verification
   'verifySignature',    // payment provider signature verification
   'hashDeviceSecret',   // paired-device secret, compared against a stored hash
@@ -72,6 +73,68 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  // ── Phase 5 website routes (2 Oct 2026) ──────────────────────
+  'site/contact/route.js': {
+    status: 'settled',
+    reason:
+      'The public contact form: nobody has an account before they write in. Rate-limited per ' +
+      'client (5 per 10 minutes), fields validated (lib/site/contact.js), a honeypot field, and ' +
+      'the row written with the service role into site_messages, which has RLS on and zero ' +
+      'policies so nothing can be read back through the Data API. A bearer token, if present, ' +
+      'only attaches the sender\'s user id for follow-up.',
+  },
+  // ── Phase 3 artist routes (2 Oct 2026) ───────────────────────
+  'artist/youtube/callback/route.js': {
+    status: 'settled',
+    reason:
+      'Google redirects the artist here after consent; there is no session header on a cross-site ' +
+      'redirect. The caller is identified by the signed OAuth `state` (user id + HMAC with the token ' +
+      'key, lib/youtube/oauth.js signState), which only /api/artist/youtube/connect (artist-auth) ' +
+      'issues. The code is exchanged server-side; nothing token-shaped reaches the browser; the ' +
+      'only outcome is a redirect back to onboarding.',
+  },
+  // ── Phase 2 viewer routes (2 Oct 2026) ───────────────────────
+  'viewer/show/[id]/route.js': {
+    status: 'settled',
+    reason:
+      'Public show page data: what any guest can see on the show screen (show, artist public ' +
+      'profile, viewer count, the open prompt). Rate-limited. A bearer token, if present, only ' +
+      'ADDS the caller\'s own vote/follow/reminder flags; it never widens what is returned about ' +
+      'anyone else. Server-side shaping (lib/showPayload.js) is the control, not the screen.',
+  },
+  'viewer/feed/route.js': {
+    status: 'settled',
+    reason:
+      'Discover for guests (PRD 90: watch first, sign up to stay). Public shows and public ' +
+      'recordings only, via the public_profiles view; a token only personalises the order.',
+  },
+  'viewer/live/route.js': {
+    status: 'settled',
+    reason: 'The Live tab for guests: public shows only, rate-limited; a token only adds own follow/reminder flags.',
+  },
+  'viewer/search/route.js': {
+    status: 'settled',
+    reason: 'Search for guests (PRD 97): public_profiles and public shows only, rate-limited, capped result sizes, no history stored server-side.',
+  },
+  'viewer/metering/route.js': {
+    status: 'settled',
+    reason:
+      'Viewer-hour metering from player events (PRD 144) must count guests. Pseudonymous device id ' +
+      'only, rate-limited, write-only (RLS on, zero policies; no product surface reads it back).',
+  },
+  'events/route.js': {
+    status: 'settled',
+    reason:
+      'Journey events (PRD 165) for guests and signed-in alike: pseudonymous, rate-limited, ' +
+      'write-only, personal keys stripped on both sides.',
+  },
+  'viewer/signup/route.js': {
+    status: 'settled',
+    reason:
+      'Nobody has a session before they sign up. Rate-limited per client (10 per 10 minutes). ' +
+      'It creates exactly one account for the credentials given, refuses under-18s before any ' +
+      'row exists, and writes consent and audit in the same request.',
+  },
   'build-info/route.js': {
     status: 'settled',
     reason:
