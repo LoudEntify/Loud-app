@@ -3,7 +3,7 @@
 // them by width. Each column's tiles appear twice so the loop is seamless.
 // Decorative: aria-hidden, every picture has an empty alt.
 import { planColumns } from './tiles';
-import { DeviceTile, BrandTile, ReactionSymbols } from './Tiles';
+import { DeviceTile, ReactionSymbols } from './Tiles';
 import MosaicPause from './MosaicPause';
 
 const COLUMNS = planColumns();
@@ -23,9 +23,7 @@ export default function Mosaic() {
           <div key={col.index} className={`lm-col lm-col-${col.direction}`} data-direction={col.direction}>
             <div className="lm-track" style={{ '--phase': col.phase }}>
               {[0, 1].map((copy) => col.tiles.map((t, i) => (
-                t.kind === 'image'
-                  ? <DeviceTile key={`${copy}-${i}`} image={t.image} cut={t.cut} eager={eagerFor(col.index, i, copy)} priority={eagerFor(col.index, i, copy)} />
-                  : <BrandTile key={`${copy}-${i}`} tone={t.tone} motif={t.motif} />
+                <DeviceTile key={`${copy}-${i}`} image={t.image} cut={t.cut} eager={eagerFor(col.index, i, copy)} priority={eagerFor(col.index, i, copy)} />
               )))}
             </div>
           </div>

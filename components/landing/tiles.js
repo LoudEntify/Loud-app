@@ -40,7 +40,7 @@ export const IMAGE_DIR = '/landing/performers/';
 // (aspect-ratio boxes and % margins), so a tile's position in its loop is
 // the same fraction at every screen size. That is what lets a CSS-only
 // highlight know when a tile is on screen: see cutPhase() below.
-export const TILE_HEIGHT = { phone: 16 / 9, fold: 1, desktop: 10 / 16, brand: 0.6 };
+export const TILE_HEIGHT = { phone: 16 / 9, fold: 1, desktop: 10 / 16 };
 export const GAP = 0.07; // margin-bottom on every tile, as a fraction of the column width
 
 // A column must be at least this tall (in widths) so one duplicate is
@@ -49,19 +49,11 @@ export const GAP = 0.07; // margin-bottom on every tile, as a fraction of the co
 export const MIN_COLUMN_HEIGHT = 6.4;
 export const COLUMNS = 5; // the most any screen shows; CSS hides the rest
 
-// Brand motifs sit between pictures: glossy gradient artwork floating on
-// the silk, no box behind it. `tone` picks the gradient set. Variants
-// cycle in this order.
-export const BRAND_VARIANTS = [
-  { tone: 'brand', motif: 'arc' },   // the signal arc in teal, red, orange
-  { tone: 'teal', motif: 'wave' },
-  { tone: 'teal', motif: 'arc' },
-  { tone: 'warm', motif: 'wave' },   // orange into red, used sparingly
-  { tone: 'brand', motif: 'arc' },
-  { tone: 'teal', motif: 'wave' },
-];
+// Each column walks the manifest with its own stride, so neighbouring
+// columns never show the same run of pictures in the same order.
+const STRIDES = [1, 4, 7, 3, 5];
 
-export const HIGHLIGHT_EVERY_S = 2.7; // target gap between director cuts (pictures only; motifs are never cut to)
+export const HIGHLIGHT_EVERY_S = 2.7; // target gap between director cuts
 
 // The ring is on just before an "up" tile's top reaches the column's top
 // edge (it is about to leave) and just after a "down" tile's does (it has
@@ -76,34 +68,32 @@ export function genreLabel(image) { return image.label; }
 // Deterministic: the server and the browser must build the same markup.
 export function planColumns(images = IMAGES) {
   const columns = [];
-  let imageIndex = 0;
-  let brandIndex = 0;
+  let start = 0;
   for (let c = 0; c < COLUMNS; c += 1) {
     const tiles = [];
     let height = 0;
-    let sinceBrand = 0;
     const seen = new Set();
-    while (height < MIN_COLUMN_HEIGHT) {
-      // a brand tile after every two pictures, and never two in a row
-      if (sinceBrand >= 2) {
-        const v = BRAND_VARIANTS[brandIndex % BRAND_VARIANTS.length];
-        brandIndex += 1;
-        tiles.push({ kind: 'brand', ...v, h: TILE_HEIGHT.brand });
-        height += TILE_HEIGHT.brand + GAP;
-        sinceBrand = 0;
-        continue;
-      }
-      // the next picture this column has not shown yet
-      let tries = 0;
-      let img = images[imageIndex % images.length];
-      while (seen.has(img.file) && tries < images.length) { imageIndex += 1; tries += 1; img = images[imageIndex % images.length]; }
-      imageIndex += 1;
+    const stride = STRIDES[c % STRIDES.length];
+    let k = 0;
+    while (height < MIN_COLUMN_HEIGHT && seen.size < images.length) {
+      // the next picture on this column's walk that it has not shown yet
+      const img = images[(start + k * stride) % images.length];
+      k += 1;
+      if (seen.has(img.file)) continue;
       seen.add(img.file);
       tiles.push({ kind: 'image', image: img, h: TILE_HEIGHT[img.frame] });
       height += TILE_HEIGHT[img.frame] + GAP;
-      sinceBrand += 1;
     }
+    start += tiles.length;
     columns.push({ index: c, direction: c % 2 === 0 ? 'up' : 'down', tiles, height });
+  }
+  // Every picture appears somewhere: one the walks skipped goes into the
+  // shortest column that has not shown it yet.
+  for (const img of images) {
+    if (columns.some((c) => c.tiles.some((t) => t.image.file === img.file))) continue;
+    const target = [...columns].filter((c) => !c.tiles.some((t) => t.image.file === img.file)).sort((a, b) => a.height - b.height)[0];
+    target.tiles.push({ kind: 'image', image: img, h: TILE_HEIGHT[img.frame] });
+    target.height += TILE_HEIGHT[img.frame] + GAP;
   }
   // Greedy, in column order, so every prefix (the 2 columns a phone shows,
   // the 3 a laptop shows...) is spaced well on its own.
@@ -124,8 +114,7 @@ function withCuts(column) {
     const top = y / column.height;
     y += t.h + GAP;
     const cut = column.direction === 'up' ? top : (1 - top) % 1;
-    // only pictures get a director cut; a brand motif has no frame to ring
-    return t.kind === 'image' ? { ...t, cut, fire: (cut + RING_SHIFT[column.direction] + 1) % 1 } : { ...t, cut };
+    return { ...t, cut, fire: (cut + RING_SHIFT[column.direction] + 1) % 1 };
   });
   return { ...column, tiles };
 }
@@ -134,12 +123,12 @@ function withCuts(column) {
 // column's start phase is chosen in turn to maximise the smallest distance
 // between any two cuts across the columns planned so far.
 function withPhase(column, earlierColumns) {
-  const earlier = earlierColumns.map((c) => c.tiles.filter((t) => t.kind === 'image').map((t) => (t.fire - c.phase + 2) % 1)).flat();
+  const earlier = earlierColumns.map((c) => c.tiles.map((t) => (t.fire - c.phase + 2) % 1)).flat();
   let best = 0; let bestGap = -1;
   if (earlier.length === 0) return { ...column, phase: 0 };
   for (let step = 0; step < 200; step += 1) {
     const phase = step / 200;
-    const mine = column.tiles.filter((t) => t.kind === 'image').map((t) => (t.fire - phase + 2) % 1);
+    const mine = column.tiles.map((t) => (t.fire - phase + 2) % 1);
     let gap = 1;
     for (const a of mine) for (const b of earlier) {
       const d = Math.abs(a - b); gap = Math.min(gap, Math.min(d, 1 - d));
@@ -152,7 +141,7 @@ function withPhase(column, earlierColumns) {
 // Loop length for a given number of visible columns, so that across them
 // a tile reaches the top of its column about every HIGHLIGHT_EVERY_S.
 export function loopSeconds(columns, visible) {
-  const pictures = columns.slice(0, visible).reduce((n, c) => n + c.tiles.filter((t) => t.kind === 'image').length, 0);
+  const pictures = columns.slice(0, visible).reduce((n, c) => n + c.tiles.length, 0);
   return Math.round(pictures * HIGHLIGHT_EVERY_S);
 }
 
@@ -160,12 +149,12 @@ export function loopSeconds(columns, visible) {
 // the lm-cut-* keyframes). tests/landing.test.mjs checks they still match
 // loopSeconds() after the manifest changes; if the test fails, update the
 // four numbers in landing.css and here.
-export const LOOP_SECONDS = { 2: 24, 3: 35, 4: 46, 5: 62 };
+export const LOOP_SECONDS = { 2: 27, 3: 43, 4: 59, 5: 76 };
 
 // Smallest spacing, in seconds, between any two director cuts across the
 // first `visible` columns. Used by the test to prove "one tile at a time".
 export function minCutGap(columns, visible, seconds = LOOP_SECONDS[visible]) {
-  const cuts = columns.slice(0, visible).flatMap((c) => c.tiles.filter((t) => t.kind === 'image').map((t) => ((t.fire - c.phase) % 1 + 1) % 1)).sort((a, b) => a - b);
+  const cuts = columns.slice(0, visible).flatMap((c) => c.tiles.map((t) => ((t.fire - c.phase) % 1 + 1) % 1)).sort((a, b) => a - b);
   let gap = 1;
   for (let i = 1; i < cuts.length; i += 1) gap = Math.min(gap, cuts[i] - cuts[i - 1]);
   gap = Math.min(gap, 1 - cuts[cuts.length - 1] + cuts[0]);

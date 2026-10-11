@@ -95,23 +95,17 @@
 .lm-reacts svg { width: 13px; height: 13px; }
 .lm-reacts .lm-r-heart { color: #ff7a8a; } .lm-reacts .lm-r-fire { color: var(--orange); } .lm-reacts .lm-r-clap { color: var(--teal); }
 
-/* brand motifs: glossy gradient artwork floating on the silk, no box */
-.lm-tile-brand { aspect-ratio: 5 / 3; background: none; border-radius: 0; display: flex; align-items: center; justify-content: center; overflow: visible; }
-.lm-motif { display: block; width: 58%; height: auto; overflow: visible; }
-.lm-motif-arc { filter: drop-shadow(0 8px 18px rgba(46, 196, 182, .42)) drop-shadow(0 2px 4px rgba(1, 22, 39, .5)); }
-.lm-motif-wave { width: 54%; filter: drop-shadow(0 8px 16px rgba(46, 196, 182, .38)) drop-shadow(0 2px 4px rgba(1, 22, 39, .5)); }
-
 /* the director cut: a teal ring, one tile at a time, timed to the loop */
-.lm-ring { position: absolute; inset: -5px; border-radius: 26px; border: 3px solid var(--teal); box-shadow: 0 0 0 3px rgba(46, 196, 182, .22), 0 0 28px rgba(46, 196, 182, .6); opacity: 0; pointer-events: none; z-index: 5; animation: lm-cut-35 var(--dur) linear infinite; animation-delay: calc((var(--cut, 0) - var(--phase, 0) - 1) * var(--dur) + var(--shift, 0s)); }
+.lm-ring { position: absolute; inset: -5px; border-radius: 26px; border: 3px solid var(--teal); box-shadow: 0 0 0 3px rgba(46, 196, 182, .22), 0 0 28px rgba(46, 196, 182, .6); opacity: 0; pointer-events: none; z-index: 5; animation: lm-cut-43 var(--dur) linear infinite; animation-delay: calc((var(--cut, 0) - var(--phase, 0) - 1) * var(--dur) + var(--shift, 0s)); }
 .lm-tile-fold .lm-ring { border-radius: 20px; }
 .lm-tile-desktop .lm-ring { inset: -5px -5px 5% -5px; border-radius: 14px; }
 .lm-col-up .lm-tile { --shift: calc(-0.036 * var(--dur)); }   /* RING_SHIFT.up in tiles.js */
 .lm-col-down .lm-tile { --shift: calc(0.009 * var(--dur)); }  /* RING_SHIFT.down */
-/* on for about 0.8s whatever the loop length: 24s, 35s, 46s, 62s */
-@keyframes lm-cut-24 { 0% { opacity: 0; } .55% { opacity: 1; } 2.8% { opacity: 1; } 3.35% { opacity: 0; } 100% { opacity: 0; } }
-@keyframes lm-cut-35 { 0% { opacity: 0; } .38% { opacity: 1; } 1.92% { opacity: 1; } 2.3% { opacity: 0; } 100% { opacity: 0; } }
-@keyframes lm-cut-46 { 0% { opacity: 0; } .29% { opacity: 1; } 1.45% { opacity: 1; } 1.74% { opacity: 0; } 100% { opacity: 0; } }
-@keyframes lm-cut-62 { 0% { opacity: 0; } .22% { opacity: 1; } 1.08% { opacity: 1; } 1.3% { opacity: 0; } 100% { opacity: 0; } }
+/* on for about 0.8s at 27s and 43s, 0.6s at 59s and 76s where four and five columns pack the cuts tighter */
+@keyframes lm-cut-27 { 0% { opacity: 0; } .5% { opacity: 1; } 2.46% { opacity: 1; } 2.96% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes lm-cut-43 { 0% { opacity: 0; } .3% { opacity: 1; } 1.6% { opacity: 1; } 1.9% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes lm-cut-59 { 0% { opacity: 0; } .17% { opacity: 1; } .85% { opacity: 1; } 1.02% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes lm-cut-76 { 0% { opacity: 0; } .13% { opacity: 1; } .66% { opacity: 1; } .79% { opacity: 0; } 100% { opacity: 0; } }
 
 /* ── layouts ── */
 /* foldable and tablet portrait: stacked, larger mosaic */
@@ -135,9 +129,9 @@
   .lm-h1 { font-size: clamp(34px, 7.5vh, 56px); }
   .lm-body { font-size: 15px; }
   .lm-pill { min-height: 44px; font-size: 16px; padding: 0 18px; }
-  .lm-cols { padding-left: 0; --dur: 35s; }
+  .lm-cols { padding-left: 0; --dur: 43s; }
   .lm-col:nth-child(3) { display: block; }
-  .lm-ring { animation-name: lm-cut-35; }
+  .lm-ring { animation-name: lm-cut-43; }
 }
 @media (max-width: 1023px) {
   .lm-nav, .lm-signin, .lm-header .lm-pill { display: none; }
@@ -145,12 +139,12 @@
 }
 
 /* column counts and loop lengths per width: 2 / 3 / 3 / 4 / 5 columns */
-.lm-cols { --dur: 24s; }
+.lm-cols { --dur: 27s; }
 .lm-col:nth-child(n+3) { display: none; }
-.lm-ring { animation-name: lm-cut-24; }
-@media (min-width: 600px) { .lm-cols { --dur: 35s; } .lm-col:nth-child(3) { display: block; } .lm-ring { animation-name: lm-cut-35; } }
-@media (min-width: 1440px) { .lm-cols { --dur: 46s; } .lm-col:nth-child(4) { display: block; } .lm-ring { animation-name: lm-cut-46; } }
-@media (min-width: 1920px) { .lm-cols { --dur: 62s; } .lm-col:nth-child(5) { display: block; } .lm-ring { animation-name: lm-cut-62; } }
+.lm-ring { animation-name: lm-cut-27; }
+@media (min-width: 600px) { .lm-cols { --dur: 43s; } .lm-col:nth-child(3) { display: block; } .lm-ring { animation-name: lm-cut-43; } }
+@media (min-width: 1440px) { .lm-cols { --dur: 59s; } .lm-col:nth-child(4) { display: block; } .lm-ring { animation-name: lm-cut-59; } }
+@media (min-width: 1920px) { .lm-cols { --dur: 76s; } .lm-col:nth-child(5) { display: block; } .lm-ring { animation-name: lm-cut-76; } }
 
 /* ── below the fold: the site sections on the silk ── */
 .lm-below.w-root { position: relative; z-index: 1; background: transparent; color: var(--porcelain); min-height: 0; }
