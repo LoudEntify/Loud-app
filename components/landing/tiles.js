@@ -49,17 +49,19 @@ export const GAP = 0.07; // margin-bottom on every tile, as a fraction of the co
 export const MIN_COLUMN_HEIGHT = 6.4;
 export const COLUMNS = 5; // the most any screen shows; CSS hides the rest
 
-// Brand tiles sit between pictures. Variants cycle in this order.
+// Brand motifs sit between pictures: glossy gradient artwork floating on
+// the silk, no box behind it. `tone` picks the gradient set. Variants
+// cycle in this order.
 export const BRAND_VARIANTS = [
-  { tone: 'teal', motif: 'arc' },
-  { tone: 'ink', motif: 'wave' },
-  { tone: 'orange', motif: 'none' },
-  { tone: 'ink', motif: 'arc' },
+  { tone: 'brand', motif: 'arc' },   // the signal arc in teal, red, orange
   { tone: 'teal', motif: 'wave' },
-  { tone: 'card', motif: 'none' },
+  { tone: 'teal', motif: 'arc' },
+  { tone: 'warm', motif: 'wave' },   // orange into red, used sparingly
+  { tone: 'brand', motif: 'arc' },
+  { tone: 'teal', motif: 'wave' },
 ];
 
-export const HIGHLIGHT_EVERY_S = 2.4; // target gap between director cuts
+export const HIGHLIGHT_EVERY_S = 2.7; // target gap between director cuts (pictures only; motifs are never cut to)
 
 // The ring is on just before an "up" tile's top reaches the column's top
 // edge (it is about to leave) and just after a "down" tile's does (it has
@@ -122,7 +124,8 @@ function withCuts(column) {
     const top = y / column.height;
     y += t.h + GAP;
     const cut = column.direction === 'up' ? top : (1 - top) % 1;
-    return { ...t, cut, fire: (cut + RING_SHIFT[column.direction] + 1) % 1 };
+    // only pictures get a director cut; a brand motif has no frame to ring
+    return t.kind === 'image' ? { ...t, cut, fire: (cut + RING_SHIFT[column.direction] + 1) % 1 } : { ...t, cut };
   });
   return { ...column, tiles };
 }
@@ -131,12 +134,12 @@ function withCuts(column) {
 // column's start phase is chosen in turn to maximise the smallest distance
 // between any two cuts across the columns planned so far.
 function withPhase(column, earlierColumns) {
-  const earlier = earlierColumns.map((c) => c.tiles.map((t) => (t.fire - c.phase + 2) % 1)).flat();
+  const earlier = earlierColumns.map((c) => c.tiles.filter((t) => t.kind === 'image').map((t) => (t.fire - c.phase + 2) % 1)).flat();
   let best = 0; let bestGap = -1;
   if (earlier.length === 0) return { ...column, phase: 0 };
   for (let step = 0; step < 200; step += 1) {
     const phase = step / 200;
-    const mine = column.tiles.map((t) => (t.fire - phase + 2) % 1);
+    const mine = column.tiles.filter((t) => t.kind === 'image').map((t) => (t.fire - phase + 2) % 1);
     let gap = 1;
     for (const a of mine) for (const b of earlier) {
       const d = Math.abs(a - b); gap = Math.min(gap, Math.min(d, 1 - d));
@@ -149,20 +152,20 @@ function withPhase(column, earlierColumns) {
 // Loop length for a given number of visible columns, so that across them
 // a tile reaches the top of its column about every HIGHLIGHT_EVERY_S.
 export function loopSeconds(columns, visible) {
-  const tiles = columns.slice(0, visible).reduce((n, c) => n + c.tiles.length, 0);
-  return Math.round(tiles * HIGHLIGHT_EVERY_S);
+  const pictures = columns.slice(0, visible).reduce((n, c) => n + c.tiles.filter((t) => t.kind === 'image').length, 0);
+  return Math.round(pictures * HIGHLIGHT_EVERY_S);
 }
 
 // The loop lengths landing.css uses per column count (its --dur values and
 // the lm-cut-* keyframes). tests/landing.test.mjs checks they still match
 // loopSeconds() after the manifest changes; if the test fails, update the
 // four numbers in landing.css and here.
-export const LOOP_SECONDS = { 2: 29, 3: 43, 4: 55, 5: 74 };
+export const LOOP_SECONDS = { 2: 24, 3: 35, 4: 46, 5: 62 };
 
 // Smallest spacing, in seconds, between any two director cuts across the
 // first `visible` columns. Used by the test to prove "one tile at a time".
 export function minCutGap(columns, visible, seconds = LOOP_SECONDS[visible]) {
-  const cuts = columns.slice(0, visible).flatMap((c) => c.tiles.map((t) => ((t.fire - c.phase) % 1 + 1) % 1)).sort((a, b) => a - b);
+  const cuts = columns.slice(0, visible).flatMap((c) => c.tiles.filter((t) => t.kind === 'image').map((t) => ((t.fire - c.phase) % 1 + 1) % 1)).sort((a, b) => a - b);
   let gap = 1;
   for (let i = 1; i < cuts.length; i += 1) gap = Math.min(gap, cuts[i] - cuts[i - 1]);
   gap = Math.min(gap, 1 - cuts[cuts.length - 1] + cuts[0]);

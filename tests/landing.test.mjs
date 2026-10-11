@@ -53,7 +53,7 @@ test('plan: five columns, each tall enough for one duplicate, alternating direct
     assert.equal(new Set(files).size, files.length, `column ${i} shows each picture once`);
     let run = 0;
     for (const t of c.tiles) { if (t.kind === 'brand') { assert.ok(run <= 2, 'at most two pictures between brand tiles'); run = 0; } else run += 1; }
-    for (const t of c.tiles) { assert.ok(t.cut >= 0 && t.cut < 1, 'cut is a loop fraction'); assert.equal(t.h, TILE_HEIGHT[t.kind === 'image' ? t.image.frame : 'brand']); }
+    for (const t of c.tiles) { assert.ok(t.cut >= 0 && t.cut < 1, 'cut is a loop fraction'); assert.equal(t.h, TILE_HEIGHT[t.kind === 'image' ? t.image.frame : 'brand']); assert.equal(t.fire === undefined, t.kind === 'brand', 'only pictures are cut to'); }
     assert.ok(c.phase >= 0 && c.phase < 1);
   });
   // the first two columns (every screen) show every picture at least once between them? not required; but the five together must
@@ -70,10 +70,10 @@ test('director cut: the loop lengths in landing.css match the plan and no two cu
     assert.equal(LOOP_SECONDS[visible], loopSeconds(cols, visible), `${visible} columns: LOOP_SECONDS in tiles.js matches the plan (update tiles.js and landing.css together)`);
     assert.ok(css.includes(`--dur: ${LOOP_SECONDS[visible]}s`), `landing.css sets --dur: ${LOOP_SECONDS[visible]}s`);
     assert.ok(css.includes(`@keyframes lm-cut-${LOOP_SECONDS[visible]} `), `landing.css has lm-cut-${LOOP_SECONDS[visible]} keyframes`);
-    const mean = LOOP_SECONDS[visible] / cols.slice(0, visible).reduce((n, c) => n + c.tiles.length, 0);
+    const mean = LOOP_SECONDS[visible] / cols.slice(0, visible).reduce((n, c) => n + c.tiles.filter((t) => t.kind === 'image').length, 0);
     assert.ok(mean >= 2 && mean <= 3, `${visible} columns: a cut every ${mean.toFixed(2)}s`);
-    // the ring is on for 2.8% of a 29s loop (0.8s), 1.9% of 43s, 1.5% of 55s and 0.81% of 74s (0.6s): the lm-cut-* keyframes
-    const on = { 29: .028, 43: .019, 55: .015, 74: .0081 }[LOOP_SECONDS[visible]] * LOOP_SECONDS[visible];
+    // the ring is on for about 0.8s at every loop length: the lm-cut-* keyframes' last stop
+    const on = { 24: .0335, 35: .023, 46: .0174, 62: .013 }[LOOP_SECONDS[visible]] * LOOP_SECONDS[visible];
     const gap = minCutGap(cols, visible);
     assert.ok(gap + 1e-9 >= on, `${visible} columns: cuts ${gap.toFixed(2)}s apart, ring on for ${on.toFixed(2)}s`);
   }

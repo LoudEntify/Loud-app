@@ -25,7 +25,7 @@ export default function Mosaic() {
               {[0, 1].map((copy) => col.tiles.map((t, i) => (
                 t.kind === 'image'
                   ? <DeviceTile key={`${copy}-${i}`} image={t.image} cut={t.cut} eager={eagerFor(col.index, i, copy)} priority={eagerFor(col.index, i, copy)} />
-                  : <BrandTile key={`${copy}-${i}`} tone={t.tone} motif={t.motif} cut={t.cut} />
+                  : <BrandTile key={`${copy}-${i}`} tone={t.tone} motif={t.motif} />
               )))}
             </div>
           </div>
