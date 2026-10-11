@@ -1,19 +1,30 @@
-// / — the website home (design/WebHome.dc.html): hero, the live strip of
-// real shows, how a show works, the two audience cards. The app itself
-// lives at /discover; the pilot's front door stayed at /pilot. The hero's
-// shapes are CSS only and animate only when the device allows motion.
-import SiteShell from '../components/site/SiteShell';
+// / — the public landing page (components/landing): a viewport-locked
+// hero with the moving mosaic, then the site's live strip of real shows,
+// how a show works and the two audience cards from the previous home
+// (design/WebHome.dc.html), on the dark silk. Signed-in visitors are sent
+// on to /discover by the landing itself. The app lives at /discover; the
+// pilot's front door stayed at /pilot.
+//
+// PRD rows 173 (home live strip), 174 (home hero: reduced motion, never
+// delays loading), 175 (contrast, targets, labels, reduced motion), 90/91
+// (Watch a show -> Discover, Go Live -> artist sign-up).
+import LandingPage from '../components/landing/LandingPage';
 import { LiveCard } from '../components/site/ShowCards';
 import { publicSchedule } from '../lib/site/publicShows';
 import { Mic, Camera, Calendar, Sparkle, Scissors } from '../components/site/SiteIcons';
 
-export const dynamic = 'force-dynamic';
+// The live strip is read once a minute, not on every request.
+export const revalidate = 60;
 
 export const metadata = {
-  title: 'Loudentify · A production crew in your pocket',
-  description: 'Independent artists play live to real audiences. Your phones become the cameras, and Loudentify directs the show. Watch free in your browser.',
+  title: 'Loudentify · Your stage. Our crew. Live.',
+  description: 'Loudentify films and directs live shows for independent artists, with an AI director behind the camera. Watch free in your browser.',
   openGraph: { title: 'Loudentify', description: 'Live music, directed for you.', siteName: 'Loudentify', type: 'website', images: [{ url: '/logo/loudentify-on-dark.png', width: 1200, height: 630 }] },
 };
+
+// Only this route extends under the notch and home indicator, so its
+// safe-area padding has something to respect.
+export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#011627' };
 
 const STEPS = [
   ['1. Book a slot', 'Pick a date and time at least 30 minutes ahead, and share the link.', Calendar],
@@ -28,30 +39,8 @@ export default async function Home() {
   const soon = rows.filter((s) => s.derived_state !== 'live');
   const strip = [...live, ...soon].slice(0, 4);
   return (
-    <SiteShell animate cta={{ href: '/discover', label: 'Start watching' }}>
-      <section className="w-hero" data-testid="hero">
-        <div className="w-hero-text">
-          <h1 className="w-h1" style={{ fontSize: 68 }}>A production crew in your pocket</h1>
-          <p className="w-lead" style={{ fontSize: 22 }}>Independent artists play live to real audiences. Your phones become the cameras, and Loudentify directs the show.</p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <a href="/discover" className="w-pill w-pill-lg w-pill-teal" style={{ height: 58 }}>Watch a show, free</a>
-            <a href="/artists" className="w-pill w-pill-lg w-pill-outline" style={{ height: 58 }}>Perform on Loudentify</a>
-          </div>
-          <span className="w-note">No account needed to start watching.</span>
-        </div>
-        <div className="w-hero-art" aria-hidden="true">
-          <span className="w-orb w-orb-teal" style={{ width: 300, height: 300, right: 40, top: 20 }} />
-          <span className="w-orb w-orb-orange" style={{ width: 220, height: 220, left: 30, bottom: 40 }} />
-          <span className="w-orb w-orb-red" style={{ width: 180, height: 180, right: 120, bottom: 0 }} />
-          <span className="w-tile-mic" style={{ left: '38%', top: '34%' }}><Mic size={64} /></span>
-          <span className="w-bubble w-bubble-bl" style={{ left: 20, top: 60 }}>that run was unreal</span>
-          <span className="w-bubble w-bubble-teal w-bubble-br" style={{ right: 10, top: 180 }}>play the second one again</span>
-          <span className="w-live-pill" style={{ left: 60, top: 220 }}>LIVE</span>
-          <span className="w-bars" style={{ right: 60, bottom: 80 }}><i style={{ height: 16 }} /><i style={{ height: 30 }} /><i style={{ height: 40 }} /><i style={{ height: 22 }} /><i style={{ height: 12 }} /></span>
-        </div>
-      </section>
-
-      <section className="w-section" data-testid="live-strip" style={{ paddingTop: 8 }}>
+    <LandingPage>
+      <section className="w-section" data-testid="live-strip">
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
           <h2 className="w-h2"><span className="w-live-dot" aria-hidden="true" />{live.length ? 'Live right now' : 'Starting soon'}</h2>
           <a href="/whats-on" className="w-link">See what&rsquo;s on</a>
@@ -65,7 +54,7 @@ export default async function Home() {
         )}
       </section>
 
-      <section className="w-section"><div className="w-dark" style={{ padding: 56 }}>
+      <section className="w-section" style={{ paddingTop: 0 }}><div className="w-dark" style={{ padding: 56 }}>
         <h2 className="w-h2" style={{ marginBottom: 28 }}>How a show works</h2>
         <div className="w-grid w-grid-4">
           {STEPS.map(([h, p, Icon]) => (
@@ -90,6 +79,6 @@ export default async function Home() {
           <a href="/discover" className="w-pill w-pill-ink" style={{ alignSelf: 'flex-start', height: 52 }}>Find a show</a>
         </div>
       </div></section>
-    </SiteShell>
+    </LandingPage>
   );
 }

@@ -45,10 +45,15 @@ async function a11y(page, label) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
 
-  await step('Home: hero, live strip with real live shows first, footer legal links, cookie banner', async () => {
+  await step('Home: landing hero, live strip with real live shows first, footer legal links, cookie banner', async () => {
     await page.goto(`${BASE}/`);
     await page.waitForSelector('[data-testid="hero"]');
-    assert.ok((await page.textContent('h1')).includes('A production crew in your pocket'));
+    assert.ok((await page.textContent('h1')).includes('Your stage.'));
+    assert.equal(await page.locator('[data-testid="mosaic"]').getAttribute('aria-hidden'), 'true', 'the mosaic is decorative');
+    assert.ok((await page.locator('[data-testid="mosaic"] img').count()) >= 8, 'the mosaic has pictures');
+    assert.ok(await page.locator('text=Illustrative images').isVisible());
+    assert.equal(await page.locator('[data-testid="cta-watch"]').getAttribute('href'), '/discover');
+    assert.ok((await page.locator('[data-testid="cta-go-live"]').getAttribute('href')).startsWith('/signup?trigger=perform'));
     const cards = page.locator('[data-testid="live-card"]');
     assert.ok((await cards.count()) >= 2, 'at least two cards in the strip');
     assert.equal(await cards.first().getAttribute('data-state'), 'live');
@@ -64,13 +69,33 @@ async function a11y(page, label) {
     await a11y(page, 'home');
   });
 
-  await step('Reduced motion: the hero animates only when the device allows it', async () => {
-    const anim = await page.evaluate(() => getComputedStyle(document.querySelector('.w-orb')).animationName);
-    assert.notEqual(anim, 'none', 'animates by default');
+  await step('Reduced motion: the mosaic moves only when the device allows it', async () => {
+    const names = () => [...document.querySelectorAll('.lm-track, .lm-ring, .lm-bg-layer, .lm-line')].map((el) => getComputedStyle(el).animationName);
+    const anim = await page.evaluate(names);
+    assert.ok(anim.length > 0 && anim.every((n) => n !== 'none'), 'animates by default');
     const rm = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-    const p2 = await rm.newPage(); await p2.goto(`${BASE}/`); await p2.waitForSelector('.w-orb');
-    assert.equal(await p2.evaluate(() => getComputedStyle(document.querySelector('.w-orb')).animationName), 'none', 'still with reduced motion');
+    const p2 = await rm.newPage(); await p2.goto(`${BASE}/`); await p2.waitForSelector('.lm-track');
+    assert.ok((await p2.evaluate(names)).every((n) => n === 'none'), 'still with reduced motion');
+    assert.ok(await p2.locator('[data-testid="mosaic"] img').first().isVisible(), 'and the page is still complete');
     await rm.close();
+  });
+
+  await step('Landing menu (phone): opens, closes on Escape, outside click and a link, focus goes to the first link from the keyboard', async () => {
+    const ctxP = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const p = await ctxP.newPage(); await p.goto(`${BASE}/`); await p.waitForSelector('[data-testid="hero"]');
+    assert.ok(await p.locator('.lm-menu-btn').isVisible(), 'phones get a Menu button');
+    assert.equal(await p.locator('.lm-menu-btn').getAttribute('aria-expanded'), 'false');
+    await p.focus('.lm-menu-btn'); await p.keyboard.press('Enter');
+    await p.waitForSelector('[data-testid="landing-menu"]');
+    assert.equal(await p.evaluate(() => document.activeElement.textContent), 'About', 'focus moves to the first link');
+    await p.keyboard.press('Escape'); await p.waitForSelector('[data-testid="landing-menu"]', { state: 'detached' });
+    await p.click('.lm-menu-btn'); await p.waitForSelector('[data-testid="landing-menu"]');
+    await p.mouse.click(20, 500); await p.waitForSelector('[data-testid="landing-menu"]', { state: 'detached' });
+    await p.click('.lm-menu-btn'); await p.waitForSelector('[data-testid="landing-menu"]');
+    await Promise.all([p.waitForURL(/\/about$/), p.click('[data-testid="landing-menu"] >> text=About')]);
+    const wide = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    assert.equal(wide, false, 'no horizontal scroll');
+    await ctxP.close();
   });
 
   await step('Nav marks the current page; header CTA and Log in for a guest', async () => {

@@ -11,6 +11,7 @@ import { usePathname } from 'next/navigation';
 import { useSession } from '../../lib/useSession';
 import { signOut } from '../../lib/supabaseAuth';
 import CookieBanner from '../viewer/CookieBanner';
+import SiteFooter from './SiteFooter';
 
 export const NAV = [
   ['/whats-on', 'Live and upcoming'],
@@ -74,24 +75,7 @@ export default function SiteShell({ children, cta = { href: '/discover', label: 
         </div>
       </header>
       <main id="main" className="w-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>{children}</main>
-      <footer className="w-footer">
-        <div className="w-wrap w-footer-grid">
-          <div className="w-footer-brand">
-            <img src="/logo/loudentify-on-light.png" alt="Loudentify" />
-            <span>Live music, directed for you.</span>
-            {/* Social links: the handles are Korey's to confirm (docs/NEEDS_KOREY.md). Until then they go to the contact page. */}
-            <div className="w-social" aria-label="Social">
-              <a href="/contact" aria-label="Instagram (not yet linked)">IG</a>
-              <a href="/contact" aria-label="TikTok (not yet linked)">TT</a>
-              <a href="/contact" aria-label="X (not yet linked)">X</a>
-              <a href="/contact" aria-label="YouTube (not yet linked)">YT</a>
-            </div>
-          </div>
-          <div className="w-footer-col"><strong>Product</strong><a href="/artists">For artists</a><a href="/fans">For fans</a><a href="/pricing">Pricing</a><a href="/get-app">Get the app</a></div>
-          <div className="w-footer-col"><strong>Company</strong><a href="/about">About</a><a href="/contact">Contact</a><a href="/help">Help</a></div>
-          <div className="w-footer-col"><strong>Legal</strong><a href="/legal/terms">Terms and Conditions</a><a href="/legal/community-guidelines">Community Guidelines</a><a href="/privacy">Privacy</a><a href="/legal/cookies">Cookies</a></div>
-        </div>
-      </footer>
+      <SiteFooter />
       <CookieBanner />
     </div>
   );
