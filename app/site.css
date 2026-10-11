@@ -173,7 +173,7 @@ textarea.w-input { height: auto; min-height: 150px; padding: 14px 16px; resize: 
 .w-footer { border-top: 1px solid rgba(1,22,39,.1); margin-top: auto; padding: 40px 0 48px; }
 .w-footer-grid { display: flex; gap: 48px; flex-wrap: wrap; }
 .w-footer-brand { width: 300px; display: flex; flex-direction: column; gap: 14px; }
-.w-footer-brand img { height: 26px; width: auto; }
+.w-footer-brand img { height: 26px; width: auto; align-self: flex-start; }
 .w-footer-col { display: flex; flex-direction: column; gap: 10px; min-width: 160px; font-size: 16px; }
 .w-footer-col strong { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
 .w-social { display: flex; gap: 10px; }
