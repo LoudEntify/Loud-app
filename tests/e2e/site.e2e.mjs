@@ -219,11 +219,18 @@ async function a11y(page, label) {
       const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(over <= 0, `${p} scrolls sideways by ${over}px`);
     }
-    await page.goto(`${BASE}/`);
+    const smallTargets = () => page.evaluate(() => [...document.querySelectorAll('header a, header button, header summary')].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height < 44; }).map((el) => el.textContent.trim() || el.tagName));
+    // the site pages share one header with a details/summary menu
+    await page.goto(`${BASE}/artists`);
     await page.click('.w-menu summary');
     assert.ok(await page.locator('.w-menu-list >> text=For fans').isVisible());
-    const small = await page.evaluate(() => [...document.querySelectorAll('header a, header button, header summary')].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height < 44; }).map((el) => el.textContent.trim() || el.tagName));
-    assert.deepEqual(small, [], `targets under 44px: ${small.join(', ')}`);
+    let small = await smallTargets();
+    assert.deepEqual(small, [], `targets under 44px on /artists: ${small.join(', ')}`);
+    // the landing has its own header and menu (opened and closed in the landing menu step above)
+    await page.goto(`${BASE}/`);
+    await page.waitForSelector('[data-testid="landing-header"]');
+    small = await smallTargets();
+    assert.deepEqual(small, [], `targets under 44px on /: ${small.join(', ')}`);
   });
   await ctx.close();
 }
