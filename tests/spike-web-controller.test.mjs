@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { WebControllerSession, browserDeviceId, browserProfile, absoluteUploadUrl, EVENTS, ROLE } from '../lib/spike/controllerSession.js';
 import { TOPIC, decode, encode, ack } from '../native/src/spike/commands.js';
+import { clockUpstreamBase, fetchUpstreamClock } from '../lib/spike/clockUpstream.js';
 
 const UA_MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 const UA_WIN_FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0';
@@ -213,4 +214,36 @@ test('a refused upload is recorded, not thrown', async () => {
   const up = events.find(([k]) => k === 'upload')[1];
   assert.equal(up.ok, false); assert.match(up.error, /director-spike/);
   assert.equal(s.report().storage.failed, 1);
+});
+
+test('clock relay: local only, absolute URL, trailing slash stripped, empty means off', () => {
+  assert.equal(clockUpstreamBase({}), null);
+  assert.equal(clockUpstreamBase({ NEXT_PUBLIC_SPIKE_CLOCK_BASE: '  ' }), null);
+  assert.equal(clockUpstreamBase({ NEXT_PUBLIC_SPIKE_CLOCK_BASE: 'https://staging.example/' }), 'https://staging.example');
+  assert.equal(clockUpstreamBase({ NEXT_PUBLIC_SPIKE_CLOCK_BASE: 'https://staging.example', VERCEL: '1' }), null);
+  assert.equal(clockUpstreamBase({ NEXT_PUBLIC_SPIKE_CLOCK_BASE: 'https://staging.example', VERCEL_ENV: 'preview' }), null);
+  assert.throws(() => clockUpstreamBase({ NEXT_PUBLIC_SPIKE_CLOCK_BASE: 'staging.example' }), /absolute/);
+});
+
+test('clock relay: passes serverMs through and turns every failure into a dropped sample, never a throw', async () => {
+  const ok = await fetchUpstreamClock('https://s', { fetchImpl: async (url, init) => { assert.equal(url, 'https://s/api/spike/clock'); assert.equal(init.cache, 'no-store'); return { ok: true, status: 200, json: async () => ({ serverMs: 123 }) }; } });
+  assert.deepEqual(ok, { ok: true, serverMs: 123 });
+  const limited = await fetchUpstreamClock('https://s', { fetchImpl: async () => ({ ok: false, status: 429, json: async () => ({ error: 'Too many requests' }) }) });
+  assert.equal(limited.ok, false); assert.equal(limited.status, 429); assert.match(limited.error, /Too many/);
+  const html = await fetchUpstreamClock('https://s', { fetchImpl: async () => ({ ok: true, status: 200, json: async () => { throw new Error('not json'); } }) });
+  assert.equal(html.ok, false); assert.match(html.error, /answered 200/);
+  const net = await fetchUpstreamClock('https://s', { fetchImpl: async () => { throw new Error('ENOTFOUND'); } });
+  assert.equal(net.ok, false); assert.equal(net.status, 502); assert.match(net.error, /ENOTFOUND/);
+});
+
+test('a relayed clock still yields a correct offset on the laptop: the round trip brackets the whole relay', async () => {
+  // The laptop's clock.js only sees the local route; the local route awaits staging. Simulate both.
+  let t = 0; const now = () => t;
+  const staging = async () => { t += 40; return { ok: true, status: 200, json: async () => ({ serverMs: 5_000_000 + t }) }; }; // staging is 5,000 s ahead
+  const localRoute = async () => { t += 5; const r = await fetchUpstreamClock('https://s', { fetchImpl: staging }); t += 5; return { ok: r.ok, status: 200, json: async () => ({ serverMs: r.serverMs, via: 'https://s' }) }; };
+  const { measureOffset } = await import('../native/src/spike/clock.js');
+  const o = await measureOffset({ base: '', fetchImpl: localRoute, now, samples: 3 });
+  assert.equal(o.rttMs, 50);                 // 5 + 40 + 5, the whole trip
+  assert.equal(o.errorBoundMs, 25);
+  assert.ok(Math.abs(o.offsetMs - 5_000_000) <= 25); // within the bound of the true 5,000 s
 });

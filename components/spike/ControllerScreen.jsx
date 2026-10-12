@@ -135,6 +135,7 @@ export default function ControllerScreen() {
 
       <div className="v-col" style={mono}>
         <span><b>{status.toUpperCase()}</b>{s?.connected ? ` · ${s.connected.room} as ${s.connected.identity}` : ''}</span>
+        <span>clock source: {process.env.NEXT_PUBLIC_SPIKE_CLOCK_BASE ? `${process.env.NEXT_PUBLIC_SPIKE_CLOCK_BASE} (staging, relayed by this server)` : 'this server'}</span>
         {clock && <span>clock offset {clock.offsetMs} ms ±{clock.errorBoundMs} (server clock)</span>}
         {lastAck && <span>last round trip {lastAck.rtt} ms · decided→completed {lastAck.ack.timestamps.completed - lastAck.ack.timestamps.decided} ms (server clock)</span>}
         {soak && <span>soak running: move {soak.moves} at {soak.minutes} min</span>}
