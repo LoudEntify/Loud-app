@@ -73,6 +73,16 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  // ── Spike: native device zoom (12 Oct 2026, branch spike/native-device-zoom) ──
+  'spike/clock/route.js': {
+    status: 'settled',
+    reason:
+      'Public by design: returns the server wall clock (one number any HTTP Date header already ' +
+      'gives away), takes no input, writes nothing, rate-limited per client. The phones use it to ' +
+      'put director-data timestamps in server time (docs/DIRECTOR_DATA_SPEC.md). A session would ' +
+      'put the clock behind the thing being timed. Deleted with the rest of app/api/spike when the ' +
+      'spike ends.',
+  },
   // ── Phase 5 website routes (2 Oct 2026) ──────────────────────
   'site/contact/route.js': {
     status: 'settled',
