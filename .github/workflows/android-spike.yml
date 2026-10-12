@@ -48,7 +48,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # The action's default package list is "tools platform-tools", and the
+      # deprecated "tools" package no longer exists in cmdline-tools 16, so
+      # the default fails with "Failed to find package 'tools'". The runner
+      # image already carries the SDK; only platform-tools and the licence
+      # acceptance are needed here, Gradle fetches the rest.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v4
 
