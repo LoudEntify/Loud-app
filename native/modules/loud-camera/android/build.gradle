@@ -1,7 +1,9 @@
 // native/modules/loud-camera — local Expo module for the device-zoom spike.
-// Compiled by EAS (dev build), never in CI: the repository's CI has no
-// Android SDK. CameraX is pinned to the version expo-camera already pulls
-// in so the app never carries two copies.
+// Compiled by EAS (dev build) and, on this branch only, by the
+// android-spike workflow (.github/workflows/android-spike.yml), which is
+// how a Kotlin error is caught without spending an EAS build. CameraX is
+// pinned to the version expo-camera already pulls in so the app never
+// carries two copies.
 plugins {
   id 'com.android.library'
   id 'expo-module-gradle-plugin'

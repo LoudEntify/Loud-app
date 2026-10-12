@@ -3,18 +3,19 @@ package app.loudentify.loudcamera
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import com.oney.WebRTCModule.ThreadUtils
+import com.facebook.react.bridge.Callback
+import com.facebook.react.bridge.ReactContext
 import com.oney.WebRTCModule.WebRTCModule
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import livekit.org.webrtc.MediaStreamTrack
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 import java.util.zip.GZIPOutputStream
 
 /**
@@ -54,7 +55,10 @@ class LoudCameraModule : Module() {
 
     AsyncFunction("start") { opts: Map<String, Any?>, promise: Promise ->
       if (capturer != null) { promise.reject(CodedException("ERR_BUSY", "capture already running", null)); return@AsyncFunction }
-      val react = appContext.reactContext ?: run { promise.reject(CodedException("ERR_NO_CONTEXT", "no React context", null)); return@AsyncFunction }
+      // appContext.reactContext is typed as a plain android Context; the
+      // native-module registry lives on ReactContext.
+      val react = appContext.reactContext as? ReactContext
+        ?: run { promise.reject(CodedException("ERR_NO_CONTEXT", "no React context", null)); return@AsyncFunction }
       val webrtc = react.getNativeModule(WebRTCModule::class.java)
         ?: run { promise.reject(CodedException("ERR_NO_WEBRTC", "WebRTCModule is not loaded: is @livekit/react-native-webrtc in this build?", null)); return@AsyncFunction }
       val facing = (opts["facing"] as? String) ?: "back"
@@ -63,19 +67,41 @@ class LoudCameraModule : Module() {
       val fps = (opts["fps"] as? Number)?.toInt() ?: 30
       val cap = LoudCameraXCapturer(react, facing, fps)
       val ctl = LoudCaptureController(width, height, fps, cap)
-      ThreadUtils.runOnExecutor {
+      // WebRTCModule keeps its track table and PeerConnectionFactory on one
+      // private single-thread executor (its ThreadUtils is package-private,
+      // and GetUserMediaImpl, whose BiConsumer createStream() takes, is
+      // too). enumerateDevices() is the one public method that runs a
+      // caller-supplied callback on that executor, so it is how this code
+      // gets onto it without touching anything non-public. The device
+      // listing it does first is a cheap camera-id query, no camera opens.
+      webrtc.enumerateDevices(Callback { _ ->
         try {
           val track = webrtc.createVideoTrack(ctl)
-          if (track == null) { promise.reject(CodedException("ERR_TRACK", "createVideoTrack returned null", null)); return@runOnExecutor }
-          webrtc.createStream(arrayOf<MediaStreamTrack>(track)) { streamId, infos ->
-            capturer = cap; controller = ctl
-            ticking = true; main.post(tick)
-            promise.resolve(mapOf("streamId" to streamId, "trackId" to track.id(), "tracks" to infos.map { it.toHashMap() }))
-          }
+          if (track == null) { promise.reject(CodedException("ERR_TRACK", "createVideoTrack returned null", null)); return@Callback }
+          val trackId = track.id()
+          // The same two calls the JS MediaStream constructor makes for a
+          // local stream. Both queue onto the executor behind this callback,
+          // so they run in order once it returns.
+          val streamId = UUID.randomUUID().toString()
+          webrtc.mediaStreamCreate(streamId)
+          webrtc.mediaStreamAddTrack(streamId, -1, trackId)
+          // What JS's MediaStreamTrack(info) reads: id, kind, enabled,
+          // readyState, remote, settings (createStream() builds the same map).
+          val trackInfo = mapOf(
+            "id" to trackId,
+            "kind" to track.kind(),
+            "enabled" to track.enabled(),
+            "readyState" to "live",
+            "remote" to false,
+            "settings" to ctl.settings.toHashMap(),
+          )
+          capturer = cap; controller = ctl
+          ticking = true; main.post(tick)
+          promise.resolve(mapOf("streamId" to streamId, "trackId" to trackId, "tracks" to listOf(trackInfo)))
         } catch (e: Exception) {
           promise.reject(CodedException("ERR_START", e.message ?: "start failed", e))
         }
-      }
+      })
     }
 
     AsyncFunction("stop") { ->
