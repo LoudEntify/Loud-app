@@ -1,0 +1,30 @@
+// native/modules/loud-camera — local Expo module for the device-zoom spike.
+// Compiled by EAS (dev build), never in CI: the repository's CI has no
+// Android SDK. CameraX is pinned to the version expo-camera already pulls
+// in so the app never carries two copies.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.loudentify'
+version = '0.1.0'
+
+android {
+  namespace "app.loudentify.loudcamera"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  def camerax_version = "1.6.0"
+  implementation "androidx.camera:camera-core:${camerax_version}"
+  implementation "androidx.camera:camera-camera2:${camerax_version}"
+  implementation "androidx.camera:camera-lifecycle:${camerax_version}"
+  implementation "androidx.lifecycle:lifecycle-runtime:2.8.7"
+  // The LiveKit fork of react-native-webrtc: its WebRTCModule is where a
+  // custom capturer becomes a local track the JS side can publish.
+  implementation project(':livekit_react-native-webrtc')
+}

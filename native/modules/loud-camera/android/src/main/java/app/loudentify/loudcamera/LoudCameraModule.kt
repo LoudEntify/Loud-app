@@ -1,0 +1,143 @@
+package app.loudentify.loudcamera
+
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import com.oney.WebRTCModule.ThreadUtils
+import com.oney.WebRTCModule.WebRTCModule
+import expo.modules.kotlin.Promise
+import expo.modules.kotlin.exception.CodedException
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+import livekit.org.webrtc.MediaStreamTrack
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.GZIPOutputStream
+
+/**
+ * JS surface of the spike's camera (native/modules/loud-camera/index.js).
+ *
+ *   survey()                      B2 capability profile, no camera opened
+ *   start({facing,width,height,fps}) → {streamId, trackId, tracks}
+ *   stop()
+ *   zoomTo(steps, mode, requested) → move result (resolves when the ramp ends)
+ *   pan(steps, requested)         → move result
+ *   cancelMove(), resetFraming()
+ *   getState()                    → camera state (B4)
+ *   cost()                        → CostMeter sample
+ *   writeGzip(path, text), uploadFile(path, url, contentType, headers)
+ *   event "onState" every 500 ms while capturing
+ */
+class LoudCameraModule : Module() {
+  private var capturer: LoudCameraXCapturer? = null
+  private var controller: LoudCaptureController? = null
+  private val main = Handler(Looper.getMainLooper())
+  private var ticking = false
+  private val tick = object : Runnable {
+    override fun run() {
+      val c = capturer
+      if (c != null && ticking) {
+        sendEvent("onState", c.state() + mapOf("tMs" to SystemClock.elapsedRealtime()))
+        main.postDelayed(this, 500)
+      }
+    }
+  }
+
+  override fun definition() = ModuleDefinition {
+    Name("LoudCamera")
+    Events("onState")
+
+    AsyncFunction("survey") { -> CameraSurvey.profile(appContext.reactContext!!) }
+
+    AsyncFunction("start") { opts: Map<String, Any?>, promise: Promise ->
+      if (capturer != null) { promise.reject(CodedException("ERR_BUSY", "capture already running", null)); return@AsyncFunction }
+      val react = appContext.reactContext ?: run { promise.reject(CodedException("ERR_NO_CONTEXT", "no React context", null)); return@AsyncFunction }
+      val webrtc = react.getNativeModule(WebRTCModule::class.java)
+        ?: run { promise.reject(CodedException("ERR_NO_WEBRTC", "WebRTCModule is not loaded: is @livekit/react-native-webrtc in this build?", null)); return@AsyncFunction }
+      val facing = (opts["facing"] as? String) ?: "back"
+      val width = (opts["width"] as? Number)?.toInt() ?: 1080
+      val height = (opts["height"] as? Number)?.toInt() ?: 1920
+      val fps = (opts["fps"] as? Number)?.toInt() ?: 30
+      val cap = LoudCameraXCapturer(react, facing, fps)
+      val ctl = LoudCaptureController(width, height, fps, cap)
+      ThreadUtils.runOnExecutor {
+        try {
+          val track = webrtc.createVideoTrack(ctl)
+          if (track == null) { promise.reject(CodedException("ERR_TRACK", "createVideoTrack returned null", null)); return@runOnExecutor }
+          webrtc.createStream(arrayOf<MediaStreamTrack>(track)) { streamId, infos ->
+            capturer = cap; controller = ctl
+            ticking = true; main.post(tick)
+            promise.resolve(mapOf("streamId" to streamId, "trackId" to track.id(), "tracks" to infos.map { it.toHashMap() }))
+          }
+        } catch (e: Exception) {
+          promise.reject(CodedException("ERR_START", e.message ?: "start failed", e))
+        }
+      }
+    }
+
+    AsyncFunction("stop") { ->
+      ticking = false
+      capturer?.cancelMove("stopped")
+      // The track itself is released from JS (track.stop()), which makes
+      // WebRTCModule stop and dispose the capturer; here we only drop refs.
+      capturer = null; controller = null
+      null
+    }
+
+    AsyncFunction("zoomTo") { steps: List<Map<String, Any?>>, mode: String, requested: Double, promise: Promise ->
+      val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
+      val plan = LoudCameraXCapturer.Plan("zoom", mode, steps.map { s ->
+        val at = (s["atMs"] as Number).toLong()
+        val z = (s["zoom"] as Number).toDouble()
+        if (mode == "digital") {
+          val w = (1.0 / z).toFloat().coerceIn(0.1f, 1f)
+          LoudCameraXCapturer.Step(at, null, floatArrayOf((1f - w) / 2f, (1f - w) / 2f, w, w))
+        } else LoudCameraXCapturer.Step(at, z, null)
+      }, requested) { r -> promise.resolve(r) }
+      if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
+    }
+
+    AsyncFunction("pan") { deviceZoom: Double?, steps: List<Map<String, Any?>>, requested: Double, promise: Promise ->
+      val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
+      val plan = LoudCameraXCapturer.Plan("pan", if (deviceZoom != null) "device" else "digital", steps.mapIndexed { i, s ->
+        LoudCameraXCapturer.Step(
+          (s["atMs"] as Number).toLong(),
+          if (i == 0) deviceZoom else null, // pull the device zoom back once, at the first step
+          floatArrayOf((s["x"] as Number).toFloat(), (s["y"] as Number).toFloat(), (s["w"] as Number).toFloat(), (s["h"] as Number).toFloat())
+        )
+      }, requested) { r -> promise.resolve(r) }
+      if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
+    }
+
+    AsyncFunction("cancelMove") { -> capturer?.cancelMove("cancelled"); null }
+    AsyncFunction("resetFraming") { -> capturer?.resetCrop(); null }
+    Function("getState") { -> capturer?.state() }
+    Function("cost") { -> CostMeter.sample(appContext.reactContext!!) }
+
+    AsyncFunction("writeGzip") { path: String, text: String ->
+      val f = File(path.removePrefix("file://"))
+      f.parentFile?.mkdirs()
+      GZIPOutputStream(FileOutputStream(f)).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+      mapOf("path" to f.absolutePath, "bytes" to f.length())
+    }
+
+    AsyncFunction("uploadFile") { path: String, url: String, contentType: String, headers: Map<String, String> ->
+      val f = File(path.removePrefix("file://"))
+      val conn = URL(url).openConnection() as HttpURLConnection
+      conn.requestMethod = "PUT"
+      conn.doOutput = true
+      conn.connectTimeout = 15000; conn.readTimeout = 60000
+      conn.setRequestProperty("Content-Type", contentType)
+      for ((k, v) in headers) conn.setRequestProperty(k, v)
+      conn.setFixedLengthStreamingMode(f.length())
+      FileInputStream(f).use { input -> conn.outputStream.use { out -> input.copyTo(out, 64 * 1024) } }
+      val status = conn.responseCode
+      val body = try { (if (status >= 400) conn.errorStream else conn.inputStream)?.bufferedReader()?.readText()?.take(500) } catch (e: Exception) { null }
+      conn.disconnect()
+      mapOf("status" to status, "bytes" to f.length(), "body" to body)
+    }
+  }
+}

@@ -27,7 +27,9 @@
         "CAMERA",
         "RECORD_AUDIO",
         "INTERNET",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE"
       ],
       "intentFilters": [
         {
@@ -59,6 +61,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Loudentify uses the camera so this phone can be a camera for your show.",
+          "microphonePermission": "Loudentify uses the microphone for your show's sound."
+        }
+      ],
+      "@livekit/react-native-expo-plugin",
       [
         "expo-camera",
         {

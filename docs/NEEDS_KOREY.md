@@ -111,6 +111,29 @@ The app is in `native/` (Expo). Cloud builds happen on Expo's EAS service; nothi
 - [ ] **Universal links**: `apple-app-site-association` and `assetlinks.json` on loudentify.app (Phase 5 serves them from `public/.well-known/`; they need your Apple team id and the Android signing certificate's SHA-256, which EAS shows after the first build: `eas credentials`).
 - [ ] **Device checklist for the first native build** (your gate): install the preview build on an iPhone and an Android phone and try: 1. Discover plays the first live card and the 60-second chip appears at 50 s. 2. Join the show: the player is uncovered; vote, comment (sign-up rises). 3. Sign up with a throwaway email; a 17-year-old date gets the stop screen. 4. Profile shows the balance and no buy button anywhere. 5. Create → Use this phone as a camera: scan the code from the web Kit Check's Add camera; the viewfinder shows ON AIR/REHEARSAL. 6. Put the app in the background mid-camera: the warning shows when you return. 7. A `loudentify.app/show/...` link opens the app once universal links are in place.
 
+## Device-zoom spike (branch `spike/native-device-zoom`, PR into staging) — your part
+
+Everything below is staging only. Nothing here touches production, main or pilot-freeze-v2.
+
+- [ ] **Create the private bucket `director-spike`** in the staging Supabase dashboard (Storage → New bucket → name `director-spike`, Public bucket OFF, no file size limit needed). It must be created in the dashboard: an SQL insert into `storage.buckets` has failed silently on this project before. Until it exists, `/api/spike/upload-url` answers 503 with this exact instruction and the phones keep buffering.
+- [ ] **Build the Android app with the native module** (Expo Go cannot run it). On a computer with Node 22, from the branch:
+  ```
+  cd native && npm install
+  eas login            # once
+  eas init             # once, if native/app.json still says SET-BY-EAS-INIT; commit the project id it writes
+  eas build --profile preview --platform android
+  ```
+  `preview` gives a self-contained APK (JS bundled, staging API and Supabase values from `native/eas.json`), which is what you want for two phones away from a laptop. Use `--profile development` instead if you plan to iterate on the JS with a Metro server (`npx expo start --dev-client`); it needs the laptop on the same Wi-Fi. Install the APK on **two physical Android phones** (Settings → allow installs from this source). Android 11 or newer gives the full zoom API; an older phone still runs but reports the digital-crop-only range. The first build of the native module is the moment any Kotlin or Gradle mistake shows up: the module has never been compiled (no Android SDK in Claude's container), so if `eas build` fails, paste the error here; it will be in `modules/loud-camera`.
+- [ ] **Phone test script** (both phones signed in as the same artist account on staging: Profile → Log in):
+  1. Phone A: Create → "Device zoom spike (dev build)" → **Camera**. Allow the camera. Status shows `in rehearsal-… as spike-camera-…` and the B2 line says `device` with a zoom range, or `DIGITAL FALLBACK ≤1.2x`.
+  2. Phone B: same screen → **Controller**. Phone A's picture appears within a few seconds.
+  3. On B press **2x**: the ramp plays on both screens; the log line `ack zoom rtt … ms → device 2x` is the round trip (decided → done, across both phones and the server clock). Then **5x** (watch for `LENS SWITCH` on a multi-lens phone), **1x fast**, and the four **pan** buttons.
+  4. Press **Start 20-min soak** on B. At 10 minutes press **Collection OFF** on A (so the report has a collection-on and a collection-off window to compare). Keep both screens on; the soak moves the camera every 30 s.
+  5. When the soak ends, press **Report + stop** on both phones. Each writes `spike-report-<role>-<device>-<time>.json` and opens the share sheet: send both files here (email to yourself, or Nearby Share to a laptop). The report holds the B2 profile, round-trip p50/p90, CPU share, thermal state, battery drop and bytes uploaded for collection on and off, and the storage per hour.
+  6. **Capability survey** (one phone, no sign-in needed): same screen → **Capability survey (no LiveKit)** → **Share file**. Or open `loudentify://spike/zoom?mode=survey&exit=1` on a device farm: the app writes `capability-<make>-<model>-<os>-<version>.json` to its documents folder and goes back.
+- [ ] **iPhone**: there is no free build route. EAS device builds need the paid Apple Developer account, and the free-Apple-ID route needs Xcode on a Mac with the phone plugged in (7-day signing). The Swift side is written but uncompiled; say when either route exists.
+- [ ] After the spike: delete `app/api/spike/*` and the `director-spike` bucket, or promote them per the spec (docs/DIRECTOR_DATA_SPEC.md).
+
 ## Phase 5 (website) — things only you can do
 
 The website lives in the same app, on the session branch. On the Vercel preview for the branch you can click through all of it now. Nothing below blocks review; each one is a value only you have.

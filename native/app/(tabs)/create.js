@@ -2,7 +2,7 @@ import { View, Text, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { styles } from '../../src/theme';
 export default function Create() {
-  const rows = [['/camera', 'Use this phone as a camera', 'Scan the code from your main device'], ['web:/artist/schedule', 'Schedule a show', 'Book a slot at least 30 minutes ahead (opens the web console)'], ['web:/artist/kit-check', 'Kit check', 'Check your mic and cameras']];
+  const rows = [['/camera', 'Use this phone as a camera', 'Scan the code from your main device'], ['web:/artist/schedule', 'Schedule a show', 'Book a slot at least 30 minutes ahead (opens the web console)'], ['web:/artist/kit-check', 'Kit check', 'Check your mic and cameras'], ['/spike/zoom', 'Device zoom spike (dev build)', 'Camera, controller or capability survey: docs/DIRECTOR_DATA_SPEC.md']];
   return (
     <View style={[styles.screenLight, { padding: 16, paddingTop: 56, gap: 12 }]}>
       <Text style={styles.h1}>Create</Text>
