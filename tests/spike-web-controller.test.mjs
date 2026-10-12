@@ -43,7 +43,7 @@ function fakeApi({ serverSkewMs = 1000, now }) {
     }
     if (url.endsWith('/api/spike/upload-url')) {
       const body = JSON.parse(init.body);
-      assert.match(body.name, /\.ndjson\.gz$/);
+      assert.match(body.name, /\.(ndjson\.gz|json)$/); // what /api/spike/upload-url accepts: a batch or a report
       assert.match(body.deviceId, DEVICE_RE);
       return json(200, { bucket: 'director-spike', path: `u1/2026-10-12/${body.deviceId}/${body.name}`, signedUrl: `/object/upload/sign/director-spike/u1/${body.name}?token=x` });
     }
@@ -146,7 +146,7 @@ test('zoom and pan go out as the phone protocol with server-clock timestamps; ac
 
   const pan = await s.pan('left');
   const pw = decode(published[1].bytes);
-  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 0.5); assert.equal(pw.window, 0.85); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
+  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 1); assert.equal(pw.window, 0.84); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
   const fast = await s.zoom(1, 400, 'ease-out');
   assert.equal(decode(published[2].bytes).easing, 'ease-out'); assert.equal(fast.durationMs, 400);
 
@@ -195,7 +195,7 @@ test('report has the phone report keys; stop uploads the controller batch throug
   assert.ok(lines.slice(1).every((l) => Number.isFinite(l.t_server_ms)));
 
   const r = s.report();
-  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'profile', 'clock', 'rtt', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt']);
+  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'profile', 'clock', 'rtt', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
   assert.equal(r.role, 'controller'); assert.equal(r.deviceId, 'web-chrome-141-mac-10-15'); assert.equal(r.appVersion, 'web-test');
   assert.equal(r.rtt.n, 1); assert.deepEqual(r.cost, { on: null, off: null, samples: 0 });
   assert.equal(r.storage.batches, 1); assert.equal(r.storage.failed, 0); assert.equal(r.storage.records, 4);
@@ -246,4 +246,24 @@ test('a relayed clock still yields a correct offset on the laptop: the round tri
   assert.equal(o.rttMs, 50);                 // 5 + 40 + 5, the whole trip
   assert.equal(o.errorBoundMs, 25);
   assert.ok(Math.abs(o.offsetMs - 5_000_000) <= 25); // within the bound of the true 5,000 s
+});
+
+test('the controller report is also uploaded to the bucket as JSON, and a refusal is recorded', async () => {
+  const events = [];
+  const { s, calls } = makeSession({ onEvent: (k, p) => events.push([k, p]) });
+  await s.connect();
+  await s.stop();
+  const name = s.reportFileName();
+  const up = await s.uploadReport(name);
+  assert.equal(up.ok, true); assert.equal(up.name, name); assert.match(up.path, /spike-report-controller-web-chrome-141-mac-10-15-\d+\.json$/);
+  const put = calls.filter((c) => c.init.method === 'PUT').pop();
+  assert.equal(put.init.headers['content-type'], 'application/json');
+  const body = JSON.parse(put.init.body);
+  assert.equal(body.role, 'controller'); assert.equal(body.deviceId, 'web-chrome-141-mac-10-15');
+  assert.equal(s.report().reportUpload.ok, true);
+  assert.equal(events.filter(([k]) => k === 'reportUpload').length, 1);
+  const base = s.fetch;
+  s.fetch = async (url, init) => (url.endsWith('/api/spike/upload-url') ? { ok: false, status: 503, json: async () => ({ error: 'Bucket "director-spike" does not exist on this project.' }) } : base(url, init));
+  const refused = await s.uploadReport();
+  assert.equal(refused.ok, false); assert.match(refused.error, /director-spike/);
 });

@@ -99,7 +99,8 @@
         {
           "style": "light"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "extra": {
       "apiBase": "https://loudentify.app",

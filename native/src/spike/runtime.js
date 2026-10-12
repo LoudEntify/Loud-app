@@ -10,14 +10,15 @@
 //
 // PRD rows 12-19, 127, 128, 165, 166. S&I: Real-time media, Observability.
 import { Room, RoomEvent, Track, LocalVideoTrack } from 'livekit-client';
-import { Paths, File } from 'expo-file-system';
+import { Paths, File, Directory } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
 import { TOPIC, zoomCommand, panCommand, ack, encode, decode, roundTripMs, mintId } from './commands';
-import { chooseZoomMode, rampSchedule, panPlan, tightnessFor } from './zoomPlan';
+import { chooseZoomMode, rampSchedule, panPlan, tightnessFor, PAN_DEFAULTS } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
 import { normaliseProfile, surveyFileName } from './survey';
@@ -40,6 +41,26 @@ export async function runSurvey() {
   return { profile, path: file.uri, name };
 }
 
+/** The newest spike-report-*.json in the app's documents folder, or null. */
+export function latestReportFile() {
+  try {
+    const files = new Directory(Paths.document).list().filter((f) => f instanceof File && /^spike-report-.*\.json$/.test(f.name));
+    files.sort((a, b) => (b.modificationTime ?? 0) - (a.modificationTime ?? 0) || (a.name < b.name ? 1 : -1));
+    return files[0] || null;
+  } catch { return null; }
+}
+
+/**
+ * Open the share sheet with the report as a FILE (Nearby Share, Drive,
+ * Gmail attachment), not as pasted text: the documents folder is private
+ * to the app on Android, so this is the only way the file leaves the phone
+ * other than the bucket upload.
+ */
+export async function shareReportFile(file) {
+  if (!(await Sharing.isAvailableAsync())) throw new Error('sharing is not available on this device');
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: file.name });
+}
+
 /** Normalised B2 profile for the running device (used by both roles). */
 export async function readProfile() {
   const raw = await LoudCamera.survey();
@@ -58,7 +79,7 @@ export class SpikeSession {
     this.buffer = new CaptureBuffer({ deviceId: this.deviceId, sessionId: this.sessionId });
     this.collect = true; this.lastUploadAt = Date.now(); this.uploads = []; this.pending = new Map();
     this.timers = []; this.stateSub = null; this.lastState = null; this.lastCost = null; this.costSamples = [];
-    this.moving = false; this.soak = null; this.remoteTrack = null; this.rtts = [];
+    this.moving = false; this.soak = null; this.remoteTrack = null; this.rtts = []; this.reportUpload = null;
   }
 
   serverNow() { return this.offset ? Date.now() + this.offset.offsetMs : null; }
@@ -155,7 +176,7 @@ export class SpikeSession {
     return command;
   }
   zoom(target, durationMs = 2000, easing = 'ease-in-out') { return this.send(zoomCommand({ target, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
-  pan(direction, { degree = 0.5, window = 0.85, durationMs = 3000, easing = 'ease-in-out' } = {}) { return this.send(panCommand({ direction, degree, window, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
+  pan(direction, { degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing } = {}) { return this.send(panCommand({ direction, degree, window, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
 
   /** 20-minute soak: a move every 30 s, alternating zoom in, zoom out, pan. */
   startSoak(minutes = 20) {
@@ -208,11 +229,20 @@ export class SpikeSession {
         const r = await LoudCamera.zoomTo(steps, choice.mode, m.target);
         result = { ...r, mode: choice.mode, clamped: r.clamped || choice.clamped, reason: r.reason || choice.reason };
       } else {
-        const zoomNow = Math.max(st.deviceZoom || 1, 1);
-        const plan = panPlan({ direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing, zoomNow });
-        const deviceAvailable = this.profile?.deviceZoom?.available && plan.deviceZoom >= (this.profile.deviceZoom.min || 1);
-        const r = await LoudCamera.pan(deviceAvailable ? plan.deviceZoom : null, plan.path, plan.digitalFactor);
-        result = { ...r, mode: deviceAvailable ? 'device+crop' : 'crop', window: plan.window, digitalFactor: plan.digitalFactor };
+        // Plan from the framing the camera has NOW, so nothing jumps at the
+        // first step: the pull-back path ramps device zoom out and the
+        // window in on the same frames; without headroom the window eases
+        // in as part of the move (zoomPlan.panPlan). `path` says which ran.
+        const dz = this.profile?.deviceZoom;
+        const plan = panPlan({
+          direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing,
+          zoomNow: Number.isFinite(st.deviceZoom) ? st.deviceZoom : 1,
+          zoomMin: dz?.available ? dz.min : null, zoomMax: dz?.available ? dz.max : null,
+          cropNow: st.crop || null,
+        });
+        const mode = plan.path === 'pull-back' ? 'device+crop' : 'crop';
+        const r = await LoudCamera.pan(plan.steps, mode, plan.digitalFactor);
+        result = { ...r, mode, path: plan.path, window: plan.window, digitalFactor: plan.digitalFactor, leadInMs: plan.leadInMs, travel: plan.travel, pullBackFrom: plan.deviceZoomFrom, pullBackTo: plan.deviceZoom };
       }
     } catch (e) {
       result = { mode: 'none', requested: m.target ?? null, achieved: null, clamped: false, reason: String(e?.message || e), droppedFrames: 0, actualDurationMs: 0 };
@@ -263,12 +293,32 @@ export class SpikeSession {
 
   /** Everything the report needs, as one JSON object; the screen also writes it to a file. */
   report() {
-    return { role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION, profile: this.profile, clock: this.offset, rtt: this.rttSummary(), cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString() };
+    return { role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION, profile: this.profile, clock: this.offset, rtt: this.rttSummary(), cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString(), reportUpload: this.reportUpload ?? null };
   }
+  /**
+   * Write the report to the app's documents folder (app-private on Android:
+   * not visible in Files or over USB, hence shareReport and the upload),
+   * then upload the same JSON to the director-spike bucket through the
+   * signed-URL route. Returns { uri, name, upload }; the upload result is
+   * also kept on the session so a report written before the upload can
+   * still say whether it reached the bucket.
+   */
   async writeReport() {
-    const file = new File(Paths.document, `spike-report-${this.role}-${this.deviceId}-${Date.now()}.json`);
+    const name = `spike-report-${this.role}-${this.deviceId}-${Date.now()}.json`;
+    const file = new File(Paths.document, name);
     file.write(JSON.stringify(this.report(), null, 2));
-    return file.uri;
+    let upload;
+    try {
+      const minted = await api('/api/spike/upload-url', { method: 'POST', body: { name, deviceId: this.deviceId }, accessToken: this.accessToken });
+      if (!minted.ok) upload = { name, ok: false, error: minted.data?.error || minted.status };
+      else {
+        const up = await LoudCamera.uploadFile(file.uri, absoluteUploadUrl(minted.data.signedUrl), 'application/json', { 'x-upsert': 'false' });
+        upload = { name, ok: up.status >= 200 && up.status < 300, status: up.status, bytes: up.bytes, path: minted.data.path };
+      }
+    } catch (e) { upload = { name, ok: false, error: String(e?.message || e) }; }
+    this.reportUpload = upload;
+    this.onEvent('reportUpload', upload);
+    return { uri: file.uri, name, upload };
   }
 
   async stop() {

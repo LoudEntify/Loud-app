@@ -82,7 +82,7 @@ as noted; the spike exports the measured numbers in its report file.
 ### B5 Director decisions
 
 - Fields, intent row: decision id, kind, source (director, artist, main-device, rule), the proposal it overrode, decided/sent timestamps, and the intent (type, target zoom or tightness as a fraction of the wide reference, pan direction, degree, window, duration, easing).
-- Fields, result row: received/started/completed timestamps, mode (device, digital, device+crop), requested, achieved, clamped, reason, lens before and after, lens switch, dropped frames during the move, actual duration, round trip ms.
+- Fields, result row: received/started/completed timestamps, mode (device, digital, device+crop, crop), requested, achieved, clamped, reason, lens before and after, lens switch, dropped frames during the move, actual duration, round trip ms. For a pan also: path (`pull-back` = device zoom ramped out while the window closed in on the same frames; `crop-ease` = no zoom headroom, the window eased in as part of the move; `pan-only` = the window was already the asked size), window, digital factor, lead-in ms, travel (fraction of the frame actually moved), pull-back from/to device zoom.
 - Rate: a few per minute.
 - Capture: `commands.js` on the control phone writes the intent when it sends; the camera writes the intent on receipt and the result on completion; both ack over the data channel so either side's record is complete.
 - Store: both. `director_decisions` (two rows share `decision_id`; `shot_commands.decision_id` links the compositor's record). ~0.4 MB raw per hour.

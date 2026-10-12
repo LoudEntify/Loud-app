@@ -79,6 +79,7 @@ export default function ControllerScreen() {
         else if (kind === 'clock') { setClock(p); push(`clock offset ${p.offsetMs} ms ±${p.errorBoundMs}`); }
         else if (kind === 'upload') push(`batch ${p.ok ? 'ok' : 'FAILED'} ${p.records ?? ''} rec ${p.gzBytes ?? ''} B gz ${p.error || p.status || ''}`);
         else if (kind === 'soak') { setSoak(p.done ? null : p); push(p.done ? `soak done after ${p.moves} moves` : `soak move ${p.moves} at ${p.minutes} min`); }
+        else if (kind === 'reportUpload') { /* logged by finish() */ }
         else if (kind === 'error') push(`error: ${p}`);
         else if (kind === 'disconnected') { setStatus('disconnected'); push(`disconnected (${p})`); }
       },
@@ -92,10 +93,12 @@ export default function ControllerScreen() {
     s.stopSoak(); setSoak(null);
     push('stopping: uploading the last batch…');
     await s.stop();
-    const report = s.report();
+    const name = s.reportFileName();
+    downloadJson(name, s.report());
+    push(`report downloaded: ${name}`);
+    const up = await s.uploadReport(name);
+    push(up.ok ? `report uploaded to the bucket: ${up.path}` : `report upload FAILED: ${up.error || up.status}`);
     sess.current = null; setStatus('stopped'); setRemote(null);
-    downloadJson(s.reportFileName(), report);
-    push(`report downloaded: ${s.reportFileName()}`);
   }
 
   const s = sess.current;

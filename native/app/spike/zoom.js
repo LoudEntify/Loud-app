@@ -12,8 +12,9 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { styles } from '../../src/theme';
 import { color } from '../../src/shared';
 import { useSession } from '../../src/session';
+import { File } from 'expo-file-system';
 import * as LoudCamera from '../../modules/loud-camera';
-import { SpikeSession, runSurvey } from '../../src/spike/runtime';
+import { SpikeSession, runSurvey, latestReportFile, shareReportFile } from '../../src/spike/runtime';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
 function Btn({ label, onPress, tone = 'ghost', small }) {
@@ -67,13 +68,14 @@ export default function ZoomSpike() {
         if (kind === 'profile') setProfile(p);
         else if (kind === 'state') setState(p);
         else if (kind === 'ack') { setLastAck(p); push(`ack ${p.command.type} rtt ${p.rtt} ms → ${p.ack.result?.mode} ${p.ack.result?.achieved}x${p.ack.result?.lensSwitch ? ' LENS SWITCH' : ''} dropped ${p.ack.result?.droppedFrames}`); }
-        else if (kind === 'result') push(`did ${p.command.type}: ${p.result.mode} ${p.result.achieved}x in ${p.result.actualDurationMs} ms, dropped ${p.result.droppedFrames}${p.result.reason ? ` (${p.result.reason})` : ''}`);
+        else if (kind === 'result') push(`did ${p.command.type}: ${p.result.mode}${p.result.path ? ` [${p.result.path}]` : ''} ${p.result.achieved}x in ${p.result.actualDurationMs} ms, dropped ${p.result.droppedFrames}${p.result.reason ? ` (${p.result.reason})` : ''}`);
         else if (kind === 'command') push(`command ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); }
         else if (kind === 'published') push(`publishing track ${p.trackSid}`);
         else if (kind === 'remote') setRemote(p);
         else if (kind === 'clock') push(`clock offset ${p.offsetMs} ms ±${p.errorBoundMs}`);
         else if (kind === 'upload') push(`batch ${p.ok ? 'ok' : 'FAILED'} ${p.records ?? ''} rec ${p.gzBytes ?? ''} B gz ${p.error || p.status || ''}`);
+        else if (kind === 'reportUpload') { /* logged by finish() */ }
         else if (kind === 'collect') setCollect(p);
         else if (kind === 'soak') push(p.done ? `soak done after ${p.moves} moves` : `soak move ${p.moves} at ${p.minutes} min`);
         else if (kind === 'error') push(`error: ${p}`);
@@ -86,13 +88,24 @@ export default function ZoomSpike() {
 
   async function finish() {
     const s = sess.current; if (!s) return;
-    let report = null;
-    try { const uri = await s.writeReport(); report = s.report(); push(`report written: ${uri}`); } catch (e) { push(String(e?.message || e)); }
+    let written = null;
+    try {
+      written = await s.writeReport();
+      push(`report written: ${written.name}`);
+      push(written.upload?.ok ? `report uploaded to the bucket: ${written.upload.path}` : `report upload FAILED: ${written.upload?.error || written.upload?.status}`);
+    } catch (e) { push(String(e?.message || e)); }
     await s.stop(); sess.current = null; setMode(null); setStatus('stopped'); setState(null); setRemote(null);
-    // The app's documents folder is not reachable from the phone's Files
-    // app on Android 11+, so the report is also offered through the share
-    // sheet (email it, or AirDrop / Nearby Share it to a laptop).
-    if (report) { try { await Share.share({ title: 'spike report', message: JSON.stringify(report) }); } catch { /* dismissed */ } }
+    // The app's documents folder is private to the app on Android (not in
+    // Files, not over USB), so the report is offered as a FILE through the
+    // share sheet; "Share last report" below re-opens it any time.
+    if (written) { try { await shareReportFile(new File(written.uri)); } catch (e) { push(`share: ${String(e?.message || e)}`); } }
+  }
+
+  async function shareLatest() {
+    const f = latestReportFile();
+    if (!f) { push('no report on this phone yet'); return; }
+    push(`sharing ${f.name}`);
+    try { await shareReportFile(f); } catch (e) { push(`share: ${String(e?.message || e)}`); }
   }
 
   if (!LoudCamera.available) {
@@ -122,6 +135,7 @@ export default function ZoomSpike() {
         <Btn label="Camera (publishes, obeys commands)" tone="teal" onPress={() => begin('camera')} />
         <Btn label="Controller (sends commands)" tone="orange" onPress={() => begin('controller')} />
         <Btn label="Capability survey (no LiveKit)" onPress={() => setMode('survey')} />
+        <Btn label="Share last report" onPress={shareLatest} />
         <Btn label="Back" onPress={() => router.back()} />
       </View>
     );
@@ -160,6 +174,7 @@ export default function ZoomSpike() {
           <Btn small label={collect ? 'Collection ON' : 'Collection OFF'} onPress={() => s?.setCollect(!collect)} />
           <Btn small label="Upload now" onPress={() => s?.maybeUpload(true).catch((e) => push(String(e)))} />
           <Btn small label="Report + stop" tone="teal" onPress={finish} />
+          <Btn small label="Share last report" onPress={shareLatest} />
         </View>
         {s && <Text style={mono}>{JSON.stringify({ rtt: s.rttSummary(), cost: s.costSummary(), storage: s.storageSummary() })}</Text>}
         {log.map((l, i) => <Text key={i} style={[mono, { color: color.mutedOnDark }]}>{l}</Text>)}

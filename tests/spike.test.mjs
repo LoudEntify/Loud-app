@@ -1,7 +1,7 @@
 // Unit tests for the platform-free spike modules in native/src/spike.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseZoomMode, rampSchedule, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX } from '../native/src/spike/zoomPlan.js';
+import { chooseZoomMode, rampSchedule, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX, PAN_DEFAULTS } from '../native/src/spike/zoomPlan.js';
 import { zoomCommand, panCommand, ack, encode, decode, roundTripMs, TOPIC } from '../native/src/spike/commands.js';
 import { pickOffset, measureOffset, toServerMs } from '../native/src/spike/clock.js';
 import { CaptureBuffer, uploadDue, objectPath, BATCH_EVERY_MS, STATE_SAMPLE_MS, MAX_BUFFER_RECORDS } from '../native/src/spike/capture.js';
@@ -35,16 +35,66 @@ test('ramp schedule is monotonic, ends exactly on target, eased in log space', (
   assert.equal(ease('ease-in-out', 0.5), 0.5); assert.equal(ease('linear', 0.25), 0.25); assert.equal(ease('ease-out', 1), 1);
 });
 
-test('pan plan pulls device zoom back by the window and keeps the crop inside the frame', () => {
-  const p = panPlan({ direction: 'left', degree: 1, window: 0.8, durationMs: 300, stepMs: 100, zoomNow: 2 });
-  assert.equal(p.deviceZoom, 1.6); assert.equal(p.window, 0.8); assert.equal(p.digitalFactor, 1.25);
-  assert.equal(p.path.length, 3);
-  const last = p.path[p.path.length - 1];
-  assert.equal(last.x, 0); assert.equal(last.w, 0.8);
-  for (const step of p.path) { assert.ok(step.x >= 0 && step.x + step.w <= 1.0001); assert.ok(step.y >= 0 && step.y + step.h <= 1.0001); }
-  const down = panPlan({ direction: 'down', degree: 0.5, window: 0.9, durationMs: 100, stepMs: 100 });
-  assert.equal(down.deviceZoom, 1); // never below 1x
-  assert.ok(down.path[0].y > 0.05);
+const inFrame = (st) => st.x >= -1e-4 && st.y >= -1e-4 && st.x + st.w <= 1.0001 && st.y + st.h <= 1.0001;
+
+test('pan with zoom headroom: device zoom ramps out while the window ramps in, framing unchanged, then the window moves', () => {
+  const p = panPlan({ direction: 'left', zoomNow: 2, zoomMin: 1, zoomMax: 8, durationMs: 3000, stepMs: 100 });
+  assert.equal(p.path, 'pull-back'); assert.equal(p.window, 0.84); assert.equal(p.deviceZoom, 1.68); assert.equal(p.leadInMs, 700);
+  assert.equal(p.steps.length, 30);
+  const lead = p.steps.filter((st) => st.atMs <= 700);
+  assert.ok(lead.length >= 6);
+  for (const st of lead) {
+    assert.ok(st.deviceZoom != null, 'every lead-in step carries a device zoom');
+    assert.ok(Math.abs(st.deviceZoom / st.w - 2) < 0.01, `field of view constant during the lead-in: ${st.deviceZoom}/${st.w}`);
+    assert.ok(Math.abs(st.x + st.w / 2 - 0.5) < 1e-3, 'window stays centred until it starts to move');
+  }
+  const lastLead = lead[lead.length - 1];
+  assert.equal(lastLead.w, 0.84); assert.equal(lastLead.deviceZoom, 1.68);
+  // the first step was not a snap: the window is still almost the full frame
+  assert.ok(p.steps[0].w > 0.99 && p.steps[0].deviceZoom > 1.98);
+  const move = p.steps.filter((st) => st.atMs > 700);
+  for (let i = 1; i < move.length; i += 1) { assert.ok(move[i].x <= move[i - 1].x + 1e-9, 'moves left monotonically'); assert.equal(move[i].w, 0.84); }
+  const last = p.steps[p.steps.length - 1];
+  assert.equal(last.atMs, 3000); assert.equal(last.x, 0); assert.equal(p.travel, 0.08); assert.equal(p.travelRequested, 0.08);
+  assert.ok(p.steps.every(inFrame));
+});
+
+test('pan without headroom (1x, no wider lens): the window eases in as part of the move, nothing snaps', () => {
+  const p = panPlan({ direction: 'right', zoomNow: 1, zoomMin: 1, zoomMax: 8, durationMs: 3000, stepMs: 100 });
+  assert.equal(p.path, 'crop-ease'); assert.equal(p.deviceZoom, null); assert.equal(p.leadInMs, 0);
+  assert.ok(p.steps.every((st) => st.deviceZoom == null));
+  assert.ok(p.steps[0].w > 0.99, 'first step is almost the full frame');
+  for (let i = 1; i < p.steps.length; i += 1) {
+    assert.ok(p.steps[i].w <= p.steps[i - 1].w + 1e-9, 'window only shrinks');
+    assert.ok(p.steps[i].x + p.steps[i].w / 2 >= p.steps[i - 1].x + p.steps[i - 1].w / 2 - 1e-9, 'centre only moves right');
+    assert.ok(Math.abs(p.steps[i].w - p.steps[i - 1].w) < 0.03, 'no step changes the window by more than a few percent');
+  }
+  const last = p.steps[p.steps.length - 1];
+  assert.equal(last.w, 0.84); assert.equal(+(last.x + last.w / 2).toFixed(4), 0.58); assert.equal(p.travel, 0.08);
+  assert.ok(p.steps.every(inFrame));
+  // no device zoom at all (digital fallback profile) takes the same path
+  assert.equal(panPlan({ direction: 'up', zoomNow: 1, zoomMin: null, durationMs: 300, stepMs: 100 }).path, 'crop-ease');
+  // an ultrawide lens below 1x IS headroom at 1x
+  assert.equal(panPlan({ direction: 'up', zoomNow: 1, zoomMin: 0.6, zoomMax: 8, durationMs: 300, stepMs: 100 }).path, 'pull-back');
+});
+
+test('a second pan starts from the framing the first one left and just moves', () => {
+  const first = panPlan({ direction: 'left', zoomNow: 2, zoomMin: 1, zoomMax: 8, durationMs: 300, stepMs: 100 });
+  const left = first.steps[first.steps.length - 1];
+  const second = panPlan({ direction: 'up', zoomNow: first.deviceZoom, zoomMin: 1, zoomMax: 8, durationMs: 300, stepMs: 100, cropNow: { x: left.x, y: left.y, w: left.w, h: left.h } });
+  assert.equal(second.path, 'pan-only'); assert.equal(second.deviceZoom, null);
+  assert.equal(second.steps[0].x, left.x, 'starts where the first pan ended'); assert.equal(second.travel, 0.08);
+  // and a pan into the edge it already sits on is clamped to zero travel, not thrown
+  const again = panPlan({ direction: 'left', zoomNow: first.deviceZoom, zoomMin: 1, zoomMax: 8, durationMs: 300, stepMs: 100, cropNow: { x: left.x, y: left.y, w: left.w, h: left.h } });
+  assert.equal(again.travel, 0); assert.equal(again.travelRequested, 0.08);
+});
+
+test('pan defaults are clearly visible and never crop past the digital cap', () => {
+  assert.equal(PAN_DEFAULTS.degree, 1); assert.equal(PAN_DEFAULTS.window, 0.84);
+  assert.ok(panPlan({ direction: 'left', zoomMin: 1 }).travel >= 0.07, 'default travel is at least 7% of the frame');
+  const tight = panPlan({ direction: 'down', window: 0.5, zoomNow: 4, zoomMin: 1, zoomMax: 8, durationMs: 300, stepMs: 100 });
+  assert.equal(tight.window, +(1 / DIGITAL_ZOOM_MAX).toFixed(4)); assert.ok(tight.digitalFactor <= DIGITAL_ZOOM_MAX + 1e-4);
+  assert.equal(panPlan({ direction: 'down', degree: 0.5, window: 0.9, zoomMin: 1, durationMs: 100, stepMs: 100 }).travel, 0.025);
   assert.throws(() => panPlan({ direction: 'sideways', durationMs: 100 }));
 });
 
@@ -63,7 +113,7 @@ test('commands and acks round-trip through the wire format with every timestamp'
   assert.deepEqual(reply.timestamps, { decided: 1000, sent: 1002, received: 1050, started: 1052, completed: 2552 });
   assert.equal(decode(encode(reply)).forType, 'zoom');
   const pan = panCommand({ direction: 'up', decidedAt: 5 });
-  assert.equal(pan.type, 'pan'); assert.equal(pan.window, 0.85);
+  assert.equal(pan.type, 'pan'); assert.equal(pan.window, PAN_DEFAULTS.window); assert.equal(pan.degree, PAN_DEFAULTS.degree);
   assert.throws(() => decode(encode({ v: 99, type: 'zoom' })));
   assert.equal(roundTripMs(100, 130), 30); assert.equal(roundTripMs(100, 90), 0);
   assert.equal(TOPIC, 'loud.camera');

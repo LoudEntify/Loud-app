@@ -6,6 +6,8 @@
 //
 // PRD rows 12, 13, 127, 128. S&I: Real-time media, Observability.
 
+import { PAN_DEFAULTS } from './zoomPlan.js';
+
 export const TOPIC = 'loud.camera';
 export const PROTOCOL_VERSION = 1;
 
@@ -18,7 +20,7 @@ export function mintId(prefix = 'cmd') { seq += 1; return `${prefix}-${Date.now(
 export function zoomCommand({ target, durationMs = 2000, easing = 'ease-in-out', decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
   return { v: PROTOCOL_VERSION, type: 'zoom', id: mintId(), decisionId, source, target, durationMs, easing, decidedAt };
 }
-export function panCommand({ direction, degree = 0.5, window = 0.85, durationMs = 3000, easing = 'ease-in-out', decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
+export function panCommand({ direction, degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing, decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
   return { v: PROTOCOL_VERSION, type: 'pan', id: mintId(), decisionId, source, direction, degree, window, durationMs, easing, decidedAt };
 }
 export function surveyRequest({ decidedAt }) { return { v: PROTOCOL_VERSION, type: 'survey', id: mintId(), decidedAt }; }

@@ -29,8 +29,8 @@ export function stop() { return native ? native.stop() : missing(); }
 
 /** steps: [{atMs, zoom}] from zoomPlan.rampSchedule; mode 'device' | 'digital'. Resolves with the move result. */
 export function zoomTo(steps, mode, requested) { return native ? native.zoomTo(steps, mode, requested) : missing(); }
-/** deviceZoom: pull-back ratio (null for digital-only); steps: panPlan().path. */
-export function pan(deviceZoom, steps, requested) { return native ? native.pan(deviceZoom ?? null, steps, requested) : missing(); }
+/** steps: panPlan().steps (each with its own deviceZoom or null); mode 'device+crop' | 'crop'. Resolves with the move result. */
+export function pan(steps, mode, requested) { return native ? native.pan(steps, mode, requested) : missing(); }
 export function cancelMove() { return native ? native.cancelMove() : missing(); }
 export function resetFraming() { return native ? native.resetFraming() : missing(); }
 export function getState() { return native ? native.getState() : null; }

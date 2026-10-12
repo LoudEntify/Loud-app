@@ -25,7 +25,7 @@ import java.util.zip.GZIPOutputStream
  *   start({facing,width,height,fps}) → {streamId, trackId, tracks}
  *   stop()
  *   zoomTo(steps, mode, requested) → move result (resolves when the ramp ends)
- *   pan(steps, requested)         → move result
+ *   pan(steps, mode, requested)   → move result
  *   cancelMove(), resetFraming()
  *   getState()                    → camera state (B4)
  *   cost()                        → CostMeter sample
@@ -126,12 +126,15 @@ class LoudCameraModule : Module() {
       if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
     }
 
-    AsyncFunction("pan") { deviceZoom: Double?, steps: List<Map<String, Any?>>, requested: Double, promise: Promise ->
+    // steps: [{atMs, deviceZoom|null, x, y, w, h}] from zoomPlan.panPlan. A
+    // step carries the device zoom for THAT frame (the pull-back path ramps
+    // it alongside the crop) or null to leave the zoom where it is.
+    AsyncFunction("pan") { steps: List<Map<String, Any?>>, mode: String, requested: Double, promise: Promise ->
       val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
-      val plan = LoudCameraXCapturer.Plan("pan", if (deviceZoom != null) "device" else "digital", steps.mapIndexed { i, s ->
+      val plan = LoudCameraXCapturer.Plan("pan", mode, steps.map { s ->
         LoudCameraXCapturer.Step(
           (s["atMs"] as Number).toLong(),
-          if (i == 0) deviceZoom else null, // pull the device zoom back once, at the first step
+          (s["deviceZoom"] as? Number)?.toDouble(),
           floatArrayOf((s["x"] as Number).toFloat(), (s["y"] as Number).toFloat(), (s["w"] as Number).toFloat(), (s["h"] as Number).toFloat())
         )
       }, requested) { r -> promise.resolve(r) }
