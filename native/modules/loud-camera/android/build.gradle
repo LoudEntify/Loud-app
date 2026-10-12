@@ -21,6 +21,15 @@ android {
 }
 
 dependencies {
+  // React Native's bridge classes (ReactContext, Callback, WritableMap):
+  // the expo-module-gradle-plugin puts expo-modules-core on the classpath
+  // but react-android only as that module's own implementation
+  // dependency, so a module that talks to WebRTCModule has to name it.
+  // Version-less on purpose: the React Native Gradle plugin pins it to
+  // the installed react-native for every project in the build, the same
+  // way expo-modules-core declares it.
+  implementation "com.facebook.react:react-android"
+
   def camerax_version = "1.6.0"
   implementation "androidx.camera:camera-core:${camerax_version}"
   implementation "androidx.camera:camera-camera2:${camerax_version}"
