@@ -1,8 +1,12 @@
-// /get-app — design/WebGetApp.dc.html. The store links are placeholders
-// until the apps are listed (docs/NEEDS_KOREY.md: Apple and Google steps);
-// the badges here are drawn in CSS, and the official badge artwork goes in
-// when the listings exist.
+// /get-app — design/WebGetApp.dc.html. Until the apps are listed
+// (docs/NEEDS_KOREY.md: Apple and Google steps) there is one plain
+// "Coming soon" label, not a store button. When both store URLs exist,
+// the official "Download on the App Store" and "Get it on Google Play"
+// badge artwork (downloaded from Apple's and Google's badge pages, used
+// to their guidelines, never redrawn) replaces the label below, each
+// linking to its store.
 import SiteShell from '../../components/site/SiteShell';
+import { PhoneFrame, LiveViewScreen, DiscoverScreen } from '../../components/site/DemoScreens';
 
 export const metadata = { title: 'Get the app · Loudentify', description: 'Watch live shows, get told when your artists go on, and perform from the same app.' };
 
@@ -17,10 +21,17 @@ export default function GetApp() {
         <div className="w-hero-text">
           <h1 className="w-h1">Loudentify on your phone</h1>
           <p className="w-lead">Watch live shows, get told when your artists go on, and perform from the same app. A spare phone becomes your second camera.</p>
-          <div className="w-badges" data-testid="store-badges">
-            <a href={APP_STORE_URL || '/help/get-the-app'} className="w-store w-store-apple" aria-label="Download on the App Store" aria-disabled={!APP_STORE_URL}><span className="w-store-logo" /><span><small>Download on the</small><b>App Store</b></span></a>
-            <a href={PLAY_STORE_URL || '/help/get-the-app'} className="w-store w-store-play" aria-label="Get it on Google Play" aria-disabled={!PLAY_STORE_URL}><span className="w-store-logo" /><span><small>GET IT ON</small><b>Google Play</b></span></a>
-          </div>
+          {listed ? (
+            /* OFFICIAL STORE BADGES GO HERE once the apps are live: Apple's
+               and Google's badge artwork as <a href={APP_STORE_URL}> and
+               <a href={PLAY_STORE_URL}>, sized and spaced per their rules. */
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }} data-testid="store-links">
+              <a href={APP_STORE_URL} className="w-pill w-pill-lg w-pill-ink">App Store</a>
+              <a href={PLAY_STORE_URL} className="w-pill w-pill-lg w-pill-ink">Google Play</a>
+            </div>
+          ) : (
+            <span className="w-pill w-pill-lg w-pill-ghost w-coming-soon" aria-disabled="true" data-testid="store-coming-soon">Coming soon to iPhone and Android</span>
+          )}
           {!listed && <span className="w-note" data-testid="store-pending"><span className="w-badge w-badge-draft">NOT YET LISTED</span>&nbsp; The apps are built but not in the stores yet. Until then, the web app does everything.</span>}
           <div className="w-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 20, maxWidth: 420 }}>
             <span className="w-qr" aria-label="Scan to download">QR code when the apps are listed</span>
@@ -28,11 +39,10 @@ export default function GetApp() {
           </div>
           <span style={{ fontSize: 17 }}>Rather not install anything? <a href="/discover" className="w-link">Watch in your browser</a>.</span>
         </div>
-        <div className="w-hero-art" aria-hidden="true" style={{ minHeight: 560 }}>
-          <span className="w-phone w-phone-dark" style={{ width: 250, height: 500, left: '18%', top: 20, borderRadius: 36, borderWidth: 6 }} />
-          <span className="w-phone" style={{ width: 250, height: 500, left: '48%', top: 60, borderRadius: 36, borderWidth: 6 }} />
-          <span className="w-live-pill" style={{ left: '52%', top: 84 }}>LIVE</span>
-          <span className="w-bars" style={{ left: '24%', top: 420 }}><i style={{ height: 16, background: 'var(--teal)' }} /><i style={{ height: 30, background: 'var(--teal)' }} /><i style={{ height: 22, background: 'var(--orange)' }} /><i style={{ height: 12, background: 'var(--red)' }} /></span>
+        <div className="w-hero-art" aria-hidden="true" style={{ '--art-h': '660px' }}>
+          {/* back: the app's home, Discover; front: the viewer's live view. Both around illustrative performers. */}
+          <PhoneFrame width={250} left="10%" top={20} testid="get-app-phone-back" illustrative><DiscoverScreen file="amapiano.webp" lazy={false} /></PhoneFrame>
+          <PhoneFrame width={250} left="44%" top={70} testid="get-app-phone-front"><LiveViewScreen file="afrobeat.webp" lazy={false} /></PhoneFrame>
         </div>
       </section>
     </SiteShell>

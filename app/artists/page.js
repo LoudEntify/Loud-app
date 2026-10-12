@@ -1,6 +1,7 @@
 // /artists — For artists (design/WebForArtists.dc.html).
 import SiteShell from '../../components/site/SiteShell';
 import { Camera, Sliders, Coin, Mic, Wifi, Moon } from '../../components/site/SiteIcons';
+import { PhoneFrame, CamFeedScreen } from '../../components/site/DemoScreens';
 
 export const metadata = { title: 'For artists · Loudentify', description: 'No venue to book, no crew to hire, no algorithm deciding whether anyone hears you. Set a time, point your phones, and perform.' };
 
@@ -28,11 +29,11 @@ export default function ForArtists() {
             <a href="/pricing" className="w-pill w-pill-lg w-pill-outline">See what it costs</a>
           </div>
         </div>
-        <div className="w-hero-art" aria-hidden="true" style={{ minHeight: 380 }}>
-          <span className="w-phone" style={{ width: 200, height: 320, left: '20%', top: 20, borderRadius: 26 }} />
-          <span className="w-phone w-phone-dark" style={{ width: 200, height: 260, left: '50%', top: 80, borderRadius: 22 }} />
+        <div className="w-hero-art" aria-hidden="true" style={{ '--art-h': '560px' }}>
+          {/* one performance from two phones: the wide shot and the close-up are two crops of the same picture */}
           <span className="w-orb w-orb-teal" style={{ width: 160, height: 160, right: 0, bottom: 0 }} />
-          <span className="w-live-pill" style={{ left: '24%', top: 36 }}>LIVE</span>
+          <PhoneFrame width={200} left="12%" top={20} testid="artists-cam-1" illustrative><CamFeedScreen file="grime.webp" cam="wide" lazy={false} /></PhoneFrame>
+          <PhoneFrame width={200} left="48%" top={80} testid="artists-cam-2"><CamFeedScreen file="grime.webp" cam="close" lazy={false} /></PhoneFrame>
         </div>
       </section>
 
