@@ -7,7 +7,7 @@
 
 .w-root { background: #fdfffc; color: var(--ink); min-height: 100dvh; font-family: var(--font); -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; }
 .w-root *, .w-root *::before, .w-root *::after { box-sizing: border-box; }
-.w-root a { color: inherit; text-decoration: none; }
+:where(.w-root a) { color: inherit; text-decoration: none; } /* zero specificity, so .w-pill-ink and friends set their own text colour whatever loads after this */
 .w-root button, .w-root input, .w-root textarea, .w-root select { font-family: inherit; font-size: inherit; color: inherit; }
 .w-root button { cursor: pointer; border: 0; background: none; }
 .w-root h1, .w-root h2, .w-root h3, .w-root p { margin: 0; }
@@ -122,8 +122,17 @@
 .w-live-pill { position: absolute; padding: 4px 12px; border-radius: 999px; background: var(--red); color: #fff; font-weight: 700; letter-spacing: .1em; font-size: 13px; }
 .w-bars { position: absolute; display: flex; align-items: flex-end; gap: 5px; height: 40px; }
 .w-bars i { display: block; width: 7px; background: var(--ink); border-radius: 3px; }
-.w-phone { position: absolute; border: 4px solid var(--ink); border-radius: 26px; background: var(--silk-card); }
-.w-phone-dark { background: var(--silk-dark); }
+/* a phone body holding one of the app's screens (components/site/DemoScreens.jsx), scaled from 390 x 844 by --s */
+.w-device-wrap { position: absolute; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; --k: calc(var(--s) * var(--shrink, 1)); }
+.w-device { position: relative; width: calc(390px * var(--k)); height: calc(844px * var(--k)); border: 4px solid var(--ink); border-radius: calc(36px * var(--k) + 10px); background: var(--silk-card); overflow: hidden; box-shadow: 0 18px 40px rgba(1,22,39,.28); }
+.w-device-dark { background: var(--silk-dark); }
+.w-screen { position: absolute; left: 0; top: 0; width: 390px; height: 844px; transform: scale(var(--k)); transform-origin: 0 0; }
+.w-hero-art { min-height: var(--art-h, 460px); }
+@media (max-width: 640px) { .w-hero-art { --shrink: .72; min-height: calc(var(--art-h, 460px) * .72); } }
+.w-demo-screen { position: absolute; inset: 0; width: 390px; height: 844px; overflow: hidden; color: var(--porcelain); font-family: var(--font); }
+.w-illus { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: rgba(1,22,39,.72); color: rgba(253,255,252,.85); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.w-poster { display: block; }
+.w-poster-centre { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--porcelain); background: rgba(1,22,39,.35); }
 @media (prefers-reduced-motion: no-preference) {
   .w-anim .w-orb { animation: w-drift 9s ease-in-out infinite alternate; }
   .w-anim .w-orb-orange { animation-duration: 11s; animation-delay: -3s; }
@@ -188,15 +197,8 @@ textarea.w-input { height: auto; min-height: 150px; padding: 14px 16px; resize: 
 .w-skel { background: rgba(1,22,39,.08); border-radius: 12px; }
 @media (prefers-reduced-motion: no-preference) { .w-skel { animation: v-pulse 1.4s ease-in-out infinite; } }
 
-/* store badges */
-.w-badges { display: flex; gap: 14px; flex-wrap: wrap; }
-.w-store { height: 64px; border-radius: 14px; background: #000; color: #fff; display: inline-flex; align-items: center; gap: 12px; padding: 0 18px 0 14px; min-width: 200px; }
-.w-store .w-store-logo { width: 28px; height: 28px; border: 2px dashed rgba(255,255,255,.6); border-radius: 6px; flex-shrink: 0; }
-.w-store small { display: block; font-size: 13px; }
-.w-store b { display: block; font-size: 22px; font-weight: 600; line-height: 1; }
-.w-store-apple { font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif; }
-.w-store-play { font-family: Roboto, 'Helvetica Neue', sans-serif; }
-.w-store-play b { font-weight: 500; }
+/* store placeholder until the apps are listed (the official Apple and Google badges go in app/get-app/page.js then) */
+.w-coming-soon { cursor: default; opacity: .92; }
 .w-qr { width: 104px; height: 104px; background: #fff; border-radius: 10px; border: 1px solid rgba(1,22,39,.12); display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: .7; text-align: center; }
 
 /* countdown */

@@ -5,7 +5,7 @@
 
 .lm-root { --lm-header: 72px; --lm-gutter: clamp(16px, 4vw, 56px); position: relative; color: var(--porcelain); font-family: var(--font); -webkit-font-smoothing: antialiased; min-height: 100svh; overflow-x: clip; }
 .lm-root *, .lm-root *::before, .lm-root *::after { box-sizing: border-box; }
-.lm-root a { color: inherit; text-decoration: none; }
+:where(.lm-root a) { color: inherit; text-decoration: none; } /* zero specificity, so pill classes keep their own text colour */
 .lm-root button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; padding: 0; }
 .lm-root h1, .lm-root p { margin: 0; }
 .lm-root :focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; border-radius: 6px; }
@@ -153,7 +153,6 @@
 .lm-below .w-error { background: rgba(231, 29, 54, .22); }
 .lm-below .w-dark { background: rgba(253, 255, 252, .06); border: 1px solid rgba(253, 255, 252, .1); }
 .lm-below .w-card { color: var(--ink); }
-.lm-below a.w-pill-ink { color: var(--porcelain); }
 .lm-below .w-footer { border-top-color: rgba(253, 255, 252, .14); }
 .lm-below .w-footer-brand img { aspect-ratio: 1168 / 256; }
 .lm-below .w-social a { background: rgba(253, 255, 252, .12); }
