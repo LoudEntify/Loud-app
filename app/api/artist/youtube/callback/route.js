@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 import { correlationFrom } from '../../../../../lib/correlation';
-import { exchangeCode, signState } from '../../../../../lib/youtube/oauth';
+import { exchangeCode, readState, RETURN_TO } from '../../../../../lib/youtube/oauth';
 import { GoogleYouTubeApi } from '../../../../../lib/youtube/api';
 import { storeConnection, checkReadiness } from '../../../../../lib/youtube/connections';
 
@@ -12,10 +12,11 @@ export async function GET(request) {
   const cid = correlationFrom(request);
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state') || '';
-  const userId = state.split('.')[0];
-  const back = (q) => NextResponse.redirect(new URL(`/artist/onboarding?${q}`, url.origin));
-  if (!code || !userId || signState(userId) !== state) return back('youtube=error&reason=state');
+  const parsed = readState(url.searchParams.get('state'));
+  // Back to where the artist started: onboarding, or Settings (the state carries the choice, signed).
+  const back = (q) => NextResponse.redirect(new URL(`${parsed?.returnPath || RETURN_TO.onboarding}?${q}`, url.origin));
+  if (!code || !parsed) return back('youtube=error&reason=state');
+  const userId = parsed.userId;
   try {
     const tokens = await exchangeCode({ code, redirectUri: `${url.origin}/api/artist/youtube/callback` });
     const api = new GoogleYouTubeApi({ accessToken: tokens.accessToken });
