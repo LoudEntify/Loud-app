@@ -22,10 +22,9 @@ import java.util.zip.GZIPOutputStream
  * JS surface of the spike's camera (native/modules/loud-camera/index.js).
  *
  *   survey()                      B2 capability profile, no camera opened
- *   start({facing,width,height,fps}) → {streamId, trackId, tracks}
+ *   start({facing,width,height,fps,frameSource}) → {streamId, trackId, tracks}
  *   stop()
- *   zoomTo(steps, mode, requested) → move result (resolves when the ramp ends)
- *   pan(steps, mode, requested)   → move result
+ *   move(kind, mode, steps, requested) → move result (resolves when the last step has been applied)
  *   cancelMove(), resetFraming()
  *   getState()                    → camera state (B4)
  *   cost()                        → CostMeter sample
@@ -65,7 +64,8 @@ class LoudCameraModule : Module() {
       val width = (opts["width"] as? Number)?.toInt() ?: 1080
       val height = (opts["height"] as? Number)?.toInt() ?: 1920
       val fps = (opts["fps"] as? Number)?.toInt() ?: 30
-      val cap = LoudCameraXCapturer(react, facing, fps)
+      val frameSource = ((opts["frameSource"] as? String) ?: "auto").let { if (it in LoudCameraXCapturer.FRAME_SOURCES) it else "auto" }
+      val cap = LoudCameraXCapturer(react, facing, fps, frameSource)
       val ctl = LoudCaptureController(width, height, fps, cap)
       // WebRTCModule keeps its track table and PeerConnectionFactory on one
       // private single-thread executor (its ThreadUtils is package-private,
@@ -97,7 +97,7 @@ class LoudCameraModule : Module() {
           )
           capturer = cap; controller = ctl
           ticking = true; main.post(tick)
-          promise.resolve(mapOf("streamId" to streamId, "trackId" to trackId, "tracks" to listOf(trackInfo)))
+          promise.resolve(mapOf("streamId" to streamId, "trackId" to trackId, "tracks" to listOf(trackInfo), "frameSourceWanted" to frameSource))
         } catch (e: Exception) {
           promise.reject(CodedException("ERR_START", e.message ?: "start failed", e))
         }
@@ -113,29 +113,21 @@ class LoudCameraModule : Module() {
       null
     }
 
-    AsyncFunction("zoomTo") { steps: List<Map<String, Any?>>, mode: String, requested: Double, promise: Promise ->
+    // One move for zooms and pans alike. steps: [{atMs, deviceZoom|null,
+    // crop:[x,y,w,h]|null}] from zoomPlan.js (zoomSchedule / panPlan): a step
+    // carries the device zoom and/or the crop window for THAT frame; null
+    // leaves the value where it is. kind 'zoom' | 'pan'; mode 'device' |
+    // 'digital' | 'device+crop' | 'crop'; requested is what the result's
+    // `achieved` is compared with.
+    AsyncFunction("move") { kind: String, mode: String, steps: List<Map<String, Any?>>, requested: Double, promise: Promise ->
       val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
-      val plan = LoudCameraXCapturer.Plan("zoom", mode, steps.map { s ->
-        val at = (s["atMs"] as Number).toLong()
-        val z = (s["zoom"] as Number).toDouble()
-        if (mode == "digital") {
-          val w = (1.0 / z).toFloat().coerceIn(0.1f, 1f)
-          LoudCameraXCapturer.Step(at, null, floatArrayOf((1f - w) / 2f, (1f - w) / 2f, w, w))
-        } else LoudCameraXCapturer.Step(at, z, null)
-      }, requested) { r -> promise.resolve(r) }
-      if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
-    }
-
-    // steps: [{atMs, deviceZoom|null, x, y, w, h}] from zoomPlan.panPlan. A
-    // step carries the device zoom for THAT frame (the pull-back path ramps
-    // it alongside the crop) or null to leave the zoom where it is.
-    AsyncFunction("pan") { steps: List<Map<String, Any?>>, mode: String, requested: Double, promise: Promise ->
-      val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
-      val plan = LoudCameraXCapturer.Plan("pan", mode, steps.map { s ->
+      val plan = LoudCameraXCapturer.Plan(kind, mode, steps.map { s ->
+        @Suppress("UNCHECKED_CAST")
+        val c = s["crop"] as? List<Number>
         LoudCameraXCapturer.Step(
           (s["atMs"] as Number).toLong(),
           (s["deviceZoom"] as? Number)?.toDouble(),
-          floatArrayOf((s["x"] as Number).toFloat(), (s["y"] as Number).toFloat(), (s["w"] as Number).toFloat(), (s["h"] as Number).toFloat())
+          if (c != null && c.size == 4) floatArrayOf(c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), c[3].toFloat()) else null
         )
       }, requested) { r -> promise.resolve(r) }
       if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))

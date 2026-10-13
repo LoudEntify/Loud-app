@@ -45,5 +45,33 @@ export function decode(bytes) {
   return m;
 }
 
-/** Round-trip time as the controller sees it: ack arrival minus command send, on one clock. */
+/** The whole command cycle as the controller sees it: ack arrival minus command send, on one clock. It INCLUDES the move (2-3 s by design). */
 export function roundTripMs(sentAt, ackArrivedAt) { return Math.max(0, ackArrivedAt - sentAt); }
+
+/**
+ * The three latencies an ack lets the controller measure:
+ *   moveCycleMs       send → ack arrived, local clock: the whole cycle
+ *                     including the move itself (what the old reports
+ *                     called "rtt");
+ *   commandLatencyMs  sent → received on the camera, server clock: the
+ *                     network leg out (null until both clocks are synced);
+ *   ackLegMs          completed on the camera → ack arrived here, server
+ *                     clock: the network leg back.
+ */
+export function ackLatencies(ackMessage, { sentLocal, arrivedLocal, arrivedServer = null }) {
+  const t = ackMessage?.timestamps || {};
+  const leg = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? b - a : null);
+  return { moveCycleMs: roundTripMs(sentLocal, arrivedLocal), commandLatencyMs: leg(t.sent, t.received), ackLegMs: leg(t.completed, arrivedServer), moveMs: leg(t.started, t.completed) };
+}
+
+/** n / p50 / p90 / max of each latency over a session, or null with nothing recorded. */
+export function summariseLatencies(list) {
+  if (!list?.length) return null;
+  const stat = (key) => {
+    const s = list.map((l) => l[key]).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+    if (!s.length) return null;
+    const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
+    return { n: s.length, p50: q(0.5), p90: q(0.9), max: s[s.length - 1] };
+  };
+  return { moveCycleMs: stat('moveCycleMs'), commandLatencyMs: stat('commandLatencyMs'), ackLegMs: stat('ackLegMs'), moveMs: stat('moveMs') };
+}

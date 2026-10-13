@@ -59,9 +59,9 @@ object CameraSurvey {
       CameraMetadata.LENS_FACING_BACK -> "back"; CameraMetadata.LENS_FACING_FRONT -> "front"; else -> "external"
     }
     val focals = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList() ?: emptyList()
-    val sensor = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+    val physical = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
     val focal = focals.minOrNull()
-    val fov = if (sensor != null && focal != null && focal > 0f) Math.toDegrees(2.0 * atan((sensor.width / (2.0 * focal)))) else null
+    val fov = if (physical != null && focal != null && focal > 0f) Math.toDegrees(2.0 * atan((physical.width / (2.0 * focal)))) else null
     val caps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList() ?: emptyList()
     val logical = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
     val physicalIds = if (Build.VERSION.SDK_INT >= 28) ch.physicalCameraIds.toList() else emptyList()
@@ -79,15 +79,35 @@ object CameraSurvey {
     val available = zMax > zMin && zMax > 1.0001
     if (!available && reason == null) reason = "zoom range is $zMin to $zMax"
 
-    // Optical reach and switch-over factors from the physical lenses.
+    // Optical reach and switch-over factors from the physical lenses, and
+    // each lens's sensor (survey.js turns these into the zoom ranges and
+    // the 1080p quality ceiling). A camera with no physical ids is its
+    // own one lens.
+    val physicalLenses = ArrayList<Map<String, Any?>>()
     val physicalFocals = ArrayList<Double>()
     for (pid in physicalIds) {
       val pch = try { cm.getCameraCharacteristics(pid) } catch (e: Exception) { null } ?: continue
-      pch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()?.let { physicalFocals.add(it.toDouble()) }
+      val pf = pch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull()?.toDouble()
+      if (pf != null) physicalFocals.add(pf)
+      physicalLenses.add(mapOf("id" to pid, "focalLengthMm" to pf, "sensor" to sensorOf(pch)))
     }
+    if (physicalLenses.isEmpty()) physicalLenses.add(mapOf("id" to id, "focalLengthMm" to focal?.toDouble(), "sensor" to sensorOf(ch)))
     val shortest = physicalFocals.minOrNull()
     val switchOver = if (shortest != null && shortest > 0) physicalFocals.map { round2(it / shortest) }.filter { it > 1.01 }.distinct().sorted() else emptyList()
     val opticalMax = if (switchOver.isNotEmpty()) switchOver.last() else 1.0
+
+    // Which frame path LoudCameraXCapturer.chooseFrameSource would pick
+    // for this camera (same rule, so the survey can say it without
+    // opening the camera).
+    val sensor = sensorOf(ch)
+    val freeform = sensor["croppingType"] == "freeform"
+    val maxDigital = sensor["maxDigitalZoom"] as Double
+    val frameSource = when {
+      !freeform -> mapOf("eligible" to "gpu", "reason" to "SCALER_CROPPING_TYPE is CENTER_ONLY: the HAL would re-centre a pan")
+      maxDigital < 1.2 -> mapOf("eligible" to "gpu", "reason" to "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM $maxDigital leaves no room to crop")
+      logical -> mapOf("eligible" to "gpu", "reason" to "logical multi-camera: zoomRatio keeps the optical lens switch (hardware can be forced)")
+      else -> mapOf("eligible" to "hardware", "reason" to "FREEFORM crop region, max digital zoom $maxDigital")
+    }
 
     val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
     val sizes = map?.getOutputSizes(ImageFormat.YUV_420_888)?.toList() ?: emptyList()
@@ -114,7 +134,10 @@ object CameraSurvey {
       "facing" to facing,
       "focalLengthMm" to focal?.toDouble(),
       "focalLengthsMm" to focals.map { it.toDouble() },
-      "sensorMm" to if (sensor != null) mapOf("width" to sensor.width.toDouble(), "height" to sensor.height.toDouble()) else null,
+      "sensorMm" to if (physical != null) mapOf("width" to physical.width.toDouble(), "height" to physical.height.toDouble()) else null,
+      "sensor" to sensor,
+      "physicalLenses" to physicalLenses,
+      "frameSource" to frameSource,
       "fieldOfViewDeg" to fov?.let { round2(it) },
       "maxZoomOnThisLens" to zMax,
       "deviceZoom" to mapOf(
@@ -131,6 +154,29 @@ object CameraSurvey {
       "manualFocus" to manualFocus,
       "manualExposure" to manualExposure,
       "hardwareLevel" to ch.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+    )
+  }
+
+  /**
+   * The sensor behind one camera id: the active array (what a frame can
+   * come from), the pixel array, how the HAL crops (FREEFORM lets a crop
+   * region sit off-centre; CENTER_ONLY re-centres it), the most it will
+   * crop, and the lens apertures (for the low-light measure in B4).
+   */
+  private fun sensorOf(ch: CameraCharacteristics): Map<String, Any?> {
+    val active = ch.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+    val pixels = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+    val cropping = when (ch.get(CameraCharacteristics.SCALER_CROPPING_TYPE)) {
+      CameraMetadata.SCALER_CROPPING_TYPE_FREEFORM -> "freeform"
+      CameraMetadata.SCALER_CROPPING_TYPE_CENTER_ONLY -> "center-only"
+      else -> null
+    }
+    return mapOf(
+      "activeArray" to if (active != null) mapOf("width" to active.width(), "height" to active.height(), "left" to active.left, "top" to active.top) else null,
+      "pixelArray" to if (pixels != null) mapOf("width" to pixels.width, "height" to pixels.height) else null,
+      "croppingType" to cropping,
+      "maxDigitalZoom" to (ch.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)?.toDouble() ?: 1.0),
+      "apertures" to (ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.map { it.toDouble() } ?: emptyList<Double>())
     )
   }
 

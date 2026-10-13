@@ -1,7 +1,10 @@
 package app.loudentify.loudcamera
 
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
@@ -12,14 +15,19 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.Range
 import android.util.Size
+import android.view.Surface
 import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -30,39 +38,65 @@ import livekit.org.webrtc.JavaI420Buffer
 import livekit.org.webrtc.SurfaceTextureHelper
 import livekit.org.webrtc.VideoCapturer
 import livekit.org.webrtc.VideoFrame
+import livekit.org.webrtc.VideoSink
 import livekit.org.webrtc.YuvHelper
 import java.nio.ByteBuffer
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * A WebRTC VideoCapturer fed by CameraX ImageAnalysis, with the zoom and
- * pan engine of the spike in the frame path:
+ * A WebRTC VideoCapturer fed by CameraX, with the zoom and pan engine of
+ * the spike in the frame path. Three FRAME SOURCES, chosen at start()
+ * and reported in every state sample and move result (`frameSource`):
  *
- *   - DEVICE zoom: CameraControl.setZoomRatio(), stepped once per frame
- *     along a schedule the JS side computed (native/src/spike/zoomPlan.js).
- *     On a logical multi-camera the HAL switches lens inside that call;
- *     LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID in the capture results
- *     tells us when it did.
- *   - DIGITAL zoom and PAN: a crop window on the I420 frame, scaled back
- *     to the full output size with libyuv (VideoFrame.Buffer.cropAndScale),
- *     never above DIGITAL_ZOOM_MAX (enforced upstream in zoomPlan.js;
- *     the engine applies whatever window it is given and reports it).
+ *   hardware  CameraX Preview straight into WebRTC's SurfaceTextureHelper
+ *             (no copy), and BOTH zoom and pan done by the camera HAL
+ *             through SCALER_CROP_REGION with CONTROL_ZOOM_RATIO held at
+ *             1.0. Costs no CPU and no GPU. Needs SCALER_CROPPING_TYPE
+ *             FREEFORM (an off-centre region on a CENTER_ONLY device is
+ *             silently re-centred by the HAL). The crop-region API does
+ *             not switch lenses the way zoomRatio does, so on a logical
+ *             multi-camera `auto` prefers the GPU path to keep optical
+ *             zoom; `hardware` forces it anyway.
+ *   gpu       the same no-copy texture path; zoom via CameraControl
+ *             .setZoomRatio() (CONTROL_ZOOM_RATIO: optical lens switches
+ *             on multi-camera phones), pan as a crop of the OES texture
+ *             (VideoFrame.TextureBuffer.cropAndScale, a matrix change the
+ *             encoder's GL pass applies; no pixels are touched on the CPU).
+ *   cpu       the original path, kept behind the flag for comparison:
+ *             ImageAnalysis YUV frames copied to I420 and cropped/scaled
+ *             with libyuv. On the Moto G35 this costs 21–30 ms per frame
+ *             and the phone fell to 23 fps after 15 minutes.
  *
- * Everything the director will later want to know about a move is
- * measured here and returned with the move's result.
+ * Why the hardware path holds zoomRatio at 1.0: the Camera2 reference for
+ * CONTROL_ZOOM_RATIO says a crop region with zoomRatio other than 1.0 may
+ * only letterbox or pillarbox, and a windowboxing region is overridden to
+ * the whole active array by the framework. So a hardware pan has to carry
+ * the zoom too, pre-API-30 style, within [1, SCALER_AVAILABLE_MAX_DIGITAL_ZOOM].
+ *
+ * The move engine is the same for all three: steps from zoomPlan.js, each
+ * with an optional device zoom and an optional crop window (display-frame
+ * fractions), applied once per frame. Everything the director will later
+ * want to know about a move is measured here and returned with its result.
  */
 class LoudCameraXCapturer(
   private val context: Context,
   private val facing: String,
-  private val fps: Int
+  private val fps: Int,
+  private val frameSourceWanted: String = "auto"
 ) : VideoCapturer {
-  companion object { private const val TAG = "LoudCamera" }
+  companion object {
+    private const val TAG = "LoudCamera"
+    val FRAME_SOURCES = listOf("auto", "hardware", "gpu", "cpu")
+  }
 
   /** One step of a planned move. Fractions are in the DISPLAY frame (0..1). */
   class Step(val atMs: Long, val deviceZoom: Double?, val crop: FloatArray?)
@@ -78,6 +112,7 @@ class LoudCameraXCapturer(
   }
 
   private var observer: CapturerObserver? = null
+  private var helper: SurfaceTextureHelper? = null
   private var provider: ProcessCameraProvider? = null
   private var camera: Camera? = null
   private val lifecycle = SpikeLifecycle()
@@ -85,15 +120,31 @@ class LoudCameraXCapturer(
   private val analyzerExecutor = Executors.newSingleThreadExecutor()
 
   @Volatile var cameraId: String? = null
+  @Volatile var frameSource: String = "cpu"
+  @Volatile var frameSourceReason: String? = null
   @Volatile private var plan: Plan? = null
   // Current digital crop window in display-frame fractions: x, y, w, h.
   @Volatile private var crop = floatArrayOf(0f, 0f, 1f, 1f)
   @Volatile private var digitalFactor = 1.0
 
+  // Hardware path: the HAL does zoom and crop in one region. `crop` then
+  // IS the shot window (zoomPlan.realise sends deviceZoom 1 and the
+  // window of the wide frame); digitalFactor stays 1 because nothing is
+  // cropped after the sensor.
+  private var activeArray: Rect? = null
+  private var maxDigitalZoom = 1.0
+  private var croppingFreeform = false
+  private var logicalMultiCamera = false
+  @Volatile private var hwRegion: Rect? = null
+  @Volatile private var appliedRegion: Rect? = null
+  @Volatile private var hwPushes = 0L
+  @Volatile private var hwClamped = false
+
   // Capture-result telemetry (updated on the camera thread).
   @Volatile var activePhysicalId: String? = null
   @Volatile var reportedZoomRatio: Double? = null
   @Volatile var focalLengthMm: Double? = null
+  @Volatile var aperture: Double? = null
   @Volatile var iso: Int? = null
   @Volatile var exposureNs: Long? = null
   @Volatile var focusDistance: Double? = null
@@ -115,7 +166,7 @@ class LoudCameraXCapturer(
   val moving: Boolean get() = plan != null
 
   // ── VideoCapturer ────────────────────────────────────────────
-  override fun initialize(helper: SurfaceTextureHelper?, ctx: Context?, obs: CapturerObserver?) { observer = obs }
+  override fun initialize(helper: SurfaceTextureHelper?, ctx: Context?, obs: CapturerObserver?) { observer = obs; this.helper = helper }
   override fun isScreencast(): Boolean = false
   override fun changeCaptureFormat(width: Int, height: Int, framerate: Int) { /* fixed for the spike */ }
   override fun dispose() { analyzerExecutor.shutdown() }
@@ -139,6 +190,7 @@ class LoudCameraXCapturer(
   override fun stopCapture() {
     val latch = CountDownLatch(1)
     main.post {
+      try { helper?.stopListening() } catch (e: Exception) { Log.w(TAG, "stopListening", e) }
       try { provider?.unbindAll(); lifecycle.stop() } catch (e: Exception) { Log.w(TAG, "unbind", e) }
       camera = null
       observer?.onCapturerStopped()
@@ -153,23 +205,82 @@ class LoudCameraXCapturer(
       .requireLensFacing(if (facing == "front") CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
       .build()
     val landscape = Size(max(width, height), minOf(width, height))
-    val builder = ImageAnalysis.Builder()
-      .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-      .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-      .setResolutionSelector(
-        ResolutionSelector.Builder()
-          .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-          .setResolutionStrategy(ResolutionStrategy(landscape, ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
-          .build()
-      )
-    Camera2Interop.Extender(builder)
-      .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
-      .setSessionCaptureCallback(captureCallback)
-    val analysis = builder.build()
-    analysis.setAnalyzer(analyzerExecutor) { image -> onImage(image) }
+    val resolution = ResolutionSelector.Builder()
+      .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+      .setResolutionStrategy(ResolutionStrategy(landscape, ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+      .build()
+    val wantTexture = frameSourceWanted != "cpu" && helper != null
+    if (frameSourceWanted != "cpu" && helper == null) frameSourceReason = "no SurfaceTextureHelper from WebRTC: CPU path"
+
+    val useCase: UseCase = if (wantTexture) {
+      val builder = Preview.Builder().setResolutionSelector(resolution)
+      Camera2Interop.Extender(builder)
+        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
+        .setSessionCaptureCallback(captureCallback)
+      val preview = builder.build()
+      val h = helper!!
+      preview.setSurfaceProvider(ContextCompat.getMainExecutor(context)) { request ->
+        val size = request.resolution
+        outputWidth = size.width; outputHeight = size.height
+        val st = h.surfaceTexture
+        st.setDefaultBufferSize(size.width, size.height)
+        h.setTextureSize(size.width, size.height)
+        request.provideSurface(Surface(st), ContextCompat.getMainExecutor(context)) { /* released with the use case */ }
+      }
+      preview
+    } else {
+      val builder = ImageAnalysis.Builder()
+        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+        .setResolutionSelector(resolution)
+      Camera2Interop.Extender(builder)
+        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
+        .setSessionCaptureCallback(captureCallback)
+      val analysis = builder.build()
+      analysis.setAnalyzer(analyzerExecutor) { image -> onImage(image) }
+      analysis
+    }
+
     lifecycle.start()
-    camera = provider.bindToLifecycle(lifecycle, selector, analysis)
-    cameraId = try { Camera2CameraInfo.from(camera!!.cameraInfo).cameraId } catch (e: Exception) { null }
+    val cam = provider.bindToLifecycle(lifecycle, selector, useCase)
+    camera = cam
+    val info = try { Camera2CameraInfo.from(cam.cameraInfo) } catch (e: Exception) { null }
+    cameraId = info?.cameraId
+    readCharacteristics(info)
+    frameSource = chooseFrameSource(wantTexture)
+    rotation = try { cam.cameraInfo.getSensorRotationDegrees(Surface.ROTATION_0) } catch (e: Exception) { 90 }
+    if (wantTexture) {
+      val h = helper!!
+      h.setFrameRotation(rotation)
+      h.startListening(VideoSink { frame -> onTextureFrame(frame) })
+      if (frameSource == "hardware") pushRegion(null)
+    }
+    Log.i(TAG, "bound camera $cameraId frameSource=$frameSource (${frameSourceReason ?: "chosen"}) rotation=$rotation")
+  }
+
+  @OptIn(ExperimentalCamera2Interop::class)
+  private fun readCharacteristics(info: Camera2CameraInfo?) {
+    if (info == null) return
+    try {
+      activeArray = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+      maxDigitalZoom = (info.getCameraCharacteristic(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
+      croppingFreeform = info.getCameraCharacteristic(CameraCharacteristics.SCALER_CROPPING_TYPE) == CameraMetadata.SCALER_CROPPING_TYPE_FREEFORM
+      val caps = info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList() ?: emptyList()
+      logicalMultiCamera = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
+      if (aperture == null) aperture = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull()?.toDouble()
+    } catch (e: Exception) { Log.w(TAG, "characteristics", e) }
+  }
+
+  /** The rule, so it can be read back from the result records: see the class comment. */
+  private fun chooseFrameSource(texture: Boolean): String {
+    if (!texture) { if (frameSourceReason == null) frameSourceReason = "cpu requested"; return "cpu" }
+    if (frameSourceWanted == "gpu") { frameSourceReason = "gpu requested"; return "gpu" }
+    if (activeArray == null) { frameSourceReason = "no active array size: GPU path"; return "gpu" }
+    if (!croppingFreeform) { frameSourceReason = "SCALER_CROPPING_TYPE is CENTER_ONLY: the HAL would re-centre a pan; GPU path"; return "gpu" }
+    if (maxDigitalZoom < 1.2) { frameSourceReason = "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM $maxDigitalZoom leaves no room to crop; GPU path"; return "gpu" }
+    if (logicalMultiCamera && frameSourceWanted != "hardware") { frameSourceReason = "logical multi-camera: zoomRatio keeps the optical lens switch, so GPU path (force with frameSource=hardware)"; return "gpu" }
+    frameSourceReason = if (frameSourceWanted == "hardware") "hardware requested (FREEFORM crop, max digital zoom $maxDigitalZoom)" else "FREEFORM crop region, max digital zoom $maxDigitalZoom"
+    return "hardware"
   }
 
   private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -177,15 +288,43 @@ class LoudCameraXCapturer(
       if (Build.VERSION.SDK_INT >= 29) activePhysicalId = result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
       if (Build.VERSION.SDK_INT >= 30) result.get(CaptureResult.CONTROL_ZOOM_RATIO)?.let { reportedZoomRatio = it.toDouble() }
       result.get(CaptureResult.LENS_FOCAL_LENGTH)?.let { focalLengthMm = it.toDouble() }
+      result.get(CaptureResult.LENS_APERTURE)?.let { aperture = it.toDouble() }
       iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
       exposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
       result.get(CaptureResult.LENS_FOCUS_DISTANCE)?.let { focusDistance = it.toDouble() }
       aeState = result.get(CaptureResult.CONTROL_AE_STATE)
       afState = result.get(CaptureResult.CONTROL_AF_STATE)
+      appliedRegion = result.get(CaptureResult.SCALER_CROP_REGION)
     }
   }
 
-  // ── frame path ───────────────────────────────────────────────
+  // ── frame path: texture (hardware / gpu) ─────────────────────
+  private fun onTextureFrame(frame: VideoFrame) {
+    val obs = observer ?: return
+    val t0 = SystemClock.elapsedRealtimeNanos()
+    val nowMs = SystemClock.elapsedRealtime()
+    accountFrame(nowMs)
+    advancePlan(nowMs)
+    val c = crop
+    if (frameSource == "gpu" && (c[2] < 0.999f || c[3] < 0.999f)) {
+      val buffer = frame.buffer
+      val w = buffer.width; val h = buffer.height
+      val r = toSensorRect(frame.rotation, c)
+      val cx = (r[0] * w).roundToInt().coerceIn(0, w - 2); val cy = (r[1] * h).roundToInt().coerceIn(0, h - 2)
+      val cw = max(2, (r[2] * w).roundToInt()).coerceAtMost(w - cx); val ch = max(2, (r[3] * h).roundToInt()).coerceAtMost(h - cy)
+      // A TextureBuffer crop is a change to the texture transform matrix,
+      // applied when the encoder draws the texture: no pixels move here.
+      val cropped = buffer.cropAndScale(cx, cy, cw, ch, w, h)
+      val out = VideoFrame(cropped, frame.rotation, frame.timestampNs)
+      obs.onFrameCaptured(out)
+      cropped.release()
+    } else {
+      obs.onFrameCaptured(frame)
+    }
+    convertMsTotal += (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000.0
+  }
+
+  // ── frame path: cpu ──────────────────────────────────────────
   private fun onImage(image: ImageProxy) {
     val obs = observer
     if (obs == null) { image.close(); return }
@@ -272,6 +411,66 @@ class LoudCameraXCapturer(
   }
   private fun even(v: Int): Int = v and 1.inv()
 
+  // ── hardware path: one crop region carries zoom and pan ──────
+  /**
+   * The output stream is the 16:9 band centred in the active array (the
+   * HAL letterboxes the region to the stream's aspect); the crop window
+   * (display-frame fractions of the wide frame) picks a sub-rectangle of
+   * that band. The region can not be smaller than
+   * activeArray / SCALER_AVAILABLE_MAX_DIGITAL_ZOOM; beyond that the HAL
+   * rounds up, so it is clamped here and reported (`clamped`).
+   */
+  private fun regionFor(c: FloatArray): Pair<Rect, Boolean> {
+    val a = activeArray!!
+    val aw = a.width().toDouble(); val ah = a.height().toDouble()
+    var bandW = aw; var bandH = aw * 9.0 / 16.0
+    if (bandH > ah) { bandH = ah; bandW = ah * 16.0 / 9.0 }
+    val bandL = a.left + (aw - bandW) / 2.0; val bandT = a.top + (ah - bandH) / 2.0
+    val s = toSensorRect(rotation, c)
+    var fx = s[0].toDouble(); var fy = s[1].toDouble()
+    var fw = s[2].toDouble(); var fh = s[3].toDouble()
+    val minW = aw / maxDigitalZoom / bandW; val minH = ah / maxDigitalZoom / bandH
+    var clamped = false
+    if (fw < minW || fh < minH) {
+      val k = max(minW / fw, minH / fh)
+      val cx = fx + fw / 2; val cy = fy + fh / 2
+      fw *= k; fh *= k; fx = cx - fw / 2; fy = cy - fh / 2; clamped = true
+    }
+    fx = fx.coerceIn(0.0, 1.0 - fw); fy = fy.coerceIn(0.0, 1.0 - fh)
+    val l = (bandL + fx * bandW).roundToInt(); val t = (bandT + fy * bandH).roundToInt()
+    val r = (bandL + (fx + fw) * bandW).roundToInt(); val b = (bandT + (fy + fh) * bandH).roundToInt()
+    return Rect(max(a.left, l), max(a.top, t), min(a.right, r), min(a.bottom, b)) to clamped
+  }
+
+  @OptIn(ExperimentalCamera2Interop::class)
+  private fun pushRegion(p: Plan?) {
+    val cam = camera ?: return
+    if (activeArray == null) return
+    val (rect, clamped) = regionFor(crop)
+    hwClamped = clamped
+    val last = hwRegion
+    if (last != null && last == rect) return
+    hwRegion = rect
+    hwPushes += 1
+    try {
+      val opts = CaptureRequestOptions.Builder().setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, rect).build()
+      val fut = Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(opts)
+      fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e) && p != null) p.refusedReason = "crop region $rect refused: ${e.cause?.message ?: e.message}" } }, Executor { it.run() })
+    } catch (e: Exception) { if (p != null) p.refusedReason = "crop region threw: ${e.message}" }
+  }
+
+  /** CameraX cancels the previous setZoomRatio / options future whenever a newer value lands: at 30 steps a second that is expected, not a refusal. */
+  private fun isCancellation(e: Throwable): Boolean {
+    var t: Throwable? = e
+    while (t != null) {
+      if (t is CancellationException) return true
+      val m = t.message ?: ""
+      if (m.contains("Cancelled", ignoreCase = true) || m.contains("Canceled", ignoreCase = true)) return true
+      t = t.cause
+    }
+    return false
+  }
+
   // ── move engine ──────────────────────────────────────────────
   /** Start a move. `steps` come from zoomPlan.js; the promise behind onDone resolves when the last step has been applied. */
   fun startMove(p: Plan): Boolean {
@@ -306,6 +505,12 @@ class LoudCameraXCapturer(
   }
 
   private fun applyStep(p: Plan, s: Step) {
+    if (frameSource == "hardware") {
+      // The step's deviceZoom is 1 by construction (zoomPlan.realise): the
+      // window carries the zoom, the HAL applies it, nothing is digital.
+      s.crop?.let { c -> crop = c; pushRegion(p) }
+      return
+    }
     s.deviceZoom?.let { z ->
       if (p.lastRequestedDeviceZoom == null || abs(p.lastRequestedDeviceZoom!! - z) > 0.0005) {
         p.lastRequestedDeviceZoom = z
@@ -313,7 +518,7 @@ class LoudCameraXCapturer(
         if (cam == null) p.refusedReason = "camera not bound"
         else try {
           val fut = cam.cameraControl.setZoomRatio(z.toFloat())
-          fut.addListener({ try { fut.get() } catch (e: Exception) { p.refusedReason = "setZoomRatio($z) refused: ${e.cause?.message ?: e.message}" } }, Executor { it.run() })
+          fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) p.refusedReason = "setZoomRatio($z) refused: ${e.cause?.message ?: e.message}" } }, Executor { it.run() })
         } catch (e: Exception) { p.refusedReason = "setZoomRatio($z) threw: ${e.message}" }
       }
     }
@@ -323,21 +528,73 @@ class LoudCameraXCapturer(
     }
   }
 
-  fun resetCrop() { crop = floatArrayOf(0f, 0f, 1f, 1f); digitalFactor = 1.0 }
+  fun resetCrop() {
+    crop = floatArrayOf(0f, 0f, 1f, 1f); digitalFactor = 1.0
+    if (frameSource == "hardware") pushRegion(null)
+  }
 
-  private fun result(p: Plan, cancelled: String?, nowMs: Long): Map<String, Any?> {
+  /** Hardware: the zoom the HAL's last applied region implies (planned window until the first result lands); otherwise CameraX's zoom ratio. */
+  private fun currentDeviceZoom(): Double? {
+    if (frameSource == "hardware") {
+      val applied = appliedCropMap()?.get("zoom") as? Double
+      return applied ?: (if (crop[2] > 0f) 1.0 / crop[2] else 1.0)
+    }
     val zs = camera?.cameraInfo?.zoomState?.value
-    val device = zs?.zoomRatio?.toDouble() ?: reportedZoomRatio ?: 1.0
-    val achieved = if (p.mode == "digital") digitalFactor else device
+    return zs?.zoomRatio?.toDouble() ?: reportedZoomRatio
+  }
+
+  private fun zoomRange(): Pair<Double?, Double?> {
+    if (frameSource == "hardware") return 1.0 to maxDigitalZoom
+    val zs = camera?.cameraInfo?.zoomState?.value
+    return zs?.minZoomRatio?.toDouble() to zs?.maxZoomRatio?.toDouble()
+  }
+
+  /** The HAL's own answer to the last region request, as fractions of the 16:9 band, plus the zoom it implies. */
+  private fun appliedCropMap(): Map<String, Any?>? {
+    val a = activeArray ?: return null
+    val r = appliedRegion ?: return null
+    val aw = a.width().toDouble(); val ah = a.height().toDouble()
+    var bandW = aw; var bandH = aw * 9.0 / 16.0
+    if (bandH > ah) { bandH = ah; bandW = ah * 16.0 / 9.0 }
+    val bandL = a.left + (aw - bandW) / 2.0; val bandT = a.top + (ah - bandH) / 2.0
+    return mapOf(
+      "x" to round3((r.left - bandL) / bandW), "y" to round3((r.top - bandT) / bandH),
+      "w" to round3(r.width() / bandW), "h" to round3(r.height() / bandH),
+      "zoom" to round3(bandW / r.width().toDouble()),
+      "px" to mapOf("left" to r.left, "top" to r.top, "right" to r.right, "bottom" to r.bottom)
+    )
+  }
+
+  /** Scene brightness as an exposure value at ISO 100 (higher = brighter); null until the lens aperture is known. */
+  private fun sceneEv(): Double? {
+    val f = aperture ?: return null
+    val t = (exposureNs ?: return null) / 1e9
+    val s = iso ?: return null
+    if (f <= 0 || t <= 0 || s <= 0) return null
+    val log2 = { v: Double -> ln(v) / ln(2.0) }
+    return round3(log2(f * f / t) - log2(s / 100.0))
+  }
+
+  /**
+   * The move's result. `achieved` is the effective zoom (device x crop)
+   * for every kind; for a pan the JS side replaces requested/achieved/
+   * clamped with the travel it asked for and got (zoomPlan.panPlan), so
+   * `clamped` here is only judged for a zoom.
+   */
+  private fun result(p: Plan, cancelled: String?, nowMs: Long): Map<String, Any?> {
+    val device = currentDeviceZoom() ?: 1.0
+    val achieved = device * digitalFactor
     return mapOf(
       "kind" to p.kind,
       "mode" to p.mode,
+      "frameSource" to frameSource,
       "requested" to p.requested,
       "achieved" to round3(achieved),
       "deviceZoom" to round3(device),
       "digitalFactor" to round3(digitalFactor),
       "effectiveZoom" to round3(device * digitalFactor),
-      "clamped" to (abs(achieved - p.requested) > 0.02),
+      "clamped" to ((p.kind == "zoom" && abs(achieved - p.requested) > 0.02) || (frameSource == "hardware" && hwClamped)),
+      "regionClamped" to (frameSource == "hardware" && hwClamped),
       "reason" to (cancelled ?: p.refusedReason),
       "lens" to activePhysicalId,
       "lensBefore" to p.lensBefore,
@@ -348,26 +605,34 @@ class LoudCameraXCapturer(
       "plannedDurationMs" to (p.steps.lastOrNull()?.atMs ?: 0L),
       "stepsPlanned" to p.steps.size,
       "stepsApplied" to (p.applied + 1),
-      "cancelled" to (cancelled != null)
+      "cancelled" to (cancelled != null),
+      "appliedCrop" to appliedCropMap()
     )
   }
 
   fun state(): Map<String, Any?> {
-    val zs = camera?.cameraInfo?.zoomState?.value
-    val device = zs?.zoomRatio?.toDouble() ?: reportedZoomRatio
+    val device = currentDeviceZoom()
+    val (zMin, zMax) = zoomRange()
     val c = crop
     return mapOf(
       "cameraId" to cameraId,
+      "frameSource" to frameSource,
+      "frameSourceReason" to frameSourceReason,
       "activePhysicalId" to activePhysicalId,
       "deviceZoom" to device?.let { round3(it) },
-      "deviceZoomMin" to zs?.minZoomRatio?.toDouble(),
-      "deviceZoomMax" to zs?.maxZoomRatio?.toDouble(),
+      "deviceZoomMin" to zMin,
+      "deviceZoomMax" to zMax,
       "digitalFactor" to round3(digitalFactor),
       "effectiveZoom" to round3((device ?: 1.0) * digitalFactor),
       "crop" to mapOf("x" to c[0], "y" to c[1], "w" to c[2], "h" to c[3]),
+      "appliedCrop" to appliedCropMap(),
+      "regionPushes" to hwPushes,
       "focalLengthMm" to focalLengthMm,
+      "aperture" to aperture,
       "iso" to iso,
       "exposureNs" to exposureNs,
+      "exposureMs" to exposureNs?.let { round3(it / 1e6) },
+      "sceneEv" to sceneEv(),
       "focusDistance" to focusDistance,
       "aeState" to aeState,
       "afState" to afState,

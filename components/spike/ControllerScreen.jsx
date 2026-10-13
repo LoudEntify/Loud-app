@@ -22,6 +22,14 @@ function Btn({ label, onPress, tone = 'ghost', disabled }) {
   return <button type="button" className={cls} style={small} onClick={onPress} disabled={disabled}>{label}</button>;
 }
 
+const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+/** Same line as the phone Controller's: the move cycle (includes the move), the command latency (network leg out), then what the camera did. */
+function ackLine(p) {
+  const r = p.ack.result || {};
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
+}
+
 function downloadJson(name, object) {
   const blob = new Blob([JSON.stringify(object, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -72,7 +80,7 @@ export default function ControllerScreen() {
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       createRoom: () => new Room({ adaptiveStream: false, dynacast: false }),
       onEvent: (kind, p) => {
-        if (kind === 'ack') { setLastAck(p); push(`ack ${p.command.type} rtt ${p.rtt} ms → ${p.ack.result?.mode} ${p.ack.result?.achieved}x${p.ack.result?.lensSwitch ? ' LENS SWITCH' : ''} dropped ${p.ack.result?.droppedFrames}`); }
+        if (kind === 'ack') { setLastAck(p); push(ackLine(p)); }
         else if (kind === 'sent') push(`sent ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus('connected'); push(`connected to ${p.room} as ${p.identity}`); }
         else if (kind === 'remote') { setRemote(p); push(p ? `camera track from ${p.participant?.identity}` : 'camera track gone'); }
@@ -140,7 +148,8 @@ export default function ControllerScreen() {
         <span><b>{status.toUpperCase()}</b>{s?.connected ? ` · ${s.connected.room} as ${s.connected.identity}` : ''}</span>
         <span>clock source: {process.env.NEXT_PUBLIC_SPIKE_CLOCK_BASE ? `${process.env.NEXT_PUBLIC_SPIKE_CLOCK_BASE} (staging, relayed by this server)` : 'this server'}</span>
         {clock && <span>clock offset {clock.offsetMs} ms ±{clock.errorBoundMs} (server clock)</span>}
-        {lastAck && <span>last round trip {lastAck.rtt} ms · decided→completed {lastAck.ack.timestamps.completed - lastAck.ack.timestamps.decided} ms (server clock)</span>}
+        {lastAck && <span>last move cycle {lastAck.moveCycleMs} ms (includes the move) · command latency {lastAck.commandLatencyMs ?? '–'} ms · ack leg {lastAck.ackLegMs ?? '–'} ms (server clock)</span>}
+        {lastAck?.ack.result?.shot && <span>camera shot: {lastAck.ack.result.shot.zoom}x at ({lastAck.ack.result.shot.cx}, {lastAck.ack.result.shot.cy}) · {lastAck.ack.result.frameSource}</span>}
         {soak && <span>soak running: move {soak.moves} at {soak.minutes} min</span>}
       </div>
 
@@ -157,7 +166,7 @@ export default function ControllerScreen() {
         <Btn label="Report + stop" tone="teal" disabled={!s || status === 'stopped'} onPress={finish} />
       </div>
 
-      {s && <div style={mono} data-tick={tick}>{JSON.stringify({ rtt: s.rttSummary(), storage: s.storageSummary() })}</div>}
+      {s && <div style={mono} data-tick={tick}>{JSON.stringify({ latency: s.latencySummary(), shots: s.shots, storage: s.storageSummary() })}</div>}
       <div className="v-col" style={{ ...mono, color: '#c9cfd1', gap: 2 }}>
         {log.map((l, i) => <span key={`${i}-${l}`}>{l}</span>)}
       </div>

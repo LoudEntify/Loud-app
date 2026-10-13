@@ -42,7 +42,8 @@ export class CaptureBuffer {
     return this.push('B4', { state, reason: changed ? 'change' : 'sample' });
   }
   intent(decisionId, intent) { return this.push('B5', { kind: 'intent', decision_id: decisionId, ...intent }); }
-  result(decisionId, result) { return this.push('B5', { kind: 'result', decision_id: decisionId, ...result }); }
+  /** The native result carries its own `kind` (zoom | pan); the record's kind is 'result', so the result's goes to `move_kind`. */
+  result(decisionId, result) { const { kind: moveKind, ...rest } = result || {}; return this.push('B5', { ...rest, kind: 'result', move_kind: moveKind ?? rest.move_kind ?? null, decision_id: decisionId }); }
   clock(offset) { return this.push('B12', { offset_ms: offset.offsetMs, error_bound_ms: offset.errorBoundMs, rtt_ms: offset.rttMs, samples: offset.samples }); }
   cost(counters) { return this.push('COST', counters); }
   /** Take everything buffered so far as one batch (NDJSON text), leaving the buffer empty. */

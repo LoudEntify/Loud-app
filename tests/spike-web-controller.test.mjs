@@ -141,12 +141,13 @@ test('zoom and pan go out as the phone protocol with server-clock timestamps; ac
   room.emit(EVENTS.DataReceived, encode(reply), { identity: 'spike-camera-9' }, undefined, TOPIC);
   assert.equal(s.pending.size, 0);
   const got = events.find(([k]) => k === 'ack')[1];
-  assert.equal(got.rtt, 180); assert.equal(got.command.id, cmd.id); assert.equal(got.ack.timestamps.completed - got.ack.timestamps.decided, 2062);
-  assert.deepEqual(s.rttSummary(), { n: 1, p50: 180, p90: 180, max: 180 });
+  assert.equal(got.moveCycleMs, 180, 'the whole cycle, move included'); assert.equal(got.command.id, cmd.id); assert.equal(got.ack.timestamps.completed - got.ack.timestamps.decided, 2062);
+  assert.equal(got.commandLatencyMs, got.ack.timestamps.received - got.ack.timestamps.sent, 'the network leg out, server clock');
+  assert.deepEqual(s.latencySummary().moveCycleMs, { n: 1, p50: 180, p90: 180, max: 180 });
 
   const pan = await s.pan('left');
   const pw = decode(published[1].bytes);
-  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 1); assert.equal(pw.window, 0.84); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
+  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 0.08); assert.equal(pw.window, 0.84); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
   const fast = await s.zoom(1, 400, 'ease-out');
   assert.equal(decode(published[2].bytes).easing, 'ease-out'); assert.equal(fast.durationMs, 400);
 
@@ -155,7 +156,7 @@ test('zoom and pan go out as the phone protocol with server-clock timestamps; ac
   room.emit(EVENTS.DataReceived, published[1].bytes, { identity: 'x' }, undefined, TOPIC);
   room.emit(EVENTS.DataReceived, encode({ ...reply, id: 'cmd-unknown' }), { identity: 'x' }, undefined, TOPIC);
   room.emit(EVENTS.DataReceived, new Uint8Array([1, 2, 3]), { identity: 'x' }, undefined, TOPIC);
-  assert.equal(s.pending.size, 2); assert.equal(s.rtts.length, 1);
+  assert.equal(s.pending.size, 2); assert.equal(s.latencies.length, 1);
   await s.stop();
 });
 
@@ -180,7 +181,7 @@ test('report has the phone report keys; stop uploads the controller batch throug
   await s.connect();
   const cmd = await s.zoom(5, 2000);
   advance(90);
-  room.emit(EVENTS.DataReceived, encode(ack({ command: { ...cmd }, receivedAt: 1, startedAt: 2, completedAt: 3, result: { mode: 'device', requested: 5, achieved: 5, clamped: false, reason: null, droppedFrames: 1, actualDurationMs: 2000 } })), { identity: 'spike-camera-2' }, undefined, TOPIC);
+  room.emit(EVENTS.DataReceived, encode(ack({ command: { ...cmd }, receivedAt: 1, startedAt: 2, completedAt: 3, result: { kind: 'zoom', mode: 'device', requested: 5, achieved: 5, clamped: false, reason: null, droppedFrames: 1, actualDurationMs: 2000 } })), { identity: 'spike-camera-2' }, undefined, TOPIC);
   await s.stop();
   const put = calls.find((c) => c.init.method === 'PUT');
   assert.ok(put, 'the last batch was uploaded on stop');
@@ -189,15 +190,15 @@ test('report has the phone report keys; stop uploads the controller batch throug
   const lines = gunzipSync(Buffer.from(put.init.body)).toString('utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.deepEqual(lines.map((l) => l.stream), ['B2', 'B12', 'B5', 'B5']);
   assert.equal(lines[2].kind, 'intent'); assert.equal(lines[2].decision_id, cmd.decisionId); assert.equal(lines[2].tightness, 0.2);
-  assert.equal(lines[3].kind, 'result'); assert.equal(lines[3].rtt_ms, 90); assert.equal(lines[3].from, 'spike-camera-2');
+  assert.equal(lines[3].kind, 'result'); assert.equal(lines[3].move_cycle_ms, 90); assert.equal(lines[3].move_kind, 'zoom'); assert.equal(lines[3].from, 'spike-camera-2');
   // B2 is recorded before the first clock sync (same order as the phone), so only it lacks a server timestamp
   assert.equal(lines[0].t_server_ms, null);
   assert.ok(lines.slice(1).every((l) => Number.isFinite(l.t_server_ms)));
 
   const r = s.report();
-  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'profile', 'clock', 'rtt', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
+  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'frameSource', 'profile', 'clock', 'latency', 'shots', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
   assert.equal(r.role, 'controller'); assert.equal(r.deviceId, 'web-chrome-141-mac-10-15'); assert.equal(r.appVersion, 'web-test');
-  assert.equal(r.rtt.n, 1); assert.deepEqual(r.cost, { on: null, off: null, samples: 0 });
+  assert.equal(r.latency.moveCycleMs.n, 1); assert.deepEqual(r.cost, { on: null, off: null, samples: 0 });
   assert.equal(r.storage.batches, 1); assert.equal(r.storage.failed, 0); assert.equal(r.storage.records, 4);
   assert.equal(r.uploads[0].ok, true); assert.equal(r.lastState, null);
   assert.match(s.reportFileName(), /^spike-report-controller-web-chrome-141-mac-10-15-\d+\.json$/);

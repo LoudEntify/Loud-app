@@ -16,21 +16,29 @@ export function survey() { return native ? native.survey() : missing(); }
 /**
  * Start capturing and return a react-native-webrtc MediaStream whose video
  * track is fed by the native capturer. The track is published with
- * livekit-client's LocalVideoTrack (src/spike/runtime.js).
+ * livekit-client's LocalVideoTrack (src/spike/runtime.js). `frameSource`
+ * 'auto' | 'hardware' | 'gpu' | 'cpu' picks the frame path (see
+ * LoudCameraXCapturer.kt); the one actually chosen is in every state
+ * sample and move result as `frameSource`.
  */
-export async function start({ facing = 'back', width = 1080, height = 1920, fps = 30 } = {}) {
+export async function start({ facing = 'back', width = 1080, height = 1920, fps = 30, frameSource = 'auto' } = {}) {
   if (!native) return missing();
-  const info = await native.start({ facing, width, height, fps });
+  const info = await native.start({ facing, width, height, fps, frameSource });
   const { MediaStream } = require('@livekit/react-native-webrtc');
   const stream = new MediaStream({ streamId: info.streamId, streamReactTag: info.streamId, tracks: info.tracks });
   return { stream, info };
 }
 export function stop() { return native ? native.stop() : missing(); }
 
-/** steps: [{atMs, zoom}] from zoomPlan.rampSchedule; mode 'device' | 'digital'. Resolves with the move result. */
-export function zoomTo(steps, mode, requested) { return native ? native.zoomTo(steps, mode, requested) : missing(); }
-/** steps: panPlan().steps (each with its own deviceZoom or null); mode 'device+crop' | 'crop'. Resolves with the move result. */
-export function pan(steps, mode, requested) { return native ? native.pan(steps, mode, requested) : missing(); }
+/**
+ * One move for zooms and pans alike. kind 'zoom' | 'pan'; mode from
+ * zoomPlan.realise (region | device | device+crop | digital); steps
+ * [{atMs, deviceZoom, crop:[x,y,w,h]}] from zoomPlan.movePlan; requested
+ * is what the result's `achieved` is compared with. Resolves with the
+ * move result once the last step has been applied (or the move was
+ * cancelled: `cancelled: true`).
+ */
+export function move(kind, mode, steps, requested) { return native ? native.move(kind, mode, steps, requested) : missing(); }
 export function cancelMove() { return native ? native.cancelMove() : missing(); }
 export function resetFraming() { return native ? native.resetFraming() : missing(); }
 export function getState() { return native ? native.getState() : null; }

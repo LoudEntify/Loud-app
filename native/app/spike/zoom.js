@@ -15,8 +15,23 @@ import { useSession } from '../../src/session';
 import { File } from 'expo-file-system';
 import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
+import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
+const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
+/** The controller's log line for an ack: the move cycle (includes the move) and the command latency (network leg out), then what the camera did. */
+function ackLine(p) {
+  const r = p.ack.result || {};
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
+}
+/** The camera's log line for a move it ran (or refused). */
+function resultLine(p) {
+  const r = p.result;
+  if (r.refused) return `refused ${p.command.type} ${p.command.direction}: ${r.reason}`;
+  const what = p.command.type === 'pan' ? `moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame at ${r.zoomAtPan}x` : `${r.achieved}x${r.releasedCrop ? ' (crop released)' : ''}`;
+  return `did ${p.command.type}: ${r.mode}${r.path ? ` [${r.path}]` : ''} ${what} in ${r.actualDurationMs} ms, ${r.frameSource}, dropped ${r.droppedFrames}${r.reason ? ` (${r.reason})` : ''}`;
+}
 function Btn({ label, onPress, tone = 'ghost', small }) {
   const bg = tone === 'teal' ? styles.btnTeal : tone === 'orange' ? styles.btnOrange : styles.btnGhostDark;
   const tx = tone === 'ghost' ? styles.btnTextDark : styles.btnText;
@@ -37,6 +52,8 @@ export default function ZoomSpike() {
   const [survey, setSurvey] = useState(null);
   const [remote, setRemote] = useState(null);
   const [VideoTrack, setVideoTrack] = useState(null);
+  // Which frame path the Camera role asks for (auto picks hardware where the camera allows it; cpu is the old path, kept for comparison).
+  const [frameSource, setFrameSource] = useState('auto');
   const sess = useRef(null);
 
   const push = (line) => setLog((l) => [`${new Date().toISOString().slice(11, 19)} ${line}`, ...l].slice(0, 60));
@@ -63,12 +80,13 @@ export default function ZoomSpike() {
     if (!accessToken) { push('sign in as an artist first (Profile tab)'); return; }
     setMode(role); setStatus('connecting');
     const s = new SpikeSession({
-      role, accessToken, userId: session?.user?.id,
+      role, accessToken, userId: session?.user?.id, frameSource,
       onEvent: (kind, p) => {
         if (kind === 'profile') setProfile(p);
         else if (kind === 'state') setState(p);
-        else if (kind === 'ack') { setLastAck(p); push(`ack ${p.command.type} rtt ${p.rtt} ms → ${p.ack.result?.mode} ${p.ack.result?.achieved}x${p.ack.result?.lensSwitch ? ' LENS SWITCH' : ''} dropped ${p.ack.result?.droppedFrames}`); }
-        else if (kind === 'result') push(`did ${p.command.type}: ${p.result.mode}${p.result.path ? ` [${p.result.path}]` : ''} ${p.result.achieved}x in ${p.result.actualDurationMs} ms, dropped ${p.result.droppedFrames}${p.result.reason ? ` (${p.result.reason})` : ''}`);
+        else if (kind === 'ack') { setLastAck(p); push(ackLine(p)); }
+        else if (kind === 'result') push(resultLine(p));
+        else if (kind === 'frameSource') push(`frame source wanted: ${p.wanted}`);
         else if (kind === 'command') push(`command ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); }
         else if (kind === 'published') push(`publishing track ${p.trackSid}`);
@@ -145,6 +163,10 @@ export default function ZoomSpike() {
         <Text style={styles.h1Dark}>Device zoom spike</Text>
         <Text style={styles.bodyDark}>{loading ? 'Checking sign-in…' : accessToken ? 'Signed in. Pick this phone’s role.' : 'Sign in as an artist (Profile tab) for Camera or Controller. Survey needs no sign-in.'}</Text>
         <Btn label="Camera (publishes, obeys commands)" tone="teal" onPress={() => begin('camera')} />
+        <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+          <Text style={mono}>frame path:</Text>
+          {FRAME_SOURCES.map((f) => <Btn key={f} small label={f === frameSource ? `[${f}]` : f} onPress={() => setFrameSource(f)} />)}
+        </View>
         <Btn label="Controller (sends commands)" tone="orange" onPress={() => begin('controller')} />
         <Btn label="Capability survey (no LiveKit)" onPress={() => setMode('survey')} />
         <Btn label="Back" onPress={() => router.back()} />
@@ -168,9 +190,10 @@ export default function ZoomSpike() {
       </View>
       <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
         <Text style={[styles.bodyDark, { fontWeight: '700' }]}>{mode.toUpperCase()} · {status}</Text>
-        {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ''}{profile.deviceZoom.smoothRamp ? ' · native ramp' : ' · stepped ramp'}</Text>}
-        {st && <Text style={mono}>B4 zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.width}×{st.height}@{st.fps} · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
-        {lastAck && <Text style={mono}>last round trip {lastAck.rtt} ms · decided→completed {lastAck.ack.timestamps.completed - lastAck.ack.timestamps.decided} ms (server clock)</Text>}
+        {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.qualityCeiling?.zoom != null ? ` · 1080p ceiling ${profile.qualityCeiling.zoom}x` : ''}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ' · no lens switch'} · frame path {profile.frameSource?.eligible ?? '?'}</Text>}
+        {st && <Text style={mono}>B4 {st.frameSource} · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.width}×{st.height}@{st.fps} · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
+        {st && <Text style={mono}>light EV {fx(st.sceneEv, 1)} · ISO {st.iso ?? '–'} · {fx(st.exposureMs, 1)} ms · f/{st.aperture ?? '–'}{st.frameSource === 'hardware' ? ` · region ${st.appliedCrop ? `${fx(st.appliedCrop.w, 3)}@${fx(st.appliedCrop.x, 3)},${fx(st.appliedCrop.y, 3)}` : '–'} pushes ${st.regionPushes}` : ''}</Text>}
+        {lastAck && <Text style={mono}>last move cycle {lastAck.moveCycleMs} ms (includes the move) · command latency {lastAck.commandLatencyMs ?? '–'} ms · ack leg {lastAck.ackLegMs ?? '–'} ms (server clock)</Text>}
         {mode === 'controller' && (
           <>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
@@ -192,7 +215,7 @@ export default function ZoomSpike() {
           <Btn small label="Report + stop" tone="teal" onPress={finish} />
           <Btn small label="Share last report" onPress={shareLatest} />
         </View>
-        {s && <Text style={mono}>{JSON.stringify({ rtt: s.rttSummary(), cost: s.costSummary(), storage: s.storageSummary() })}</Text>}
+        {s && <Text style={mono}>{JSON.stringify({ latency: s.latencySummary(), shots: s.shots, cost: s.costSummary(), storage: s.storageSummary() })}</Text>}
         {log.map((l, i) => <Text key={i} style={[mono, { color: color.mutedOnDark }]}>{l}</Text>)}
       </ScrollView>
     </View>

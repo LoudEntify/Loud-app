@@ -17,8 +17,8 @@ import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
-import { TOPIC, zoomCommand, panCommand, ack, encode, decode, roundTripMs, mintId } from './commands';
-import { chooseZoomMode, rampSchedule, panPlan, tightnessFor, PAN_DEFAULTS } from './zoomPlan';
+import { TOPIC, zoomCommand, panCommand, ack, encode, decode, ackLatencies, summariseLatencies, mintId } from './commands';
+import { capsFor, zoomPlan, panPlan, tightnessFor, PAN_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
 import { normaliseProfile, surveyFileName } from './survey';
@@ -76,14 +76,19 @@ export async function readProfile() {
  * screen; everything else is internal. Call connect(), then stop().
  */
 export class SpikeSession {
-  constructor({ role, accessToken, userId, onEvent }) {
+  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto' }) {
     this.role = role; this.accessToken = accessToken; this.userId = userId; this.onEvent = onEvent || (() => {});
+    this.frameSource = FRAME_SOURCES.includes(frameSource) ? frameSource : 'auto';
     this.room = null; this.profile = null; this.offset = null; this.track = null; this.stream = null;
+    // The camera's framing as the director sees it: one shot at a time
+    // (zoomPlan.js). A zoom or a pan makes a new shot; a refused or failed
+    // move leaves it as it was.
+    this.shot = { ...SHOT_HOME }; this.shotId = mintId('shot'); this.shots = 0;
     this.deviceId = deviceId(); this.sessionId = mintId('ses');
     this.buffer = new CaptureBuffer({ deviceId: this.deviceId, sessionId: this.sessionId });
     this.collect = true; this.lastUploadAt = Date.now(); this.uploads = []; this.pending = new Map();
     this.timers = []; this.stateSub = null; this.lastState = null; this.lastCost = null; this.costSamples = [];
-    this.moving = false; this.soak = null; this.remoteTrack = null; this.rtts = []; this.reportUpload = null;
+    this.moving = false; this.soak = null; this.remoteTrack = null; this.latencies = []; this.reportUpload = null;
   }
 
   serverNow() { return this.offset ? Date.now() + this.offset.offsetMs : null; }
@@ -111,8 +116,9 @@ export class SpikeSession {
   }
 
   async startCamera() {
-    const { stream } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: 30 });
+    const { stream, info } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: 30, frameSource: this.frameSource });
     this.stream = stream;
+    this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
     const mediaTrack = stream.getVideoTracks()[0];
     const track = new LocalVideoTrack(mediaTrack, undefined, true);
     this.track = track;
@@ -122,7 +128,7 @@ export class SpikeSession {
     this.onEvent('published', { trackSid: pub.trackSid });
     this.stateSub = LoudCamera.addStateListener((s) => {
       this.lastState = s;
-      if (this.collect) this.buffer.state({ ...s, offset: undefined });
+      if (this.collect) this.buffer.state({ ...s, offset: undefined, shotId: this.shotId, shot: this.shot });
       this.onEvent('state', s);
     });
   }
@@ -189,7 +195,7 @@ export class SpikeSession {
     const tick = () => {
       if (Date.now() - started > minutes * 60000) { this.stopSoak(); this.onEvent('soak', { done: true, moves: i }); return; }
       const k = i % 4; i += 1;
-      const p = k === 0 ? this.zoom(2, 2000) : k === 1 ? this.pan(i % 8 < 4 ? 'left' : 'right', { durationMs: 3000 }) : k === 2 ? this.zoom(1, 2000) : this.pan('up', { degree: 0.3, durationMs: 2500 });
+      const p = k === 0 ? this.zoom(2, 2000) : k === 1 ? this.pan(i % 8 < 4 ? 'left' : 'right', { durationMs: 3000 }) : k === 2 ? this.zoom(1, 2000) : this.pan('up', { degree: 0.04, durationMs: 2500 });
       p.catch((e) => this.onEvent('error', String(e?.message || e)));
       this.onEvent('soak', { done: false, moves: i, minutes: +((Date.now() - started) / 60000).toFixed(1) });
     };
@@ -206,10 +212,14 @@ export class SpikeSession {
       const p = this.pending.get(m.id);
       if (p) {
         this.pending.delete(m.id);
-        const rtt = roundTripMs(p.sentLocal, arrived);
-        this.rtts.push(rtt); if (this.rtts.length > 200) this.rtts.shift();
-        if (this.collect) this.buffer.result(m.decisionId, { ...m.result, timestamps: m.timestamps, rtt_ms: rtt, from: participant?.identity || null });
-        this.onEvent('ack', { ack: m, rtt, command: p.command });
+        // moveCycleMs is the whole cycle on this clock: send, the move
+        // itself (2-3 s by design), and the ack back. The two legs that
+        // measure the network alone come from the ack's server-clock
+        // timestamps (commands.ackLatencies).
+        const lat = ackLatencies(m, { sentLocal: p.sentLocal, arrivedLocal: arrived, arrivedServer: this.serverNow() });
+        this.latencies.push(lat); if (this.latencies.length > 200) this.latencies.shift();
+        if (this.collect) this.buffer.result(m.decisionId, { ...m.result, timestamps: m.timestamps, move_cycle_ms: lat.moveCycleMs, command_latency_ms: lat.commandLatencyMs, ack_leg_ms: lat.ackLegMs, from: participant?.identity || null });
+        this.onEvent('ack', { ack: m, ...lat, command: p.command });
       }
       return;
     }
@@ -219,45 +229,64 @@ export class SpikeSession {
   async execute(m) {
     const receivedAt = this.serverNow() ?? Date.now();
     this.onEvent('command', m);
-    if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, target: m.target ?? null, direction: m.direction ?? null, degree: m.degree ?? null, window: m.window ?? null, duration_ms: m.durationMs, easing: m.easing, source: m.source, received_from: 'data-channel' });
+    if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, target: m.target ?? null, direction: m.direction ?? null, degree: m.degree ?? null, window: m.window ?? null, duration_ms: m.durationMs, easing: m.easing, source: m.source, received_from: 'data-channel', shot_id: this.shotId, shot: this.shot });
     this.moving = true;
     const startedAt = this.serverNow() ?? Date.now();
+    const shotBefore = this.shot; const shotIdBefore = this.shotId;
     let result;
     try {
-      const st = this.lastState || LoudCamera.getState() || {};
-      if (m.type === 'zoom') {
-        const choice = chooseZoomMode(this.profile, m.target);
-        const from = choice.mode === 'device' ? Math.max(st.deviceZoom || 1, this.profile.deviceZoom.min || 1) : Math.max(st.digitalFactor || 1, 1);
-        if (choice.mode === 'digital' && st.crop && st.crop.w < 0.999) await LoudCamera.resetFraming();
-        const steps = rampSchedule({ from, to: choice.target, durationMs: m.durationMs, easing: m.easing });
-        const r = await LoudCamera.zoomTo(steps, choice.mode, m.target);
-        result = { ...r, mode: choice.mode, clamped: r.clamped || choice.clamped, reason: r.reason || choice.reason };
-      } else {
-        // Plan from the framing the camera has NOW, so nothing jumps at the
-        // first step: the pull-back path ramps device zoom out and the
-        // window in on the same frames; without headroom the window eases
-        // in as part of the move (zoomPlan.panPlan). `path` says which ran.
-        const dz = this.profile?.deviceZoom;
-        const plan = panPlan({
-          direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing,
-          zoomNow: Number.isFinite(st.deviceZoom) ? st.deviceZoom : 1,
-          zoomMin: dz?.available ? dz.min : null, zoomMax: dz?.available ? dz.max : null,
-          cropNow: st.crop || null,
-        });
-        const mode = plan.path === 'pull-back' ? 'device+crop' : 'crop';
-        const r = await LoudCamera.pan(plan.steps, mode, plan.digitalFactor);
-        result = { ...r, mode, path: plan.path, window: plan.window, digitalFactor: plan.digitalFactor, leadInMs: plan.leadInMs, travel: plan.travel, pullBackFrom: plan.deviceZoomFrom, pullBackTo: plan.deviceZoom };
-      }
+      result = await this.runMove(m);
     } catch (e) {
-      result = { mode: 'none', requested: m.target ?? null, achieved: null, clamped: false, reason: String(e?.message || e), droppedFrames: 0, actualDurationMs: 0 };
+      result = { mode: 'none', frameSource: this.lastState?.frameSource ?? null, requested: m.target ?? null, achieved: null, clamped: false, reason: String(e?.message || e), droppedFrames: 0, actualDurationMs: 0, refused: false, failed: true };
     }
     this.moving = false;
     const completedAt = this.serverNow() ?? Date.now();
+    result = { ...result, shotBefore, shotIdBefore, shot: this.shot, shotId: this.shotId };
     const reply = ack({ command: m, receivedAt, startedAt, completedAt, result });
     if (this.collect) this.buffer.result(m.decisionId, { ...result, timestamps: reply.timestamps });
     await this.room.localParticipant.publishData(encode(reply), { reliable: true, topic: TOPIC });
     this.onEvent('result', { command: m, result, reply });
     return result;
+  }
+
+  /**
+   * Plan the move against the current shot and this camera's frame source
+   * (zoomPlan.js), hand the steps to the native capturer, and move the
+   * shot on when the move was applied. A pan into a frame edge comes
+   * back refused (no native call, `refused: true`, the reason in
+   * `reason`), and the shot stays where it was.
+   */
+  async runMove(m) {
+    const st = this.lastState || LoudCamera.getState() || {};
+    const caps = capsFor(this.profile, st);
+    const common = { frameSource: st.frameSource ?? caps.frameSource };
+    let plan; let requested;
+    if (m.type === 'zoom') {
+      plan = zoomPlan({ profile: this.profile, caps, shot: this.shot, target: m.target, durationMs: m.durationMs, easing: m.easing });
+      requested = m.target;
+    } else {
+      plan = panPlan({ direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing, shot: this.shot, caps });
+      requested = plan.travelRequested;
+      if (plan.refused) {
+        return { ...common, kind: 'pan', mode: null, path: plan.path, requested, achieved: 0, clamped: false, reason: plan.reason, refused: true, direction: m.direction, room: plan.room, window: plan.window, travel: 0, droppedFrames: 0, framesDuring: 0, actualDurationMs: 0, stepsPlanned: 0, stepsApplied: 0 };
+      }
+    }
+    const r = await LoudCamera.move(m.type, plan.mode, plan.steps, requested);
+    // Where the camera is now: the end shot, or the last applied step's shot if the move was cut short.
+    const applied = Number.isFinite(r?.stepsApplied) ? r.stepsApplied : plan.steps.length;
+    const landed = r?.cancelled && applied < plan.steps.length ? (plan.shots[Math.max(0, applied - 1)] || this.shot) : plan.to;
+    this.shot = landed; this.shotId = mintId('shot'); this.shots += 1;
+    if (m.type === 'zoom') {
+      return { ...r, ...common, mode: plan.mode, clamped: Boolean(r.clamped || plan.clamped), reason: r.reason || plan.reason, releasedCrop: plan.releasesCrop, refused: false };
+    }
+    // A pan is judged by its travel, not by a zoom figure: requested is
+    // what was asked (frame fraction), achieved what the camera reports
+    // (the HAL's own region on the hardware path, the plan elsewhere).
+    const achieved = panTravelAchieved(plan, r, landed);
+    return {
+      ...r, ...common, mode: plan.mode, path: plan.path, requested, achieved, clamped: Math.abs(achieved - requested) > 0.01, reason: r.reason || null, refused: false,
+      direction: m.direction, room: plan.room, window: plan.window, tightened: plan.tightened, travel: achieved, zoomAtPan: plan.zoom, effectiveZoomAchieved: r.achieved ?? null,
+    };
   }
 
   // ── Part C: batches ───────────────────────────────────────────
@@ -288,16 +317,12 @@ export class SpikeSession {
     return { batches: ok.length, failed: this.uploads.length - ok.length, records: recs, rawBytes: raw, gzBytes: gz, gzBytesPerHour: minutes ? Math.round((gz / minutes) * 60) : null, rawBytesPerHour: minutes ? Math.round((raw / minutes) * 60) : null, ratio: gz ? +(raw / gz).toFixed(1) : null };
   }
 
-  rttSummary() {
-    if (!this.rtts.length) return null;
-    const s = [...this.rtts].sort((a, b) => a - b);
-    const q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
-    return { n: s.length, p50: q(0.5), p90: q(0.9), max: s[s.length - 1] };
-  }
+  /** Controller side: the three latencies over the session, each as n/p50/p90/max (commands.summariseLatencies). */
+  latencySummary() { return summariseLatencies(this.latencies); }
 
   /** Everything the report needs, as one JSON object; the screen also writes it to a file. */
   report() {
-    return { role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION, profile: this.profile, clock: this.offset, rtt: this.rttSummary(), cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString(), reportUpload: this.reportUpload ?? null };
+    return { role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION, frameSource: this.role === 'camera' ? { wanted: this.frameSource, used: this.lastState?.frameSource ?? null, reason: this.lastState?.frameSourceReason ?? null } : null, profile: this.profile, clock: this.offset, latency: this.latencySummary(), shots: this.shots, cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString(), reportUpload: this.reportUpload ?? null };
   }
   /**
    * Write the report to the app's documents folder (app-private on Android:
@@ -337,6 +362,20 @@ export class SpikeSession {
     try { await this.room?.disconnect(); } catch { /* closing */ }
     this.room = null;
   }
+}
+
+/**
+ * How far a pan actually moved, as a frame fraction: on the hardware path
+ * from the HAL's own applied region (its centre against the shot the pan
+ * measured from), elsewhere the crop is exact so the landed shot says.
+ */
+export function panTravelAchieved(plan, r, landed) {
+  const start = { cx: plan.from.cx, cy: plan.from.cy };
+  const ac = r?.appliedCrop;
+  if (r?.frameSource === 'hardware' && ac && Number.isFinite(ac.x) && Number.isFinite(ac.w)) {
+    return +Math.hypot(ac.x + ac.w / 2 - start.cx, ac.y + ac.h / 2 - start.cy).toFixed(4);
+  }
+  return +Math.hypot(landed.cx - start.cx, landed.cy - start.cy).toFixed(4);
 }
 
 /** storage-js returns the signed upload URL absolute or /storage/v1-relative depending on version. */
