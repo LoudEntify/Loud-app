@@ -14,7 +14,7 @@ import { color } from '../../src/shared';
 import { useSession } from '../../src/session';
 import { File } from 'expo-file-system';
 import * as LoudCamera from '../../modules/loud-camera';
-import { SpikeSession, runSurvey, latestReportFile, shareReportFile } from '../../src/spike/runtime';
+import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
 function Btn({ label, onPress, tone = 'ghost', small }) {
@@ -104,9 +104,21 @@ export default function ZoomSpike() {
   async function shareLatest() {
     const f = latestReportFile();
     if (!f) { push('no report on this phone yet'); return; }
+    await shareOne(f);
+  }
+  async function shareOne(f) {
     push(`sharing ${f.name}`);
     try { await shareReportFile(f); } catch (e) { push(`share: ${String(e?.message || e)}`); }
   }
+  // Every report still on the phone, newest first; refreshed whenever the
+  // idle screen shows (a report written by an older build is here too).
+  const [reports, setReports] = useState([]);
+  useEffect(() => { if (!mode) setReports(listReportFiles()); }, [mode, status]);
+  const reportLabel = (f) => {
+    const m = f.name.match(/^spike-report-([a-z]+)-(.+)-(\d{10,})\.json$/);
+    const when = m ? new Date(Number(m[3])) : null;
+    return `${m ? m[1] : 'report'} · ${when ? `${when.toISOString().slice(0, 10)} ${when.toTimeString().slice(0, 5)}` : f.name}`;
+  };
 
   if (!LoudCamera.available) {
     return <View style={[styles.screenDark, { padding: 20, paddingTop: 80, gap: 12 }]}><Text style={styles.h1Dark}>Dev build needed</Text><Text style={styles.bodyDark}>This screen needs the LoudCamera native module, which Expo Go does not carry. Build with `eas build --profile development --platform android` (docs/NEEDS_KOREY.md).</Text><Btn label="Back" onPress={() => router.back()} /></View>;
@@ -135,8 +147,12 @@ export default function ZoomSpike() {
         <Btn label="Camera (publishes, obeys commands)" tone="teal" onPress={() => begin('camera')} />
         <Btn label="Controller (sends commands)" tone="orange" onPress={() => begin('controller')} />
         <Btn label="Capability survey (no LiveKit)" onPress={() => setMode('survey')} />
-        <Btn label="Share last report" onPress={shareLatest} />
         <Btn label="Back" onPress={() => router.back()} />
+        <Text style={[styles.bodyDark, { fontWeight: '700', marginTop: 8 }]}>Share a report</Text>
+        {reports.length === 0 && <Text style={mono}>No report on this phone yet.</Text>}
+        <ScrollView style={{ maxHeight: 220 }} contentContainerStyle={{ gap: 6 }}>
+          {reports.map((f) => <Btn key={f.name} small label={reportLabel(f)} onPress={() => shareOne(f)} />)}
+        </ScrollView>
       </View>
     );
   }

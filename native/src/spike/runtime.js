@@ -41,14 +41,18 @@ export async function runSurvey() {
   return { profile, path: file.uri, name };
 }
 
-/** The newest spike-report-*.json in the app's documents folder, or null. */
-export function latestReportFile() {
+/** Every spike-report-*.json in the app's documents folder, newest first (by the timestamp in the name, then mtime). */
+export function listReportFiles() {
   try {
     const files = new Directory(Paths.document).list().filter((f) => f instanceof File && /^spike-report-.*\.json$/.test(f.name));
-    files.sort((a, b) => (b.modificationTime ?? 0) - (a.modificationTime ?? 0) || (a.name < b.name ? 1 : -1));
-    return files[0] || null;
-  } catch { return null; }
+    const stamp = (f) => Number((f.name.match(/-(\d{10,})\.json$/) || [])[1] || 0) || (f.modificationTime ?? 0);
+    files.sort((a, b) => stamp(b) - stamp(a) || (a.name < b.name ? 1 : -1));
+    return files;
+  } catch { return []; }
 }
+
+/** The newest spike-report-*.json, or null. */
+export function latestReportFile() { return listReportFiles()[0] || null; }
 
 /**
  * Open the share sheet with the report as a FILE (Nearby Share, Drive,
