@@ -18,12 +18,17 @@ name: ci
 #   3. build       — `next build`, with missing-import warnings treated as
 #                    errors (check:build).
 #   4. native      — the Expo app in native/ (separate job, no secrets):
-#                    `npm ci` from its own lockfile, `expo install --check`
-#                    (every dependency at the version the installed Expo SDK
-#                    expects), `expo-doctor`, then `expo export` for iOS and
-#                    Android, which compiles the real JS bundles through
-#                    Metro. A broken import, config plugin or lockfile fails
-#                    here instead of on Korey's phone.
+#                    `npm ci` from its own lockfile, the Expo dependency
+#                    check (scripts/native-expo-drift.mjs: `expo install
+#                    --check --json`, where a PATCH-level drift such as
+#                    57.0.27 vs ~57.0.28 is a warning annotation and a
+#                    major/minor mismatch, an unreadable version or a check
+#                    that cannot run fails), `expo-doctor`, then `expo
+#                    export` for iOS and Android, which compiles the real JS
+#                    bundles through Metro. A broken import, config plugin
+#                    or lockfile fails here instead of on Korey's phone; a
+#                    routine Expo patch release published overnight does not
+#                    (docs/DECISIONS.md 2026-10-14).
 
 on:
   push:
@@ -131,9 +136,8 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: native
-      - name: Every dependency at the version the Expo SDK expects
-        run: npx expo install --check
-        working-directory: native
+      - name: Expo dependencies (patch drift warns, anything else fails)
+        run: node scripts/native-expo-drift.mjs native
       - name: Expo doctor
         run: npx expo-doctor
         working-directory: native
