@@ -133,16 +133,24 @@ export class SpikeSession {
   async startCamera() {
     const { stream, info } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: 30, frameSource: this.frameSource });
     this.stream = stream;
-    this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
     const mediaTrack = stream.getVideoTracks()[0];
     const track = new LocalVideoTrack(mediaTrack, undefined, true);
-    this.track = track;
     const pub = await this.room.localParticipant.publishTrack(track, {
       source: Track.Source.Camera, simulcast: false, videoEncoding: { maxBitrate: 3_000_000, maxFramerate: 30 },
     });
+    // Only now is there a publication for the screen to render: setting
+    // `track` earlier let a re-render (the frameSource event fired in this
+    // window) mount the preview before the publication existed, and
+    // LiveKit's VideoTrack reads publication.track unguarded, which
+    // crashed the app the moment Camera was chosen (14 Oct).
+    this.track = track;
     this.onEvent('published', { trackSid: pub.trackSid });
+    this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
+    let announced = null;
     this.stateSub = LoudCamera.addStateListener((s) => {
       this.lastState = s;
+      // The capturer may have fallen back to another frame path (hardware → gpu → cpu); say so once when it does.
+      if (s?.frameSource && s.frameSource !== announced) { announced = s.frameSource; this.onEvent('frameSource', { wanted: this.frameSource, used: s.frameSource, reason: s.frameSourceReason ?? null, fellBack: Boolean(s.frameSourceFellBack) }); }
       if (this.collect) this.buffer.state({ ...s, offset: undefined, shotId: this.shotId, shot: this.shot });
       this.onEvent('state', s);
     });

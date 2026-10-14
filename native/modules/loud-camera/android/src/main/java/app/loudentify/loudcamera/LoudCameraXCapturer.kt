@@ -124,6 +124,15 @@ class LoudCameraXCapturer(
   @Volatile var cameraId: String? = null
   @Volatile var frameSource: String = "cpu"
   @Volatile var frameSourceReason: String? = null
+  // Fallback: the paths still to try, in order, when one fails to bind or
+  // delivers no frames (docs/DECISIONS.md 2026-10-14). `frameSourceFellBack`
+  // is reported in every state sample so the record says a path was skipped.
+  private var fallbackQueue = ArrayDeque<String>()
+  @Volatile var frameSourceFellBack = false
+  private var fallbackLog = ArrayList<String>()
+  private var startWidth = 0
+  private var startHeight = 0
+  private var noFrameWatchdog: Runnable? = null
   @Volatile private var plan: Plan? = null
   // Current digital crop window in display-frame fractions: x, y, w, h.
   @Volatile private var crop = floatArrayOf(0f, 0f, 1f, 1f)
@@ -199,24 +208,84 @@ class LoudCameraXCapturer(
   override fun dispose() { analyzerExecutor.shutdown() }
 
   override fun startCapture(width: Int, height: Int, framerate: Int) {
+    startWidth = width; startHeight = height
+    // The order the paths are tried: the one asked for first, then the
+    // simpler ones. `cpu` is the floor; it has run every soak so far.
+    fallbackQueue = ArrayDeque(when (frameSourceWanted) {
+      "cpu" -> listOf("cpu")
+      "gpu" -> listOf("gpu", "cpu")
+      else -> listOf(frameSourceWanted.let { if (it == "hardware") "hardware" else "auto" }, "gpu", "cpu")
+    })
     main.post {
       val future = ProcessCameraProvider.getInstance(context)
       future.addListener({
         try {
           provider = future.get()
-          bind(provider!!, width, height)
+          bindWithFallback()
           observer?.onCapturerStarted(true)
         } catch (e: Exception) {
-          Log.e(TAG, "bind failed", e)
+          Log.e(TAG, "bind failed on every frame path", e)
+          frameSourceReason = "every frame path failed to start: ${e.message}"
           observer?.onCapturerStarted(false)
         }
       }, ContextCompat.getMainExecutor(context))
     }
   }
 
+  /**
+   * Bind the next frame path in the queue; a path that throws is logged
+   * and the next one is tried, so a HAL that rejects the texture surface
+   * or the crop region costs a fallback, never the app. A path that binds
+   * but delivers no frame within 3 s is treated the same way (the
+   * watchdog), as long as another path is left.
+   */
+  private fun bindWithFallback() {
+    val p = provider ?: throw IllegalStateException("no camera provider")
+    var last: Exception? = null
+    while (fallbackQueue.isNotEmpty()) {
+      val attempt = fallbackQueue.removeFirst()
+      // `auto` may already have resolved to gpu and failed; do not try gpu twice.
+      if (attempt == "gpu" && frameSource == "gpu" && frameSourceFellBack) continue
+      try {
+        try { p.unbindAll() } catch (e: Exception) { /* nothing bound yet */ }
+        try { helper?.stopListening() } catch (e: Exception) { /* not listening yet */ }
+        frames = 0; lastFrameMs = 0L; sampleAtMs = 0L; framesAtLastSample = 0L
+        bind(p, startWidth, startHeight, attempt)
+        armNoFrameWatchdog()
+        return
+      } catch (e: Exception) {
+        last = e
+        val why = "$attempt failed to start: ${e.message ?: e.javaClass.simpleName}"
+        Log.w(TAG, why, e)
+        fallbackLog.add(why)
+        frameSourceFellBack = true
+      }
+    }
+    throw last ?: IllegalStateException("no frame path to try")
+  }
+
+  private fun armNoFrameWatchdog() {
+    noFrameWatchdog?.let { main.removeCallbacks(it) }
+    if (fallbackQueue.isEmpty()) return
+    val expected = frameSource
+    val r = Runnable {
+      if (frames == 0L && frameSource == expected && camera != null) {
+        val why = "$expected delivered no frame in 3 s"
+        Log.w(TAG, "$why: falling back")
+        fallbackLog.add(why)
+        frameSourceFellBack = true
+        try { bindWithFallback() } catch (e: Exception) { Log.e(TAG, "fallback after no frames failed", e); frameSourceReason = "every frame path failed: ${e.message}" }
+      }
+    }
+    noFrameWatchdog = r
+    main.postDelayed(r, 3000)
+  }
+
   override fun stopCapture() {
     val latch = CountDownLatch(1)
     main.post {
+      noFrameWatchdog?.let { main.removeCallbacks(it) }; noFrameWatchdog = null
+      fallbackQueue.clear()
       try { helper?.stopListening() } catch (e: Exception) { Log.w(TAG, "stopListening", e) }
       try { provider?.unbindAll(); lifecycle.stop() } catch (e: Exception) { Log.w(TAG, "unbind", e) }
       camera = null
@@ -227,7 +296,7 @@ class LoudCameraXCapturer(
   }
 
   @OptIn(ExperimentalCamera2Interop::class)
-  private fun bind(provider: ProcessCameraProvider, width: Int, height: Int) {
+  private fun bind(provider: ProcessCameraProvider, width: Int, height: Int, attempt: String = frameSourceWanted) {
     val selector = CameraSelector.Builder()
       .requireLensFacing(if (facing == "front") CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK)
       .build()
@@ -236,8 +305,8 @@ class LoudCameraXCapturer(
       .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
       .setResolutionStrategy(ResolutionStrategy(landscape, ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
       .build()
-    val wantTexture = frameSourceWanted != "cpu" && helper != null
-    if (frameSourceWanted != "cpu" && helper == null) frameSourceReason = "no SurfaceTextureHelper from WebRTC: CPU path"
+    val wantTexture = attempt != "cpu" && helper != null
+    if (attempt != "cpu" && helper == null) frameSourceReason = "no SurfaceTextureHelper from WebRTC: CPU path"
 
     val useCase: UseCase = if (wantTexture) {
       val builder = Preview.Builder().setResolutionSelector(resolution)
@@ -252,7 +321,13 @@ class LoudCameraXCapturer(
         val st = h.surfaceTexture
         st.setDefaultBufferSize(size.width, size.height)
         h.setTextureSize(size.width, size.height)
-        request.provideSurface(Surface(st), ContextCompat.getMainExecutor(context)) { /* released with the use case */ }
+        request.provideSurface(Surface(st), ContextCompat.getMainExecutor(context)) { result ->
+          // A surface the camera will not use (resolution or format refused) is a path that failed: let the watchdog fall back.
+          if (result.resultCode != androidx.camera.core.SurfaceRequest.Result.RESULT_SURFACE_USED_SUCCESSFULLY && result.resultCode != androidx.camera.core.SurfaceRequest.Result.RESULT_REQUEST_CANCELLED) {
+            Log.w(TAG, "preview surface not used: code ${result.resultCode}")
+            fallbackLog.add("$frameSource: preview surface refused (code ${result.resultCode})")
+          }
+        }
       }
       preview
     } else {
@@ -274,7 +349,8 @@ class LoudCameraXCapturer(
     val info = try { Camera2CameraInfo.from(cam.cameraInfo) } catch (e: Exception) { null }
     cameraId = info?.cameraId
     readCharacteristics(info)
-    frameSource = chooseFrameSource(wantTexture)
+    frameSource = chooseFrameSource(wantTexture, attempt)
+    if (fallbackLog.isNotEmpty()) frameSourceReason = "${fallbackLog.joinToString("; ")}; now $frameSource (${frameSourceReason ?: "chosen"})"
     rotation = try { cam.cameraInfo.getSensorRotationDegrees(Surface.ROTATION_0) } catch (e: Exception) { 90 }
     if (wantTexture) {
       val h = helper!!
@@ -308,14 +384,14 @@ class LoudCameraXCapturer(
   }
 
   /** The rule, so it can be read back from the result records: see the class comment. */
-  private fun chooseFrameSource(texture: Boolean): String {
+  private fun chooseFrameSource(texture: Boolean, attempt: String = frameSourceWanted): String {
     if (!texture) { if (frameSourceReason == null) frameSourceReason = "cpu requested"; return "cpu" }
-    if (frameSourceWanted == "gpu") { frameSourceReason = "gpu requested"; return "gpu" }
+    if (attempt == "gpu") { frameSourceReason = if (frameSourceWanted == "gpu") "gpu requested" else "gpu after fallback"; return "gpu" }
     if (activeArray == null) { frameSourceReason = "no active array size: GPU path"; return "gpu" }
     if (!croppingFreeform) { frameSourceReason = "SCALER_CROPPING_TYPE is CENTER_ONLY: the HAL would re-centre a pan; GPU path"; return "gpu" }
     if (maxDigitalZoom < 1.2) { frameSourceReason = "SCALER_AVAILABLE_MAX_DIGITAL_ZOOM $maxDigitalZoom leaves no room to crop; GPU path"; return "gpu" }
-    if (logicalMultiCamera && frameSourceWanted != "hardware") { frameSourceReason = "logical multi-camera: zoomRatio keeps the optical lens switch, so GPU path (force with frameSource=hardware)"; return "gpu" }
-    frameSourceReason = if (frameSourceWanted == "hardware") "hardware requested (FREEFORM crop, max digital zoom $maxDigitalZoom)" else "FREEFORM crop region, max digital zoom $maxDigitalZoom"
+    if (logicalMultiCamera && attempt != "hardware") { frameSourceReason = "logical multi-camera: zoomRatio keeps the optical lens switch, so GPU path (force with frameSource=hardware)"; return "gpu" }
+    frameSourceReason = if (attempt == "hardware") "hardware requested (FREEFORM crop, max digital zoom $maxDigitalZoom)" else "FREEFORM crop region, max digital zoom $maxDigitalZoom"
     return "hardware"
   }
 
@@ -872,6 +948,8 @@ class LoudCameraXCapturer(
       "cameraId" to cameraId,
       "frameSource" to frameSource,
       "frameSourceReason" to frameSourceReason,
+      "frameSourceFellBack" to frameSourceFellBack,
+      "frameSourceAttempts" to fallbackLog.toList(),
       "activePhysicalId" to activePhysicalId,
       "deviceZoom" to device?.let { round3(it) },
       "deviceZoomMin" to zMin,

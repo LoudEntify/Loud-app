@@ -5,7 +5,7 @@
 //   Survey      read the B2 profile, write it to a file, exit (no LiveKit);
 //               also reachable as loudentify://spike/zoom?mode=survey for
 //               a device farm.
-import { useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Share } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -19,6 +19,30 @@ import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
 import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
+
+/**
+ * A render error anywhere below this must not take the app down (a
+ * release build turns an uncaught render error into a process crash,
+ * which is what happened on 14 Oct when the camera preview rendered
+ * before its publication existed). The boundary shows the error in the
+ * spike's own log style and leaves the rest of the screen working.
+ */
+class SpikeErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error) { this.props.onError?.(String(error?.message || error)); }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={[this.props.style, { padding: 12, justifyContent: 'center' }]}>
+          <Text style={[mono, { color: '#ff9f1c' }]}>{this.props.label || 'This part of the screen hit an error'}: {String(this.state.error?.message || this.state.error)}</Text>
+          <Pressable onPress={() => this.setState({ error: null })}><Text style={[mono, { marginTop: 8 }]}>Tap to retry</Text></Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 /** The controller's log line for an ack: the move cycle (includes the move) and the command latency (network leg out), then what the camera did. */
 function ackLine(p) {
@@ -153,7 +177,7 @@ export default function ZoomSpike() {
         else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
         else if (kind === 'stage') { setStage(p); push(`stage ${p ?? 'none'}`); }
         else if (kind === 'match') push(p.ok ? `match cameras: targets ISO ${p.targets.iso}, ${p.targets.shutterMs} ms, ${p.targets.wbKelvin} K; ${p.results.map((r) => `${r.from}: ${residualLine(r.residual)}`).join('; ')}` : `match cameras failed: ${p.reason}`);
-        else if (kind === 'frameSource') push(`frame source wanted: ${p.wanted}`);
+        else if (kind === 'frameSource') push(p.used ? `frame path: ${p.used}${p.fellBack ? ' (FELL BACK' : ''}${p.reason ? ` — ${p.reason}` : ''}${p.fellBack ? ')' : ''}` : `frame path wanted: ${p.wanted}`);
         else if (kind === 'command') push(`command ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); if (role === 'controller') setTimeout(() => s.requestSurvey().catch(() => {}), 1500); }
         else if (kind === 'published') push(`publishing track ${p.trackSid}`);
@@ -250,11 +274,19 @@ export default function ZoomSpike() {
   const st = state;
   return (
     <View style={styles.screenDark}>
-      <View style={{ height: 300, backgroundColor: '#000' }}>
-        {VideoTrack && mode === 'camera' && s?.track && s?.room && <VideoTrack trackRef={{ participant: s.room.localParticipant, publication: s.room.localParticipant.getTrackPublication('camera'), source: 'camera' }} style={{ flex: 1 }} objectFit="cover" />}
-        {VideoTrack && mode === 'controller' && remote && <VideoTrack trackRef={{ participant: remote.participant, publication: remote.publication, source: remote.publication?.source }} style={{ flex: 1 }} objectFit="cover" />}
-        {mode === 'controller' && !remote && <Text style={[styles.bodyDark, { padding: 12 }]}>Waiting for the camera phone…</Text>}
-      </View>
+      <SpikeErrorBoundary label="Preview" style={{ height: 300, backgroundColor: '#000' }} onError={(e) => push(`preview error: ${e}`)}>
+        <View style={{ height: 300, backgroundColor: '#000' }}>
+          {(() => {
+            // LiveKit's VideoTrack reads trackRef.publication.track without a guard: render it only once the publication and its track exist.
+            const localPub = mode === 'camera' && s?.track && s?.room ? s.room.localParticipant.getTrackPublication('camera') : null;
+            if (VideoTrack && mode === 'camera' && localPub?.track) return <VideoTrack trackRef={{ participant: s.room.localParticipant, publication: localPub, source: 'camera' }} style={{ flex: 1 }} objectFit="cover" />;
+            if (VideoTrack && mode === 'controller' && remote?.publication?.track) return <VideoTrack trackRef={{ participant: remote.participant, publication: remote.publication, source: remote.publication?.source }} style={{ flex: 1 }} objectFit="cover" />;
+            if (mode === 'controller') return <Text style={[styles.bodyDark, { padding: 12 }]}>Waiting for the camera phone…</Text>;
+            return <Text style={[styles.bodyDark, { padding: 12 }]}>{s?.track ? 'Preview starting…' : 'Starting the camera…'}</Text>;
+          })()}
+        </View>
+      </SpikeErrorBoundary>
+      <SpikeErrorBoundary label="Controls" style={{ flex: 1 }} onError={(e) => push(`screen error: ${e}`)}>
       <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
         <Text style={[styles.bodyDark, { fontWeight: '700' }]}>{mode.toUpperCase()} · {status}</Text>
         {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.qualityCeiling?.zoom != null ? ` · 1080p ceiling ${profile.qualityCeiling.zoom}x` : ''}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ' · no lens switch'} · frame path {profile.frameSource?.eligible ?? '?'}</Text>}
@@ -289,6 +321,7 @@ export default function ZoomSpike() {
         {s && <Text style={mono}>{JSON.stringify({ latency: s.latencySummary(), shots: s.shots, cost: s.costSummary(), storage: s.storageSummary() })}</Text>}
         {log.map((l, i) => <Text key={i} style={[mono, { color: color.mutedOnDark }]}>{l}</Text>)}
       </ScrollView>
+      </SpikeErrorBoundary>
     </View>
   );
 }
