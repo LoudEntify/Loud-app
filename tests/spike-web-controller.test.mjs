@@ -196,7 +196,7 @@ test('report has the phone report keys; stop uploads the controller batch throug
   assert.ok(lines.slice(1).every((l) => Number.isFinite(l.t_server_ms)));
 
   const r = s.report();
-  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'frameSource', 'profile', 'clock', 'latency', 'shots', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
+  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'stage', 'stageChanges', 'frameSource', 'profile', 'cameraProfile', 'clock', 'latency', 'shots', 'pro', 'match', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
   assert.equal(r.role, 'controller'); assert.equal(r.deviceId, 'web-chrome-141-mac-10-15'); assert.equal(r.appVersion, 'web-test');
   assert.equal(r.latency.moveCycleMs.n, 1); assert.deepEqual(r.cost, { on: null, off: null, samples: 0 });
   assert.equal(r.storage.batches, 1); assert.equal(r.storage.failed, 0); assert.equal(r.storage.records, 4);

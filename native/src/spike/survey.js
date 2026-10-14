@@ -8,11 +8,15 @@
 //                  (optical) and which are the sensor being cropped;
 //   qualityCeiling the default zoom ceiling: the most zoom the sensor
 //                  crop gives before the region feeding a 1080p stream
-//                  is narrower than 1920 px (docs/DECISIONS.md 2026-10-13).
+//                  is narrower than 1920 px (docs/DECISIONS.md 2026-10-13);
+//   proSupport     what each pro-mode control can do on the primary lens
+//                  and why not (proMode.js, docs/SPIKE_PRO_MODE_PLAN.md).
 //
 // PRD row 127. S&I: Observability.
 
-export const PROFILE_SCHEMA_VERSION = 2;
+import { proSupport } from './proMode.js';
+
+export const PROFILE_SCHEMA_VERSION = 3;
 export const OUTPUT_WIDTH_PX = 1920;   // the stream is 1080p (1920 x 1080 landscape, carried portrait)
 
 export const PROFILE_SHAPE = {
@@ -24,6 +28,8 @@ export const PROFILE_SHAPE = {
   maxResolution: '{ width, height }', maxFrameRate: 'number', stabilisation: 'array of mode names',
   manualFocus: 'boolean', manualExposure: 'boolean', logicalMultiCamera: 'boolean',
   frameSource: "{ eligible: 'hardware' | 'gpu', reason }",
+  pro: 'per lens: { hardwareLevel, manualSensor, manualPostProcessing, readSensorSettings, isoRange, shutterNsRange, maxFrameDurationNs, evRange, evStep, focus: { minDiopters, hyperfocalDiopters, calibration, afModes }, awbModes, awbLockAvailable, aeModes, aeLockAvailable, fpsRanges, stabilisation }',
+  proSupport: 'primary lens: { hardwareLevel, iso, shutter, wb, focus, ev, lockAe, lockAwb, lockAf } each { supported, reason, min, max }',
   activeMode: "'device' | 'digital'", activeModeReason: 'string',
 };
 
@@ -126,6 +132,8 @@ export function normaliseProfile(raw, { appVersion, schemaVersion = PROFILE_SCHE
     manualFocus: Boolean(raw?.manualFocus), manualExposure: Boolean(raw?.manualExposure),
     logicalMultiCamera: Boolean(raw?.logicalMultiCamera),
     frameSource: primary?.frameSource || { eligible: null, reason: 'not surveyed' },
+    pro: primary?.pro || null,
+    proSupport: proSupport(primary?.pro || null),
     activeMode,
     activeModeReason: available
       ? `device zoom ${min}x to ${max}x${ceiling.zoom != null && ceiling.zoom < max ? `, ceiling ${ceiling.zoom}x for 1080p` : ''}`

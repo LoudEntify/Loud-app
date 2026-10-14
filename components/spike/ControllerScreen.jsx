@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Room } from 'livekit-client';
 import { useSession } from '../../lib/useSession';
 import { WebControllerSession } from '../../lib/spike/controllerSession';
+import { proWarnings, residualLine, STAGES } from '../../native/src/spike/proMode.js';
 
 const mono = { fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word' };
 const small = { height: 40, padding: '0 14px', fontSize: 15 };
@@ -28,6 +29,60 @@ function ackLine(p) {
   const r = p.ack.result || {};
   const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
+}
+
+/** The pro-mode presets; each row is gated by the camera's proSupport (docs/SPIKE_PRO_MODE_PLAN.md section 4). Same rows as the phone Controller. */
+const PRO_ROWS = [
+  { key: 'iso', label: 'ISO', presets: [[100, '100'], [400, '400'], [1600, '1600'], [3200, '3200']] },
+  { key: 'shutter', label: 'Shutter', presets: [[4.17, '1/240'], [8.33, '1/120'], [16.67, '1/60'], [33.33, '1/30'], [66.67, '1/15']] },
+  { key: 'wb', label: 'WB', presets: [[3200, '3200K'], [4500, '4500K'], [5600, '5600K'], [7500, '7500K']] },
+  { key: 'focus', label: 'Focus', presets: [[0, '∞'], [0.5, '2 m'], [1, '1 m'], [3.33, '0.3 m']] },
+  { key: 'ev', label: 'EV', presets: [[-1, '−1'], [-0.33, '−⅓'], [0, '0'], [0.33, '+⅓'], [1, '+1']] },
+];
+const LOCK_ROWS = [['ae', 'AE', 'lockAe'], ['awb', 'AWB', 'lockAwb'], ['af', 'AF', 'lockAf']];
+function proAckLine(p) {
+  const r = p.ack.result || {};
+  if (p.command.type === 'stage') return `stage ${r.achieved} on the camera`;
+  if (p.command.type === 'survey') return `camera capability: ${r.profile?.hardwareLevel ?? '?'} level, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}`;
+  if (p.command.type === 'match') return r.phase === 'read' ? `match read: ISO ${r.targets?.iso ?? '–'}, ${r.targets?.shutterMs ?? '–'} ms, ${r.targets?.wbKelvin ?? '–'} K` : `match apply: residual ${residualLine(r.residual)}${r.reasons?.length ? ` (${r.reasons.join('; ')})` : ''}`;
+  const base = `pro ${r.control} ${p.command.value ?? ''} → ${r.supported === false ? 'UNSUPPORTED' : `achieved ${r.achieved ?? '–'}`}${r.clamped ? ' (clamped)' : ''}${r.reason ? ` · ${r.reason}` : ''}`;
+  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''} · ${p.moveCycleMs} ms`;
+}
+
+/** Pro mode controls: only what the camera reports as supported is live; the rest is greyed with its reason. */
+function ProPanel({ s, cameraProfile, push }) {
+  const sup = cameraProfile?.proSupport;
+  if (!cameraProfile) return <span style={mono}>pro mode: waiting for the camera's capability (asked when its track arrives; "Ask camera" retries)</span>;
+  const send = (control, value) => {
+    for (const w of proWarnings(control, value, { fps: 30, pro: cameraProfile.pro })) push(`WARN ${w}`);
+    s?.pro(control, value).catch((e) => push(String(e?.message || e)));
+  };
+  return (
+    <div className="v-col" style={{ gap: 6 }}>
+      <span style={{ fontWeight: 700 }}>Pro mode · {cameraProfile.hardwareLevel ?? '?'} level · {cameraProfile.model ?? ''}</span>
+      <div className="v-row" style={{ flexWrap: 'wrap' }}>
+        <Btn label="Enable" tone="teal" onPress={() => send('enable', null)} />
+        <Btn label="Disable (all auto)" onPress={() => send('disable', null)} />
+        <Btn label="Match cameras" tone="orange" onPress={() => s?.matchCameras().catch((e) => push(String(e?.message || e)))} />
+        <Btn label="Ask camera" onPress={() => s?.requestSurvey().catch((e) => push(String(e?.message || e)))} />
+      </div>
+      {PRO_ROWS.map((row) => {
+        const c = sup?.[row.key];
+        if (!c?.supported) return <span key={row.key} style={{ ...mono, color: '#8a9499' }}>{row.label}: unavailable — {c?.reason ?? 'not surveyed'}</span>;
+        return (
+          <div key={row.key} className="v-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={mono}>{row.label} ({c.min}–{c.max}):</span>
+            {row.presets.filter(([v]) => v >= c.min - 1e-9 && v <= c.max + 1e-9).map(([v, label]) => <Btn key={label} label={label} onPress={() => send(row.key, v)} />)}
+          </div>
+        );
+      })}
+      <div className="v-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        {LOCK_ROWS.map(([value, label, key]) => (sup?.[key]?.supported
+          ? <span key={value} className="v-row" style={{ gap: 4 }}><Btn label={`Lock ${label}`} onPress={() => send('lock', value)} /><Btn label={`Unlock ${label}`} onPress={() => send('unlock', value)} /></span>
+          : <span key={value} style={{ ...mono, color: '#8a9499' }}>{label} lock: unavailable — {sup?.[key]?.reason ?? 'not surveyed'}</span>))}
+      </div>
+    </div>
+  );
 }
 
 function downloadJson(name, object) {
@@ -48,6 +103,8 @@ export default function ControllerScreen() {
   const [clock, setClock] = useState(null);
   const [soak, setSoak] = useState(null);
   const [tick, setTick] = useState(0);
+  const [cameraProfile, setCameraProfile] = useState(null);
+  const [stage, setStage] = useState(null);
   const sess = useRef(null);
   const video = useRef(null);
 
@@ -80,10 +137,13 @@ export default function ControllerScreen() {
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       createRoom: () => new Room({ adaptiveStream: false, dynacast: false }),
       onEvent: (kind, p) => {
-        if (kind === 'ack') { setLastAck(p); push(ackLine(p)); }
+        if (kind === 'ack') { setLastAck(p); push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? proAckLine(p) : ackLine(p)); }
+        else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
+        else if (kind === 'stage') { setStage(p); push(`stage ${p ?? 'none'}`); }
+        else if (kind === 'match') push(p.ok ? `match cameras: targets ISO ${p.targets.iso}, ${p.targets.shutterMs} ms, ${p.targets.wbKelvin} K; ${p.results.map((r) => `${r.from}: ${residualLine(r.residual)}`).join('; ')}` : `match cameras failed: ${p.reason}`);
         else if (kind === 'sent') push(`sent ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus('connected'); push(`connected to ${p.room} as ${p.identity}`); }
-        else if (kind === 'remote') { setRemote(p); push(p ? `camera track from ${p.participant?.identity}` : 'camera track gone'); }
+        else if (kind === 'remote') { setRemote(p); push(p ? `camera track from ${p.participant?.identity}` : 'camera track gone'); if (p) setTimeout(() => s.requestSurvey().catch(() => {}), 1000); }
         else if (kind === 'clock') { setClock(p); push(`clock offset ${p.offsetMs} ms ±${p.errorBoundMs}`); }
         else if (kind === 'upload') push(`batch ${p.ok ? 'ok' : 'FAILED'} ${p.records ?? ''} rec ${p.gzBytes ?? ''} B gz ${p.error || p.status || ''}`);
         else if (kind === 'soak') { setSoak(p.done ? null : p); push(p.done ? `soak done after ${p.moves} moves` : `soak move ${p.moves} at ${p.minutes} min`); }
@@ -163,10 +223,12 @@ export default function ControllerScreen() {
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
         <Btn label="Start 20-min soak" disabled={!live || !!soak} onPress={() => s.startSoak(20)} />
         <Btn label="Stop soak" disabled={!soak} onPress={() => { s?.stopSoak(); setSoak(null); push('soak stopped'); }} />
+        {STAGES.map((x) => <Btn key={x} label={stage === x ? `[Stage ${x}]` : `Stage ${x}`} disabled={!live} onPress={() => run(s.setStage(x))} />)}
         <Btn label="Report + stop" tone="teal" disabled={!s || status === 'stopped'} onPress={finish} />
       </div>
+      {live && <ProPanel s={s} cameraProfile={cameraProfile} push={push} />}
 
-      {s && <div style={mono} data-tick={tick}>{JSON.stringify({ latency: s.latencySummary(), shots: s.shots, storage: s.storageSummary() })}</div>}
+      {s && <div style={mono} data-tick={tick}>{JSON.stringify({ stage: s.stage, latency: s.latencySummary(), shots: s.shots, match: s.match, storage: s.storageSummary() })}</div>}
       <div className="v-col" style={{ ...mono, color: '#c9cfd1', gap: 2 }}>
         {log.map((l, i) => <span key={`${i}-${l}`}>{l}</span>)}
       </div>

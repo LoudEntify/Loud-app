@@ -16,6 +16,7 @@ import { File } from 'expo-file-system';
 import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
 import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
+import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
 const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
@@ -25,6 +26,25 @@ function ackLine(p) {
   const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
 }
+/** The pro-mode presets the controller offers; each row is gated by the camera's proSupport (docs/SPIKE_PRO_MODE_PLAN.md section 4). */
+const PRO_ROWS = [
+  { key: 'iso', label: 'ISO', presets: [[100, '100'], [400, '400'], [1600, '1600'], [3200, '3200']] },
+  { key: 'shutter', label: 'Shutter', presets: [[4.17, '1/240'], [8.33, '1/120'], [16.67, '1/60'], [33.33, '1/30'], [66.67, '1/15']] },
+  { key: 'wb', label: 'WB', presets: [[3200, '3200K'], [4500, '4500K'], [5600, '5600K'], [7500, '7500K']] },
+  { key: 'focus', label: 'Focus', presets: [[0, '∞'], [0.5, '2 m'], [1, '1 m'], [3.33, '0.3 m']] },
+  { key: 'ev', label: 'EV', presets: [[-1, '−1'], [-0.33, '−⅓'], [0, '0'], [0.33, '+⅓'], [1, '+1']] },
+];
+const LOCK_ROWS = [['ae', 'AE', 'lockAe'], ['awb', 'AWB', 'lockAwb'], ['af', 'AF', 'lockAf']];
+/** The controller's log line for a pro or match ack. */
+function proAckLine(p) {
+  const r = p.ack.result || {};
+  if (p.command.type === 'stage') return `stage ${r.achieved} on the camera`;
+  if (p.command.type === 'survey') return `camera capability: ${r.profile?.hardwareLevel ?? '?'} level, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}`;
+  if (p.command.type === 'match') return r.phase === 'read' ? `match read: ISO ${r.targets?.iso ?? '–'}, ${r.targets?.shutterMs ?? '–'} ms, ${r.targets?.wbKelvin ?? '–'} K` : `match apply: residual ${residualLine(r.residual)}${r.reasons?.length ? ` (${r.reasons.join('; ')})` : ''}`;
+  const base = `pro ${r.control} ${p.command.value ?? ''} → ${r.supported === false ? 'UNSUPPORTED' : `achieved ${r.achieved ?? '–'}`}${r.clamped ? ' (clamped)' : ''}${r.reason ? ` · ${r.reason}` : ''}`;
+  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''} · ${p.moveCycleMs} ms`;
+}
+
 /** The camera's log line for a move it ran (or refused). */
 function resultLine(p) {
   const r = p.result;
@@ -36,6 +56,47 @@ function Btn({ label, onPress, tone = 'ghost', small }) {
   const bg = tone === 'teal' ? styles.btnTeal : tone === 'orange' ? styles.btnOrange : styles.btnGhostDark;
   const tx = tone === 'ghost' ? styles.btnTextDark : styles.btnText;
   return <Pressable style={[styles.btn, bg, small ? { minHeight: 40, paddingHorizontal: 12 } : null]} onPress={onPress}><Text style={[tx, small ? { fontSize: 14 } : null]}>{label}</Text></Pressable>;
+}
+
+/**
+ * Pro mode controls (controller role). Only what the camera's proSupport
+ * marks supported is live; the rest is greyed with its one-line reason.
+ * A warning the planner expects (frame rate, grain, slow path) is logged
+ * before the command goes, and comes back in the ack too.
+ */
+function ProPanel({ s, cameraProfile, push }) {
+  const sup = cameraProfile?.proSupport;
+  if (!cameraProfile) return <Text style={mono}>pro mode: waiting for the camera's capability (sent on connect; tap "Ask camera" to retry)</Text>;
+  const send = (control, value) => {
+    for (const w of proWarnings(control, value, { fps: 30, pro: cameraProfile.pro })) push(`WARN ${w}`);
+    s?.pro(control, value).catch((e) => push(String(e)));
+  };
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.bodyDark, { fontWeight: '700' }]}>Pro mode · {cameraProfile.hardwareLevel ?? '?'} level · {cameraProfile.model ?? ''}</Text>
+      <View style={[styles.row, { flexWrap: 'wrap' }]}>
+        <Btn small label="Enable" tone="teal" onPress={() => send('enable', null)} />
+        <Btn small label="Disable (all auto)" onPress={() => send('disable', null)} />
+        <Btn small label="Match cameras" tone="orange" onPress={() => s?.matchCameras().catch((e) => push(String(e)))} />
+        <Btn small label="Ask camera" onPress={() => s?.requestSurvey().catch((e) => push(String(e)))} />
+      </View>
+      {PRO_ROWS.map((row) => {
+        const c = sup?.[row.key];
+        if (!c?.supported) return <Text key={row.key} style={[mono, { color: color.mutedOnDark }]}>{row.label}: unavailable — {c?.reason ?? 'not surveyed'}</Text>;
+        return (
+          <View key={row.key} style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+            <Text style={mono}>{row.label} ({c.min}–{c.max}):</Text>
+            {row.presets.filter(([v]) => v >= c.min - 1e-9 && v <= c.max + 1e-9).map(([v, label]) => <Btn key={label} small label={label} onPress={() => send(row.key, v)} />)}
+          </View>
+        );
+      })}
+      <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+        {LOCK_ROWS.map(([value, label, key]) => (sup?.[key]?.supported
+          ? <View key={value} style={[styles.row, { gap: 4 }]}><Btn small label={`Lock ${label}`} onPress={() => send('lock', value)} /><Btn small label={`Unlock ${label}`} onPress={() => send('unlock', value)} /></View>
+          : <Text key={value} style={[mono, { color: color.mutedOnDark }]}>{label} lock: unavailable — {sup?.[key]?.reason ?? 'not surveyed'}</Text>))}
+      </View>
+    </View>
+  );
 }
 
 export default function ZoomSpike() {
@@ -54,6 +115,9 @@ export default function ZoomSpike() {
   const [VideoTrack, setVideoTrack] = useState(null);
   // Which frame path the Camera role asks for (auto picks hardware where the camera allows it; cpu is the old path, kept for comparison).
   const [frameSource, setFrameSource] = useState('auto');
+  // Pro mode (controller role): the camera's capability as it reported it, the current test stage.
+  const [cameraProfile, setCameraProfile] = useState(null);
+  const [stage, setStage] = useState(null);
   const sess = useRef(null);
 
   const push = (line) => setLog((l) => [`${new Date().toISOString().slice(11, 19)} ${line}`, ...l].slice(0, 60));
@@ -84,11 +148,14 @@ export default function ZoomSpike() {
       onEvent: (kind, p) => {
         if (kind === 'profile') setProfile(p);
         else if (kind === 'state') setState(p);
-        else if (kind === 'ack') { setLastAck(p); push(ackLine(p)); }
-        else if (kind === 'result') push(resultLine(p));
+        else if (kind === 'ack') { setLastAck(p); push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? proAckLine(p) : ackLine(p)); }
+        else if (kind === 'result') push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? `did ${p.command.type} ${p.command.control ?? p.command.phase ?? p.command.stage ?? ''}: ${p.result.supported === false ? 'unsupported' : `achieved ${p.result.achieved ?? p.result.targets?.iso ?? '–'}`}${p.result.reason ? ` (${p.result.reason})` : ''}` : resultLine(p));
+        else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
+        else if (kind === 'stage') { setStage(p); push(`stage ${p ?? 'none'}`); }
+        else if (kind === 'match') push(p.ok ? `match cameras: targets ISO ${p.targets.iso}, ${p.targets.shutterMs} ms, ${p.targets.wbKelvin} K; ${p.results.map((r) => `${r.from}: ${residualLine(r.residual)}`).join('; ')}` : `match cameras failed: ${p.reason}`);
         else if (kind === 'frameSource') push(`frame source wanted: ${p.wanted}`);
         else if (kind === 'command') push(`command ${p.type} ${p.target ?? p.direction}`);
-        else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); }
+        else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); if (role === 'controller') setTimeout(() => s.requestSurvey().catch(() => {}), 1500); }
         else if (kind === 'published') push(`publishing track ${p.trackSid}`);
         else if (kind === 'remote') setRemote(p);
         else if (kind === 'clock') push(`clock offset ${p.offsetMs} ms ±${p.errorBoundMs}`);
@@ -193,6 +260,8 @@ export default function ZoomSpike() {
         {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.qualityCeiling?.zoom != null ? ` · 1080p ceiling ${profile.qualityCeiling.zoom}x` : ''}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ' · no lens switch'} · frame path {profile.frameSource?.eligible ?? '?'}</Text>}
         {st && <Text style={mono}>B4 {st.frameSource} · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.width}×{st.height}@{st.fps} · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
         {st && <Text style={mono}>light EV {fx(st.sceneEv, 1)} · ISO {st.iso ?? '–'} · {fx(st.exposureMs, 1)} ms · f/{st.aperture ?? '–'}{st.frameSource === 'hardware' ? ` · region ${st.appliedCrop ? `${fx(st.appliedCrop.w, 3)}@${fx(st.appliedCrop.x, 3)},${fx(st.appliedCrop.y, 3)}` : '–'} pushes ${st.regionPushes}` : ''}</Text>}
+        {st?.pro?.enabled && <Text style={mono}>PRO on · AE {st.pro.aeMode ?? '?'}{st.pro.aeLock ? ' locked' : ''} · AWB {st.pro.awbMode ?? '?'}{st.pro.awbLock ? ' locked' : ''} · AF {st.pro.afMode ?? '?'} · ISO {st.pro.iso ?? '–'} · {st.pro.shutterMs ?? '–'} ms · WB {st.pro.wbKelvin ?? '–'} K · focus {st.pro.focusDiopters ?? '–'} dpt · EV {st.pro.evStops ?? 0} · frame {st.pro.frameDurationMs ?? '–'} ms</Text>}
+        <Text style={mono}>stage {stage ?? 'none'}{mode === 'controller' ? '' : ' (set by the controller)'}</Text>
         {lastAck && <Text style={mono}>last move cycle {lastAck.moveCycleMs} ms (includes the move) · command latency {lastAck.commandLatencyMs ?? '–'} ms · ack leg {lastAck.ackLegMs ?? '–'} ms (server clock)</Text>}
         {mode === 'controller' && (
           <>
@@ -206,7 +275,9 @@ export default function ZoomSpike() {
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
               <Btn small label="Start 20-min soak" onPress={() => s?.startSoak(20)} />
               <Btn small label="Stop soak" onPress={() => s?.stopSoak()} />
+              {STAGES.map((x) => <Btn key={x} small label={stage === x ? `[Stage ${x}]` : `Stage ${x}`} onPress={() => s?.setStage(x).catch((e) => push(String(e)))} />)}
             </View>
+            <ProPanel s={s} cameraProfile={cameraProfile} push={push} />
           </>
         )}
         <View style={[styles.row, { flexWrap: 'wrap' }]}>

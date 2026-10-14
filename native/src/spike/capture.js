@@ -21,12 +21,15 @@ export class CaptureBuffer {
   constructor({ deviceId, showId = null, sessionId, now = () => Date.now(), offset = null }) {
     this.deviceId = deviceId; this.showId = showId; this.sessionId = sessionId; this.now = now; this.offset = offset;
     this.records = []; this.dropped = 0; this.lastState = null; this.seq = 0; this.enabled = true;
+    // The test stage every record from now on carries ('A' | 'B', null before the first stage command), docs/SPIKE_PRO_MODE_PLAN.md section 5.
+    this.stage = null;
   }
+  setStage(stage) { this.stage = stage || null; }
   setOffset(offset) { this.offset = offset; }
   stamp(deviceMs = this.now()) { return { t_device_ms: deviceMs, t_server_ms: this.offset ? deviceMs + this.offset.offsetMs : null, clock_error_ms: this.offset ? this.offset.errorBoundMs : null }; }
   push(stream, body) {
     if (!this.enabled) return null;
-    const rec = { schema_version: SCHEMA_VERSION, stream, seq: (this.seq += 1), device_id: this.deviceId, show_id: this.showId, session_id: this.sessionId, ...this.stamp(), ...body };
+    const rec = { schema_version: SCHEMA_VERSION, stream, seq: (this.seq += 1), device_id: this.deviceId, show_id: this.showId, session_id: this.sessionId, stage: this.stage, ...this.stamp(), ...body };
     this.records.push(rec);
     if (this.records.length > MAX_BUFFER_RECORDS) { this.records.shift(); this.dropped += 1; }
     return rec;

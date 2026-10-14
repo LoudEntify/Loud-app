@@ -2,6 +2,8 @@ package app.loudentify.loudcamera
 
 import android.content.Context
 import android.graphics.Rect
+import android.hardware.camera2.params.ColorSpaceTransform
+import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -140,6 +142,31 @@ class LoudCameraXCapturer(
   @Volatile private var hwPushes = 0L
   @Volatile private var hwClamped = false
 
+  // Pro mode (docs/SPIKE_PRO_MODE_PLAN.md): a map of capture-request
+  // options sent only when a pro command arrives. Off by default; while
+  // off, nothing below is read or written per frame (the `proEnabled`
+  // flag gates the extra capture-result reads).
+  @Volatile private var proEnabled = false
+  private val proOptions = LinkedHashMap<CaptureRequest.Key<*>, Any>()
+  @Volatile private var proColorGains: RggbChannelVector? = null
+  @Volatile private var proColorTransform: ColorSpaceTransform? = null
+  @Volatile private var proFrameDurationNs: Long? = null
+  @Volatile private var proAeLock: Boolean? = null
+  @Volatile private var proAwbLock: Boolean? = null
+  @Volatile private var proAeMode: Int? = null
+  @Volatile private var proAwbMode: Int? = null
+  @Volatile private var proAfMode: Int? = null
+  @Volatile private var proEvIndex: Int? = null
+  private var isoRange: Range<Int>? = null
+  private var exposureRange: Range<Long>? = null
+  private var minFocusDiopters = 0f
+  private var evRange: Range<Int>? = null
+  private var evStep = 0.0
+  private var manualSensor = false
+  private var manualPost = false
+  private var aeLockAvailable = false
+  private var awbLockAvailable = false
+
   // Capture-result telemetry (updated on the camera thread).
   @Volatile var activePhysicalId: String? = null
   @Volatile var reportedZoomRatio: Double? = null
@@ -268,6 +295,15 @@ class LoudCameraXCapturer(
       val caps = info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList() ?: emptyList()
       logicalMultiCamera = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
       if (aperture == null) aperture = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull()?.toDouble()
+      manualSensor = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)
+      manualPost = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+      isoRange = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+      exposureRange = info.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+      minFocusDiopters = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+      evRange = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+      evStep = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 0.0
+      aeLockAvailable = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
+      awbLockAvailable = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE) == true
     } catch (e: Exception) { Log.w(TAG, "characteristics", e) }
   }
 
@@ -295,8 +331,226 @@ class LoudCameraXCapturer(
       aeState = result.get(CaptureResult.CONTROL_AE_STATE)
       afState = result.get(CaptureResult.CONTROL_AF_STATE)
       appliedRegion = result.get(CaptureResult.SCALER_CROP_REGION)
+      if (proEnabled) {
+        // Pro mode on: the colour and lock state the HAL actually applied
+        // (nothing here runs while pro mode is off).
+        proColorGains = result.get(CaptureResult.COLOR_CORRECTION_GAINS)
+        result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)?.let { if (!proOptions.containsKey(CaptureRequest.COLOR_CORRECTION_TRANSFORM)) proColorTransform = it }
+        proFrameDurationNs = result.get(CaptureResult.SENSOR_FRAME_DURATION)
+        proAeLock = result.get(CaptureResult.CONTROL_AE_LOCK)
+        proAwbLock = result.get(CaptureResult.CONTROL_AWB_LOCK)
+        proAeMode = result.get(CaptureResult.CONTROL_AE_MODE)
+        proAwbMode = result.get(CaptureResult.CONTROL_AWB_MODE)
+        proAfMode = result.get(CaptureResult.CONTROL_AF_MODE)
+        proEvIndex = result.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)
+      }
     }
   }
+
+  // ── pro mode ──────────────────────────────────────────────────
+  /**
+   * One manual-control change (docs/SPIKE_PRO_MODE_PLAN.md section 2).
+   * Builds the capture-request options for `control`, pushes the merged
+   * set once through CameraX's Camera2 interop, waits for the HAL to
+   * report three frames, then answers with what it actually applied.
+   * Values on the wire: ISO, shutter ms, Kelvin, diopters, EV stops, or
+   * 'ae' | 'awb' | 'af' for lock/unlock.
+   */
+  @OptIn(ExperimentalCamera2Interop::class)
+  fun setPro(control: String, value: Any?, done: (Map<String, Any?>) -> Unit) {
+    val cam = camera
+    if (cam == null) { done(proResult(control, value, null, false, "camera not bound", supported = false)); return }
+    val num = (value as? Number)?.toDouble()
+    val name = value as? String
+    var requested: Any? = value
+    var achievedPlanned: Double? = null
+    var clamped = false
+    var reason: String? = null
+    var fpsExpected: Double? = null
+    fun clampD(v: Double, lo: Double, hi: Double): Double { val c = v.coerceIn(lo, hi); if (c != v) { clamped = true; reason = "$control $v is outside $lo–$hi; using $c" }; return c }
+    try {
+      when (control) {
+        "enable" -> { proEnabled = true }
+        "disable" -> {
+          proOptions.clear(); proEnabled = false
+          proColorGains = null; proFrameDurationNs = null; proAeLock = null; proAwbLock = null; proAeMode = null; proAwbMode = null; proAfMode = null; proEvIndex = null
+          Camera2CameraControl.from(cam.cameraControl).clearCaptureRequestOptions()
+          cam.cameraControl.setExposureCompensationIndex(0)
+          done(proResult(control, value, null, false, null, supported = true)); return
+        }
+        "iso", "shutter" -> {
+          if (!manualSensor) { done(proResult(control, value, null, false, "no MANUAL_SENSOR capability on this camera", supported = false)); return }
+          if (num == null) { done(proResult(control, value, null, false, "$control needs a number", supported = true)); return }
+          proEnabled = true
+          val ir = isoRange; val er = exposureRange
+          val isoNow = (proOptions[CaptureRequest.SENSOR_SENSITIVITY] as? Int) ?: iso ?: ir?.lower ?: 100
+          val expNow = (proOptions[CaptureRequest.SENSOR_EXPOSURE_TIME] as? Long) ?: exposureNs ?: (1_000_000_000L / fps)
+          var isoNew = isoNow; var expNew = expNow
+          if (control == "iso") {
+            isoNew = clampD(num, (ir?.lower ?: 1).toDouble(), (ir?.upper ?: 12800).toDouble()).roundToInt(); achievedPlanned = isoNew.toDouble()
+          } else {
+            expNew = clampD(num * 1e6, (er?.lower ?: 1000L).toDouble(), (er?.upper ?: 1_000_000_000L).toDouble()).toLong(); achievedPlanned = expNew / 1e6
+          }
+          val frameNs = max(1_000_000_000L / fps, expNew)
+          fpsExpected = round3(1e9 / frameNs)
+          proOptions[CaptureRequest.CONTROL_AE_MODE] = CameraMetadata.CONTROL_AE_MODE_OFF
+          proOptions[CaptureRequest.SENSOR_SENSITIVITY] = isoNew
+          proOptions[CaptureRequest.SENSOR_EXPOSURE_TIME] = expNew
+          proOptions[CaptureRequest.SENSOR_FRAME_DURATION] = frameNs
+        }
+        "wb" -> {
+          if (!manualPost) { done(proResult(control, value, null, false, "no MANUAL_POST_PROCESSING capability on this camera: the HAL will not take colour gains", supported = false)); return }
+          if (num == null) { done(proResult(control, value, null, false, "wb needs a Kelvin number", supported = true)); return }
+          proEnabled = true
+          val k = clampD(num, 2000.0, 10000.0)
+          val g = kelvinToGains(k)
+          achievedPlanned = k
+          proOptions[CaptureRequest.CONTROL_AWB_MODE] = CameraMetadata.CONTROL_AWB_MODE_OFF
+          proOptions[CaptureRequest.COLOR_CORRECTION_MODE] = CameraMetadata.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX
+          proOptions[CaptureRequest.COLOR_CORRECTION_GAINS] = g
+          // The matrix the HAL last used while AWB was auto keeps the
+          // sensor's colour science; without one, identity.
+          proOptions[CaptureRequest.COLOR_CORRECTION_TRANSFORM] = proColorTransform ?: ColorSpaceTransform(intArrayOf(1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1))
+        }
+        "focus" -> {
+          if (minFocusDiopters <= 0f) { done(proResult(control, value, null, false, "fixed-focus lens", supported = false)); return }
+          if (num == null) { done(proResult(control, value, null, false, "focus needs a diopter number (0 = infinity)", supported = true)); return }
+          proEnabled = true
+          val d = clampD(num, 0.0, minFocusDiopters.toDouble())
+          achievedPlanned = d
+          proOptions[CaptureRequest.CONTROL_AF_MODE] = CameraMetadata.CONTROL_AF_MODE_OFF
+          proOptions[CaptureRequest.LENS_FOCUS_DISTANCE] = d.toFloat()
+        }
+        "ev" -> {
+          val r = evRange
+          if (r == null || (r.lower == 0 && r.upper == 0) || evStep <= 0) { done(proResult(control, value, null, false, "exposure compensation range is empty", supported = false)); return }
+          if (num == null) { done(proResult(control, value, null, false, "ev needs a number of stops", supported = true)); return }
+          if (proOptions[CaptureRequest.CONTROL_AE_MODE] == CameraMetadata.CONTROL_AE_MODE_OFF) { done(proResult(control, value, null, false, "exposure compensation does nothing while ISO or shutter are set by hand (AE is off); unlock them first", supported = true)); return }
+          proEnabled = true
+          val idx = clampD((num / evStep), r.lower.toDouble(), r.upper.toDouble()).roundToInt()
+          achievedPlanned = round3(idx * evStep)
+          val fut = cam.cameraControl.setExposureCompensationIndex(idx)
+          fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) Log.w(TAG, "ev", e) } }, Executor { it.run() })
+          val planned = achievedPlanned; val why = reason; val cl = clamped
+          main.postDelayed({ done(proResult(control, value, planned, cl, why, supported = true)) }, 150)
+          return
+        }
+        "lock", "unlock" -> {
+          val on = control == "lock"
+          when (name) {
+            "ae" -> { if (!aeLockAvailable) { done(proResult(control, value, null, false, "AE lock is not available on this camera", supported = false)); return }; proEnabled = true; if (on) proOptions[CaptureRequest.CONTROL_AE_LOCK] = true else proOptions.remove(CaptureRequest.CONTROL_AE_LOCK) }
+            "awb" -> { if (!awbLockAvailable) { done(proResult(control, value, null, false, "AWB lock is not available on this camera", supported = false)); return }; proEnabled = true; if (on) proOptions[CaptureRequest.CONTROL_AWB_LOCK] = true else proOptions.remove(CaptureRequest.CONTROL_AWB_LOCK) }
+            "af" -> {
+              if (minFocusDiopters <= 0f) { done(proResult(control, value, null, false, "AF lock needs manual focus, which this fixed-focus lens does not offer", supported = false)); return }
+              proEnabled = true
+              if (on) {
+                // Camera2 has no "lock here" for AF outside a trigger sequence: hold the distance the HAL last reported.
+                val d = (focusDistance ?: 0.0).toFloat().coerceIn(0f, minFocusDiopters)
+                proOptions[CaptureRequest.CONTROL_AF_MODE] = CameraMetadata.CONTROL_AF_MODE_OFF
+                proOptions[CaptureRequest.LENS_FOCUS_DISTANCE] = d
+                achievedPlanned = d.toDouble(); reason = "locked at the current focus distance ($d diopters) via manual focus"
+              } else { proOptions.remove(CaptureRequest.CONTROL_AF_MODE); proOptions.remove(CaptureRequest.LENS_FOCUS_DISTANCE) }
+            }
+            else -> { done(proResult(control, value, null, false, "unknown lock $name; one of ae, awb, af", supported = false)); return }
+          }
+          if (control == "unlock" && name != "af" && (name == "ae")) {
+            // Unlocking AE also releases a manual ISO/shutter, which is what a director means by it.
+            proOptions.remove(CaptureRequest.CONTROL_AE_MODE); proOptions.remove(CaptureRequest.SENSOR_SENSITIVITY); proOptions.remove(CaptureRequest.SENSOR_EXPOSURE_TIME); proOptions.remove(CaptureRequest.SENSOR_FRAME_DURATION)
+          }
+          if (control == "unlock" && name == "awb") { proOptions.remove(CaptureRequest.CONTROL_AWB_MODE); proOptions.remove(CaptureRequest.COLOR_CORRECTION_MODE); proOptions.remove(CaptureRequest.COLOR_CORRECTION_GAINS); proOptions.remove(CaptureRequest.COLOR_CORRECTION_TRANSFORM) }
+        }
+        else -> { done(proResult(control, value, null, false, "unknown control $control", supported = false)); return }
+      }
+      pushPro(cam)
+    } catch (e: Exception) {
+      done(proResult(control, value, null, false, "pro $control threw: ${e.message}", supported = true)); return
+    }
+    // Let the HAL report a few frames with the new request before reading back.
+    val planned = achievedPlanned; val why = reason; val cl = clamped; val fpsEx = fpsExpected
+    main.postDelayed({ done(proResult(control, value, planned, cl, why, supported = true, fpsExpected = fpsEx)) }, 150)
+  }
+
+  @OptIn(ExperimentalCamera2Interop::class)
+  private fun pushPro(cam: Camera) {
+    val b = CaptureRequestOptions.Builder()
+    for ((k, v) in proOptions) {
+      @Suppress("UNCHECKED_CAST")
+      b.setCaptureRequestOption(k as CaptureRequest.Key<Any>, v)
+    }
+    val fut = Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(b.build())
+    fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) Log.w(TAG, "pro options", e) } }, Executor { it.run() })
+  }
+
+  /** The current exposure and colour as the HAL reports them (Match cameras, phase read). Turns the extra reads on. */
+  fun proRead(): Map<String, Any?> {
+    proEnabled = true
+    return proReadback()
+  }
+
+  private fun proReadback(): Map<String, Any?> {
+    val g = proColorGains
+    return mapOf(
+      "iso" to iso,
+      "shutterMs" to exposureNs?.let { round3(it / 1e6) },
+      "colorGains" to g?.let { mapOf("r" to round3(it.red.toDouble()), "gEven" to round3(it.greenEven.toDouble()), "gOdd" to round3(it.greenOdd.toDouble()), "b" to round3(it.blue.toDouble())) },
+      "wbKelvin" to g?.let { gainsToKelvin(it.red.toDouble(), it.blue.toDouble()) },
+      "focusDiopters" to focusDistance,
+      "evIndex" to proEvIndex,
+      "evStops" to proEvIndex?.let { round3(it * evStep) },
+      "aeLock" to proAeLock, "awbLock" to proAwbLock,
+      "aeMode" to proAeMode?.let { aeModeName(it) }, "awbMode" to proAwbMode?.let { awbModeName(it) }, "afMode" to proAfMode?.let { afModeName(it) },
+      "frameDurationMs" to proFrameDurationNs?.let { round3(it / 1e6) },
+      "fps" to round3(measuredFps)
+    )
+  }
+
+  private fun proResult(control: String, requested: Any?, achieved: Double?, clamped: Boolean, reason: String?, supported: Boolean, fpsExpected: Double? = null): Map<String, Any?> {
+    val rb = if (proEnabled) proReadback() else null
+    // What the HAL reports for the control just set, when it reports it; else what was planned.
+    val reported: Double? = when (control) {
+      "iso" -> rb?.get("iso")?.let { (it as Number).toDouble() }
+      "shutter" -> rb?.get("shutterMs") as? Double
+      "wb" -> (rb?.get("wbKelvin") as? Number)?.toDouble()
+      "focus" -> rb?.get("focusDiopters") as? Double
+      "ev" -> rb?.get("evStops") as? Double
+      else -> null
+    }
+    return mapOf(
+      "control" to control, "requested" to requested, "achieved" to (reported ?: achieved), "planned" to achieved,
+      "clamped" to clamped, "reason" to reason, "supported" to supported, "fpsExpected" to fpsExpected,
+      "proEnabled" to proEnabled, "readback" to rb
+    )
+  }
+
+  /** Kelvin → RGGB gains (Tanner Helland's black-body fit, green = 1; same maths as proMode.js kelvinToGains). */
+  private fun kelvinToGains(kelvin: Double): RggbChannelVector {
+    val t = kelvin.coerceIn(1000.0, 40000.0) / 100.0
+    fun clamp(v: Double) = v.coerceIn(0.0, 255.0)
+    val red = if (t <= 66) 255.0 else clamp(329.698727446 * Math.pow(t - 60, -0.1332047592))
+    val green = if (t <= 66) clamp(99.4708025861 * ln(t) - 161.1195681661) else clamp(288.1221695283 * Math.pow(t - 60, -0.0755148492))
+    val blue = if (t >= 66) 255.0 else if (t <= 19) 0.0 else clamp(138.5177312231 * ln(t - 10) - 305.0447927307)
+    val g = if (green > 0) green else 1.0
+    return RggbChannelVector((g / max(red, 1.0)).toFloat(), 1f, 1f, (g / max(blue, 1.0)).toFloat())
+  }
+
+  /** The Kelvin whose gains best match the HAL's red/blue ratio (25 K steps, same search as proMode.js gainsToKelvin). */
+  private fun gainsToKelvin(r: Double, b: Double): Int? {
+    if (r <= 0 || b <= 0) return null
+    val want = ln(r / b)
+    var best = 0; var bestErr = Double.MAX_VALUE
+    var k = 2000
+    while (k <= 10000) {
+      val g = kelvinToGains(k.toDouble())
+      val err = abs(ln(g.red.toDouble() / g.blue.toDouble()) - want)
+      if (err < bestErr) { bestErr = err; best = k }
+      k += 25
+    }
+    return best
+  }
+
+  private fun aeModeName(m: Int) = when (m) { CameraMetadata.CONTROL_AE_MODE_OFF -> "off"; CameraMetadata.CONTROL_AE_MODE_ON -> "on"; else -> "mode-$m" }
+  private fun awbModeName(m: Int) = when (m) { CameraMetadata.CONTROL_AWB_MODE_OFF -> "off"; CameraMetadata.CONTROL_AWB_MODE_AUTO -> "auto"; else -> "mode-$m" }
+  private fun afModeName(m: Int) = when (m) { CameraMetadata.CONTROL_AF_MODE_OFF -> "off"; CameraMetadata.CONTROL_AF_MODE_AUTO -> "auto"; CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO -> "continuous-video"; CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE -> "continuous-picture"; else -> "mode-$m" }
 
   // ── frame path: texture (hardware / gpu) ─────────────────────
   private fun onTextureFrame(frame: VideoFrame) {
@@ -642,7 +896,9 @@ class LoudCameraXCapturer(
       "droppedFrames" to droppedFrames,
       "convertMsPerFrame" to (if (frames > 0) round3(convertMsTotal / frames) else null),
       "moving" to (plan != null),
-      "moveKind" to plan?.kind
+      "moveKind" to plan?.kind,
+      // Pro mode: the applied exposure/colour/lock state while on; one flag while off (no extra reads).
+      "pro" to (if (proEnabled) proReadback() + mapOf("enabled" to true) else mapOf("enabled" to false))
     )
   }
 

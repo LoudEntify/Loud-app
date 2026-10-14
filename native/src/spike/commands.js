@@ -23,7 +23,30 @@ export function zoomCommand({ target, durationMs = 2000, easing = 'ease-in-out',
 export function panCommand({ direction, degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing, decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
   return { v: PROTOCOL_VERSION, type: 'pan', id: mintId(), decisionId, source, direction, degree, window, durationMs, easing, decidedAt };
 }
-export function surveyRequest({ decidedAt }) { return { v: PROTOCOL_VERSION, type: 'survey', id: mintId(), decidedAt }; }
+export function surveyRequest({ decidedAt, decisionId = mintId('dec') }) { return { v: PROTOCOL_VERSION, type: 'survey', id: mintId(), decisionId, decidedAt }; }
+
+// ── pro mode (docs/SPIKE_PRO_MODE_PLAN.md section 2) ──────────────
+/**
+ * One manual-control change on the camera: control ∈ iso | shutter | wb |
+ * focus | ev | lock | unlock | enable | disable; value as proMode.js
+ * says (ISO number, shutter ms, Kelvin, diopters, stops; 'ae' | 'awb' |
+ * 'af' for the locks; ignored for enable/disable).
+ */
+export function proCommand({ control, value = null, decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
+  return { v: PROTOCOL_VERSION, type: 'pro', id: mintId(), decisionId, source, control, value, decidedAt };
+}
+/**
+ * Match cameras, in two phases: 'read' asks the reference camera for its
+ * current exposure and white balance; 'apply' carries those targets to
+ * every camera, which locks to the nearest values it can achieve.
+ */
+export function matchCommand({ phase, targets = null, reference = null, decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
+  return { v: PROTOCOL_VERSION, type: 'match', id: mintId(), decisionId, source, phase, targets, reference, decidedAt };
+}
+/** Tell the camera which test stage it is in ('A' | 'B'), so both sides tag their records the same. */
+export function stageCommand({ stage, decidedAt, decisionId = mintId('dec') }) {
+  return { v: PROTOCOL_VERSION, type: 'stage', id: mintId(), decisionId, stage, decidedAt };
+}
 
 /** The reply a camera sends once a move has settled (or been refused). */
 export function ack({ command, receivedAt, startedAt, completedAt, result }) {

@@ -138,6 +138,7 @@ object CameraSurvey {
       "sensor" to sensor,
       "physicalLenses" to physicalLenses,
       "frameSource" to frameSource,
+      "pro" to proOf(ch),
       "fieldOfViewDeg" to fov?.let { round2(it) },
       "maxZoomOnThisLens" to zMax,
       "deviceZoom" to mapOf(
@@ -178,6 +179,75 @@ object CameraSurvey {
       "maxDigitalZoom" to (ch.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)?.toDouble() ?: 1.0),
       "apertures" to (ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.map { it.toDouble() } ?: emptyList<Double>())
     )
+  }
+
+  /**
+   * Pro mode: what this camera can do by hand (docs/SPIKE_PRO_MODE_PLAN.md
+   * section 1). Characteristics only, no camera opened. survey.js turns
+   * it into per-control support with a reason for anything unavailable.
+   */
+  private fun proOf(ch: CameraCharacteristics): Map<String, Any?> {
+    val caps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList() ?: emptyList()
+    val level = when (ch.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
+      CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "legacy"
+      CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "limited"
+      CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "full"
+      CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "level3"
+      CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL -> "external"
+      else -> null
+    }
+    val iso = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+    val exp = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+    val ev = ch.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+    val evStep = ch.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+    val afModes = ch.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.map { afModeName(it) } ?: emptyList()
+    val awbModes = ch.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)?.map { awbModeName(it) } ?: emptyList()
+    val aeModes = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES)?.map { aeModeName(it) } ?: emptyList()
+    val calibration = when (ch.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)) {
+      CameraMetadata.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_CALIBRATED -> "calibrated"
+      CameraMetadata.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_APPROXIMATE -> "approximate"
+      else -> "uncalibrated"
+    }
+    val fps = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.map { listOf(it.lower, it.upper) } ?: emptyList()
+    val videoStab = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)?.map { if (it == 0) "off" else if (it == 1) "eis" else "eis-preview" } ?: emptyList()
+    val ois = ch.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)?.map { if (it == 0) "off" else "ois" } ?: emptyList()
+    return mapOf(
+      "hardwareLevel" to level,
+      "manualSensor" to caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR),
+      "manualPostProcessing" to caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING),
+      "readSensorSettings" to caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_READ_SENSOR_SETTINGS),
+      "isoRange" to if (iso != null) listOf(iso.lower, iso.upper) else null,
+      "shutterNsRange" to if (exp != null) listOf(exp.lower, exp.upper) else null,
+      "maxFrameDurationNs" to ch.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION),
+      "evRange" to if (ev != null) listOf(ev.lower, ev.upper) else null,
+      "evStep" to evStep?.toDouble(),
+      "focus" to mapOf(
+        "minDiopters" to ch.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)?.toDouble(),
+        "hyperfocalDiopters" to ch.get(CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE)?.toDouble(),
+        "calibration" to calibration,
+        "afModes" to afModes
+      ),
+      "awbModes" to awbModes,
+      "awbLockAvailable" to (ch.get(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE) == true),
+      "aeModes" to aeModes,
+      "aeLockAvailable" to (ch.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true),
+      "fpsRanges" to fps,
+      "stabilisation" to (videoStab + ois).distinct()
+    )
+  }
+
+  private fun afModeName(m: Int): String = when (m) {
+    CameraMetadata.CONTROL_AF_MODE_OFF -> "off"; CameraMetadata.CONTROL_AF_MODE_AUTO -> "auto"; CameraMetadata.CONTROL_AF_MODE_MACRO -> "macro"
+    CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO -> "continuous-video"; CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE -> "continuous-picture"; CameraMetadata.CONTROL_AF_MODE_EDOF -> "edof"; else -> "mode-$m"
+  }
+  private fun awbModeName(m: Int): String = when (m) {
+    CameraMetadata.CONTROL_AWB_MODE_OFF -> "off"; CameraMetadata.CONTROL_AWB_MODE_AUTO -> "auto"; CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT -> "incandescent"
+    CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT -> "fluorescent"; CameraMetadata.CONTROL_AWB_MODE_WARM_FLUORESCENT -> "warm-fluorescent"; CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT -> "daylight"
+    CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> "cloudy-daylight"; CameraMetadata.CONTROL_AWB_MODE_TWILIGHT -> "twilight"; CameraMetadata.CONTROL_AWB_MODE_SHADE -> "shade"; else -> "mode-$m"
+  }
+  private fun aeModeName(m: Int): String = when (m) {
+    CameraMetadata.CONTROL_AE_MODE_OFF -> "off"; CameraMetadata.CONTROL_AE_MODE_ON -> "on"; CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH -> "on-auto-flash"
+    CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH -> "on-always-flash"; CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE -> "on-auto-flash-redeye"; else -> "mode-$m"
   }
 
   private fun round2(v: Double): Double = (v * 100).roundToInt() / 100.0

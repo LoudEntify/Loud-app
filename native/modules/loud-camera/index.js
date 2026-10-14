@@ -39,6 +39,17 @@ export function stop() { return native ? native.stop() : missing(); }
  * cancelled: `cancelled: true`).
  */
 export function move(kind, mode, steps, requested) { return native ? native.move(kind, mode, steps, requested) : missing(); }
+/**
+ * Pro mode (docs/SPIKE_PRO_MODE_PLAN.md): one manual-control change.
+ * control 'iso' | 'shutter' | 'wb' | 'focus' | 'ev' | 'lock' | 'unlock' |
+ * 'enable' | 'disable'; value ISO, ms, Kelvin, diopters, stops, or
+ * 'ae' | 'awb' | 'af' for the locks. Resolves after the camera has
+ * reported a few frames with { control, requested, achieved, clamped,
+ * reason, supported, fpsExpected, readback }. Nothing per frame when off.
+ */
+export function setPro(control, value = null) { return native ? native.setPro(control, value) : missing(); }
+/** The camera's current exposure and colour as the HAL reports them (for Match cameras): { iso, shutterMs, wbKelvin, colorGains, focusDiopters }. */
+export function proRead() { return native ? native.proRead() : missing(); }
 export function cancelMove() { return native ? native.cancelMove() : missing(); }
 export function resetFraming() { return native ? native.resetFraming() : missing(); }
 export function getState() { return native ? native.getState() : null; }

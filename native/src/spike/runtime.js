@@ -17,7 +17,8 @@ import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
-import { TOPIC, zoomCommand, panCommand, ack, encode, decode, ackLatencies, summariseLatencies, mintId } from './commands';
+import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, ack, encode, decode, ackLatencies, summariseLatencies, mintId } from './commands';
+import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
 import { capsFor, zoomPlan, panPlan, tightnessFor, PAN_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
@@ -89,6 +90,20 @@ export class SpikeSession {
     this.collect = true; this.lastUploadAt = Date.now(); this.uploads = []; this.pending = new Map();
     this.timers = []; this.stateSub = null; this.lastState = null; this.lastCost = null; this.costSamples = [];
     this.moving = false; this.soak = null; this.remoteTrack = null; this.latencies = []; this.reportUpload = null;
+    // Test stage ('A' | 'B'), set by the controller and sent to the camera, on every record and report section (docs/SPIKE_PRO_MODE_PLAN.md).
+    this.stage = null; this.stageChanges = [];
+    // Pro mode bookkeeping: the camera's pro block as the controller learnt it (survey ack), acks awaited by id, the last Match cameras run.
+    this.cameraProfile = null; this.ackWaiters = new Map(); this.match = null; this.proLog = [];
+  }
+
+  /** Both roles: tag everything from now on with the stage; the controller also tells the camera. */
+  setStage(stage) {
+    const st = STAGES.includes(stage) ? stage : null;
+    this.stage = st; this.buffer.setStage(st);
+    this.stageChanges.push({ stage: st, atMs: Date.now(), serverMs: this.serverNow() });
+    this.onEvent('stage', st);
+    if (this.role === 'controller' && this.room) return this.send(stageCommand({ stage: st, decidedAt: this.serverNow() ?? Date.now() }));
+    return Promise.resolve(null);
   }
 
   serverNow() { return this.offset ? Date.now() + this.offset.offsetMs : null; }
@@ -141,7 +156,7 @@ export class SpikeSession {
   sampleCost() {
     const c = LoudCamera.cost();
     if (!c) return;
-    const sample = { ...c, atMs: Date.now(), collect: this.collect, moving: this.moving };
+    const sample = { ...c, atMs: Date.now(), collect: this.collect, moving: this.moving, stage: this.stage };
     this.costSamples.push(sample);
     if (this.costSamples.length > 400) this.costSamples.shift();
     if (this.collect) this.buffer.cost({ cpuMs: c.cpuMs, wallMs: c.wallMs, thermal: c.thermalLabel, batteryPct: c.batteryPct, txBytes: c.txBytes ?? null, bufferedRecords: this.buffer.records.length });
@@ -165,7 +180,12 @@ export class SpikeSession {
         txBytes: (a.txBytes != null && b.txBytes != null) ? b.txBytes - a.txBytes : null,
       };
     };
-    return { on: summarise(groups.on), off: summarise(groups.off), samples: this.costSamples.length };
+    const byStage = {};
+    for (const st of STAGES) {
+      const xs = this.costSamples.filter((s) => s.stage === st);
+      if (xs.length) byStage[st] = { on: summarise(xs.filter((s) => s.collect)), off: summarise(xs.filter((s) => !s.collect)), samples: xs.length };
+    }
+    return { on: summarise(groups.on), off: summarise(groups.off), samples: this.costSamples.length, byStage };
   }
 
   setCollect(on) {
@@ -187,6 +207,41 @@ export class SpikeSession {
   }
   zoom(target, durationMs = 2000, easing = 'ease-in-out') { return this.send(zoomCommand({ target, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
   pan(direction, { degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing } = {}) { return this.send(panCommand({ direction, degree, window, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
+
+  // ── pro mode (controller side) ────────────────────────────────
+  /** One manual-control change on the camera (proMode.js for the controls and units). */
+  pro(control, value = null) { return this.send(proCommand({ control, value, decidedAt: this.serverNow() ?? Date.now() })); }
+  /** Ask the camera for its pro capability (B2 `pro` block + support), so the controls can be gated; resolves with the ack. */
+  async requestSurvey() {
+    const ack = await this.sendAndWait(surveyRequest({ decidedAt: this.serverNow() ?? Date.now() }));
+    if (ack?.result?.profile) { this.cameraProfile = ack.result.profile; this.onEvent('cameraProfile', this.cameraProfile); }
+    return ack;
+  }
+  /** Send a command and resolve with its ack (or null after `timeoutMs`). */
+  async sendAndWait(command, timeoutMs = 8000) {
+    const p = new Promise((resolve) => {
+      const t = setTimeout(() => { this.ackWaiters.delete(command.id); resolve(null); }, timeoutMs);
+      this.ackWaiters.set(command.id, (ackMsg) => { clearTimeout(t); resolve(ackMsg); });
+    });
+    await this.send(command);
+    return p;
+  }
+  /**
+   * Match cameras (docs/SPIKE_PRO_MODE_PLAN.md section 3): read the
+   * reference camera's exposure and white balance, then have every camera
+   * lock to the nearest values it can achieve. Resolves with { targets,
+   * results } and keeps it for the report.
+   */
+  async matchCameras() {
+    const read = await this.sendAndWait(matchCommand({ phase: 'read', decidedAt: this.serverNow() ?? Date.now() }));
+    if (!read?.result?.targets) { const r = { ok: false, reason: read ? (read.result?.reason || 'the reference camera did not report its values') : 'no ack from the reference camera', targets: null, results: [] }; this.match = r; this.onEvent('match', r); return r; }
+    const targets = read.result.targets;
+    const applied = await this.sendAndWait(matchCommand({ phase: 'apply', targets, reference: read.result.from ?? null, decidedAt: this.serverNow() ?? Date.now() }));
+    const results = applied ? [{ from: applied.result?.from ?? null, achieved: applied.result?.achieved ?? null, residual: applied.result?.residual ?? null, reasons: applied.result?.reasons ?? [] }] : [];
+    const r = { ok: Boolean(applied), reason: applied ? null : 'no ack to the apply phase', reference: read.result.from ?? null, targets, results, at: this.serverNow() ?? Date.now(), stage: this.stage };
+    this.match = r; this.onEvent('match', r);
+    return r;
+  }
 
   /** 20-minute soak: a move every 30 s, alternating zoom in, zoom out, pan. */
   startSoak(minutes = 20) {
@@ -216,14 +271,85 @@ export class SpikeSession {
         // itself (2-3 s by design), and the ack back. The two legs that
         // measure the network alone come from the ack's server-clock
         // timestamps (commands.ackLatencies).
-        const lat = ackLatencies(m, { sentLocal: p.sentLocal, arrivedLocal: arrived, arrivedServer: this.serverNow() });
+        const lat = { ...ackLatencies(m, { sentLocal: p.sentLocal, arrivedLocal: arrived, arrivedServer: this.serverNow() }), stage: this.stage, type: m.forType };
         this.latencies.push(lat); if (this.latencies.length > 200) this.latencies.shift();
+        if (m.result && typeof m.result === 'object') m.result.from = m.result.from ?? participant?.identity ?? null;
+        const waiter = this.ackWaiters.get(m.id); if (waiter) { this.ackWaiters.delete(m.id); waiter(m); }
         if (this.collect) this.buffer.result(m.decisionId, { ...m.result, timestamps: m.timestamps, move_cycle_ms: lat.moveCycleMs, command_latency_ms: lat.commandLatencyMs, ack_leg_ms: lat.ackLegMs, from: participant?.identity || null });
         this.onEvent('ack', { ack: m, ...lat, command: p.command });
       }
       return;
     }
-    if (this.role === 'camera' && (m.type === 'zoom' || m.type === 'pan')) this.execute(m).catch((e) => this.onEvent('error', String(e?.message || e)));
+    if (this.role !== 'camera') return;
+    if (m.type === 'zoom' || m.type === 'pan') this.execute(m).catch((e) => this.onEvent('error', String(e?.message || e)));
+    else if (m.type === 'pro' || m.type === 'match' || m.type === 'stage' || m.type === 'survey') this.executePro(m).catch((e) => this.onEvent('error', String(e?.message || e)));
+  }
+
+  /**
+   * Camera side of pro mode: every command is a decision (intent on
+   * receipt, result on completion) and is acked with the achieved value,
+   * a reason when clamped or unsupported, and the warnings. Nothing here
+   * touches the frame path.
+   */
+  async executePro(m) {
+    const receivedAt = this.serverNow() ?? Date.now();
+    this.onEvent('command', m);
+    if (m.type === 'stage') this.setStage(m.stage);
+    if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, control: m.control ?? null, value: m.value ?? null, phase: m.phase ?? null, targets: m.targets ?? null, stage_requested: m.stage ?? null, source: m.source ?? null, received_from: 'data-channel' });
+    const startedAt = this.serverNow() ?? Date.now();
+    let result;
+    try {
+      if (m.type === 'stage') result = { kind: 'stage', stage: this.stage, achieved: this.stage, requested: m.stage, supported: true, reason: null };
+      else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.profile?.pro ?? null, proSupport: this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, hardwareLevel: this.profile?.pro?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model }, supported: true, reason: null };
+      else if (m.type === 'pro') result = await this.runPro(m.control, m.value);
+      else result = await this.runMatch(m);
+    } catch (e) {
+      result = { kind: m.type, control: m.control ?? null, requested: m.value ?? null, achieved: null, clamped: false, supported: true, reason: String(e?.message || e), failed: true };
+    }
+    const completedAt = this.serverNow() ?? Date.now();
+    result = { ...result, stage: this.stage, proEnabled: Boolean(this.lastState?.pro?.enabled || result.proEnabled) };
+    const reply = ack({ command: m, receivedAt, startedAt, completedAt, result });
+    if (this.collect) this.buffer.result(m.decisionId, { ...result, timestamps: reply.timestamps });
+    this.proLog.push({ type: m.type, control: m.control ?? m.phase ?? null, requested: m.value ?? null, achieved: result.achieved ?? null, reason: result.reason ?? null, stage: this.stage, atMs: Date.now() });
+    if (this.proLog.length > 100) this.proLog.shift();
+    await this.room.localParticipant.publishData(encode(reply), { reliable: true, topic: TOPIC });
+    this.onEvent('result', { command: m, result, reply });
+    return result;
+  }
+
+  /** One pro control: clamp against the profile first (no native call when unsupported), then the native change, then the readback. */
+  async runPro(control, value) {
+    const pro = this.profile?.pro ?? null;
+    const c = clampPro(control, value, pro);
+    const warnings = proWarnings(control, c.value ?? value, { fps: 30, pro });
+    if (!c.supported) return { kind: 'pro', control, requested: value, achieved: null, clamped: false, supported: false, reason: c.reason, warnings, applied: false };
+    if (c.value == null && !['enable', 'disable', 'lock', 'unlock'].includes(control)) return { kind: 'pro', control, requested: value, achieved: null, clamped: false, supported: true, reason: c.reason, warnings, applied: false };
+    const r = await LoudCamera.setPro(control, control === 'lock' || control === 'unlock' ? value : (c.value ?? null));
+    const reason = [c.clamped ? c.reason : null, r?.reason].filter(Boolean).join('; ') || null;
+    return { ...r, kind: 'pro', control, requested: value, planned: c.value, clamped: Boolean(c.clamped || r?.clamped), supported: r?.supported !== false, reason, warnings, applied: true };
+  }
+
+  /** Match cameras, camera side: 'read' reports this camera's values; 'apply' locks to the nearest achievable values and reports the residual. */
+  async runMatch(m) {
+    if (m.phase === 'read') {
+      const rb = await LoudCamera.proRead();
+      const targets = { iso: Number.isFinite(rb?.iso) ? Math.round(rb.iso) : null, shutterMs: Number.isFinite(rb?.shutterMs) ? rb.shutterMs : null, wbKelvin: Number.isFinite(rb?.wbKelvin) ? rb.wbKelvin : null };
+      return { kind: 'match', phase: 'read', targets, readback: rb, supported: true, reason: targets.iso == null && targets.shutterMs == null ? 'the HAL reported no exposure values yet' : null, achieved: null };
+    }
+    const t = m.targets || {};
+    const reasons = [];
+    const achieved = { iso: null, shutterMs: null, wbKelvin: null };
+    const step = async (control, v, key) => {
+      if (!Number.isFinite(v)) { reasons.push(`${control}: no target from the reference`); return; }
+      const r = await this.runPro(control, v);
+      if (!r.supported) reasons.push(`${control}: ${r.reason}`);
+      else { achieved[key] = Number.isFinite(r.achieved) ? r.achieved : (r.planned ?? null); if (r.reason) reasons.push(`${control}: ${r.reason}`); }
+    };
+    await step('iso', t.iso, 'iso');
+    await step('shutter', t.shutterMs, 'shutterMs');
+    await step('wb', t.wbKelvin, 'wbKelvin');
+    const residual = matchResidual(t, achieved);
+    return { kind: 'match', phase: 'apply', targets: t, achieved, residual, reasons, supported: true, reason: reasons.length ? reasons.join('; ') : null };
   }
 
   async execute(m) {
@@ -317,12 +443,26 @@ export class SpikeSession {
     return { batches: ok.length, failed: this.uploads.length - ok.length, records: recs, rawBytes: raw, gzBytes: gz, gzBytesPerHour: minutes ? Math.round((gz / minutes) * 60) : null, rawBytesPerHour: minutes ? Math.round((raw / minutes) * 60) : null, ratio: gz ? +(raw / gz).toFixed(1) : null };
   }
 
-  /** Controller side: the three latencies over the session, each as n/p50/p90/max (commands.summariseLatencies). */
-  latencySummary() { return summariseLatencies(this.latencies); }
+  /** Controller side: the three latencies over the session, each as n/p50/p90/max (commands.summariseLatencies), overall and per stage. */
+  latencySummary() {
+    const all = summariseLatencies(this.latencies);
+    if (!all) return null;
+    const byStage = {};
+    for (const st of STAGES) { const xs = this.latencies.filter((l) => l.stage === st); if (xs.length) byStage[st] = summariseLatencies(xs); }
+    const pro = this.latencies.filter((l) => l.type === 'pro' || l.type === 'match');
+    return { ...all, byStage, proCommands: pro.length ? summariseLatencies(pro) : null };
+  }
 
   /** Everything the report needs, as one JSON object; the screen also writes it to a file. */
   report() {
-    return { role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION, frameSource: this.role === 'camera' ? { wanted: this.frameSource, used: this.lastState?.frameSource ?? null, reason: this.lastState?.frameSourceReason ?? null } : null, profile: this.profile, clock: this.offset, latency: this.latencySummary(), shots: this.shots, cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString(), reportUpload: this.reportUpload ?? null };
+    return {
+      role: this.role, deviceId: this.deviceId, sessionId: this.sessionId, appVersion: APP_VERSION,
+      stage: this.stage, stageChanges: this.stageChanges,
+      frameSource: this.role === 'camera' ? { wanted: this.frameSource, used: this.lastState?.frameSource ?? null, reason: this.lastState?.frameSourceReason ?? null } : null,
+      profile: this.profile, cameraProfile: this.cameraProfile, clock: this.offset, latency: this.latencySummary(), shots: this.shots,
+      pro: { enabled: Boolean(this.lastState?.pro?.enabled), last: this.lastState?.pro ?? null, log: this.proLog.slice(-40) }, match: this.match,
+      cost: this.costSummary(), storage: this.storageSummary(), uploads: this.uploads.slice(-20), lastState: this.lastState, writtenAt: new Date().toISOString(), reportUpload: this.reportUpload ?? null,
+    };
   }
   /**
    * Write the report to the app's documents folder (app-private on Android:

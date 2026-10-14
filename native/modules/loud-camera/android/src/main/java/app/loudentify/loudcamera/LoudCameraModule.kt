@@ -25,6 +25,7 @@ import java.util.zip.GZIPOutputStream
  *   start({facing,width,height,fps,frameSource}) → {streamId, trackId, tracks}
  *   stop()
  *   move(kind, mode, steps, requested) → move result (resolves when the last step has been applied)
+ *   setPro(control, value) → pro-mode result; proRead() → current exposure/colour
  *   cancelMove(), resetFraming()
  *   getState()                    → camera state (B4)
  *   cost()                        → CostMeter sample
@@ -132,6 +133,15 @@ class LoudCameraModule : Module() {
       }, requested) { r -> promise.resolve(r) }
       if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
     }
+
+    // Pro mode (docs/SPIKE_PRO_MODE_PLAN.md): one manual-control change,
+    // answered with the value the HAL applied. Nothing runs per frame
+    // until the first call; "disable" clears everything.
+    AsyncFunction("setPro") { control: String, value: Any?, promise: Promise ->
+      val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
+      main.post { cap.setPro(control, value) { r -> promise.resolve(r) } }
+    }
+    AsyncFunction("proRead") { -> capturer?.proRead() }
 
     AsyncFunction("cancelMove") { -> capturer?.cancelMove("cancelled"); null }
     AsyncFunction("resetFraming") { -> capturer?.resetCrop(); null }
