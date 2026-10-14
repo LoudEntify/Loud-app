@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange } from '../lib/supabaseAuth';
 import AccountDataControls from './AccountDataControls';
+import YouTubeSettings from './YouTubeSettings';
 import AvatarRing from './AvatarRing';
 import GenreSelect from './GenreSelect';
 
@@ -31,7 +32,9 @@ const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transp
 // isMainPerformer gating (only ever true after a claim-slot success) --
 // not by hiding form fields here. This file no longer branches on role at
 // all for what's editable.
-export default function AccountSettings() {
+// `youtubeResult` is the ?youtube=connected|error the YouTube callback
+// appends when the artist started the connection from this page.
+export default function AccountSettings({ youtubeResult = null }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -360,6 +363,10 @@ export default function AccountSettings() {
             )}
           </div>
         </div>
+
+        {/* The YouTube connection (artist accounts): its own component,
+            the privacy policy's "disconnect in Settings at any time". */}
+        {isArtist && <YouTubeSettings session={session} result={youtubeResult} />}
 
         {/* Data export, session revocation and account closure. Their own
             component because they are the highest-consequence controls in
