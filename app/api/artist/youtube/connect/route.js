@@ -1,12 +1,13 @@
 // POST /api/artist/youtube/connect — start the YouTube connection.
 // Real mode returns the Google consent URL; mock mode (no client id)
 // connects a mock channel at once so onboarding can be completed and the
-// whole pipeline exercised. Artist only; audited.
+// whole pipeline exercised. Artist only; audited. Called from onboarding
+// and from Settings (body { returnTo: 'settings' } to come back there).
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 import { verifyArtistAuth } from '../../../../../lib/verifyArtistAuth';
 import { correlationFrom, withCorrelation } from '../../../../../lib/correlation';
-import { authUrl, signState } from '../../../../../lib/youtube/oauth';
+import { authUrl, signState, RETURN_TO } from '../../../../../lib/youtube/oauth';
 import { youtubeMode, YOUTUBE_SCOPE } from '../../../../../lib/youtube/api';
 import { storeConnection, checkReadiness, mockApiFor } from '../../../../../lib/youtube/connections';
 
@@ -15,8 +16,12 @@ export async function POST(request) {
   const auth = await verifyArtistAuth(request);
   if (auth.error) return withCorrelation(NextResponse.json({ error: auth.error }, { status: auth.status }), cid);
   const origin = new URL(request.url).origin;
+  // Where Google sends the artist back to afterwards: onboarding (default)
+  // or Settings. Only RETURN_TO's keys are honoured (lib/youtube/oauth.js).
+  let returnTo = 'onboarding';
+  try { const body = await request.json(); if (body?.returnTo && RETURN_TO[body.returnTo]) returnTo = body.returnTo; } catch { /* no body */ }
   if (youtubeMode() === 'google') {
-    const url = authUrl({ redirectUri: `${origin}/api/artist/youtube/callback`, state: signState(auth.user.id) });
+    const url = authUrl({ redirectUri: `${origin}/api/artist/youtube/callback`, state: signState(auth.user.id, returnTo) });
     return withCorrelation(NextResponse.json({ mode: 'google', url }), cid);
   }
   const admin = getSupabaseAdmin();

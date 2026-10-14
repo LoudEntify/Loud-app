@@ -6,10 +6,11 @@ export const metadata = {
   description: 'Account and security settings',
 };
 
-export default function SettingsPage() {
+export default function SettingsPage({ searchParams }) {
+  const yt = searchParams?.youtube;
   return (
     <PageShell active="profile">
-      <AccountSettings />
+      <AccountSettings youtubeResult={yt === 'connected' || yt === 'error' ? yt : null} />
     </PageShell>
   );
 }
