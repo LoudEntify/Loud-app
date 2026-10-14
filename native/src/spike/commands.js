@@ -47,13 +47,26 @@ export function matchCommand({ phase, targets = null, reference = null, decidedA
 export function stageCommand({ stage, decidedAt, decisionId = mintId('dec') }) {
   return { v: PROTOCOL_VERSION, type: 'stage', id: mintId(), decisionId, stage, decidedAt };
 }
+/**
+ * The show's orientation for every camera ('portrait' | 'landscape',
+ * docs/DECISIONS.md 2026-10-14; src/spike/orientation.js). Sent from the
+ * main device before the show and locked once live: a camera that is
+ * live (a stage or a move running) refuses it with `refused: true`.
+ */
+export function orientationCommand({ orientation, decidedAt, source = 'main-device', decisionId = mintId('dec') }) {
+  return { v: PROTOCOL_VERSION, type: 'orientation', id: mintId(), decisionId, source, orientation, decidedAt };
+}
 
 /** The reply a camera sends once a move has settled (or been refused). */
-export function ack({ command, receivedAt, startedAt, completedAt, result }) {
+export function ack({ command, receivedAt, startedAt, completedAt, result, diag = null }) {
   return {
     v: PROTOCOL_VERSION, type: 'ack', id: command.id, decisionId: command.decisionId, forType: command.type,
     timestamps: { decided: command.decidedAt, sent: command.sentAt ?? null, received: receivedAt, started: startedAt, completed: completedAt },
     result, // { mode, requested, achieved, clamped, reason, lens, lensSwitch, droppedFrames, actualDurationMs }
+    // The camera's own view of the receipt, for a slow command: its local
+    // clock at receipt, the clock offset it used and the sender's local
+    // send time are what tell a stalled link from a stepped clock.
+    ...(diag ? { diag } : {}),
   };
 }
 
@@ -85,6 +98,31 @@ export function ackLatencies(ackMessage, { sentLocal, arrivedLocal, arrivedServe
   const t = ackMessage?.timestamps || {};
   const leg = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? b - a : null);
   return { moveCycleMs: roundTripMs(sentLocal, arrivedLocal), commandLatencyMs: leg(t.sent, t.received), ackLegMs: leg(t.completed, arrivedServer), moveMs: leg(t.started, t.completed) };
+}
+
+/** A command whose network leg out took longer than this is logged with its diagnostics (one took 30 s on 14 Oct and the records could not say why). */
+export const SLOW_COMMAND_MS = 2000;
+/**
+ * Why a command was slow, from the two sides' diagnostics: the controller's
+ * local send time and clock offset (`sent`), the camera's local receipt
+ * time and offset (the ack's `diag`). On the two local clocks the leg is
+ * sent → received minus the offsets' difference; when that local figure is
+ * also long the link stalled; when the server-clock figure is long but the
+ * local one is not, one side's clock offset stepped between syncs.
+ */
+export function slowCommandDiagnosis(lat, { sentLocal, offsetAtSend = null }, diag = null) {
+  const leg = lat?.commandLatencyMs;
+  if (!Number.isFinite(leg) || leg < SLOW_COMMAND_MS) return null;
+  const d = diag || {};
+  const localLeg = Number.isFinite(d.receivedLocalMs) && Number.isFinite(sentLocal) && Number.isFinite(d.offsetMs) && Number.isFinite(offsetAtSend)
+    ? (d.receivedLocalMs + d.offsetMs) - (sentLocal + offsetAtSend) : null;
+  const clockStep = localLeg != null ? Math.abs(leg - localLeg) : null;
+  const verdict = localLeg == null ? 'no camera diagnostics in the ack: cannot tell a stalled link from a stepped clock'
+    : clockStep > SLOW_COMMAND_MS / 2 ? `a clock offset changed by ~${Math.round(clockStep)} ms between the send and the receipt (not the link)`
+      : d.stallMs > SLOW_COMMAND_MS / 2 ? `the camera's JS thread was blocked for ~${Math.round(d.stallMs)} ms before the command was handled`
+        : d.linkEvents?.length ? `the camera's LiveKit connection changed state (${d.linkEvents.join(', ')}) in that window: the link stalled`
+          : 'the link stalled with no connection-state change and no clock step recorded';
+  return { commandLatencyMs: leg, localLegMs: localLeg != null ? Math.round(localLeg) : null, clockStepMs: clockStep != null ? Math.round(clockStep) : null, cameraStallMs: d.stallMs ?? null, linkEvents: d.linkEvents ?? [], verdict };
 }
 
 /** n / p50 / p90 / max of each latency over a session, or null with nothing recorded. */

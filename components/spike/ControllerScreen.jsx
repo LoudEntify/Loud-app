@@ -14,6 +14,7 @@ import { Room } from 'livekit-client';
 import { useSession } from '../../lib/useSession';
 import { WebControllerSession } from '../../lib/spike/controllerSession';
 import { proWarnings, residualLine, STAGES } from '../../native/src/spike/proMode.js';
+import { ORIENTATIONS } from '../../native/src/spike/orientation.js';
 
 const mono = { fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word' };
 const small = { height: 40, padding: '0 14px', fontSize: 15 };
@@ -28,7 +29,8 @@ const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 function ackLine(p) {
   const r = p.ack.result || {};
   const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
-  return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
+  const timing = r.maxStepLateMs != null ? ` · steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late) · frame gap ≤${r.maxFrameGapMs} ms` : '';
+  return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''} · dropped ${r.droppedFrames}${timing}`;
 }
 
 /** The pro-mode presets; each row is gated by the camera's proSupport (docs/SPIKE_PRO_MODE_PLAN.md section 4). Same rows as the phone Controller. */
@@ -43,11 +45,14 @@ const LOCK_ROWS = [['ae', 'AE', 'lockAe'], ['awb', 'AWB', 'lockAwb'], ['af', 'AF
 function proAckLine(p) {
   const r = p.ack.result || {};
   if (p.command.type === 'stage') return `stage ${r.achieved} on the camera`;
+  if (p.command.type === 'orientation') return r.refused ? `orientation ${r.requested} REFUSED by the camera: ${r.reason}` : `orientation ${r.achieved} on the camera (rotation ${r.rotation}°, ${r.width}×${r.height}) · mounted ${r.physical}${r.mismatch ? ` · MOUNT WARNING: ${r.warning}. Fix: ${r.fix}` : ''}`;
   if (p.command.type === 'survey') return `camera capability: ${r.profile?.hardwareLevel ?? '?'} level, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}`;
   if (p.command.type === 'match') return r.phase === 'read' ? `match read: ISO ${r.targets?.iso ?? '–'}, ${r.targets?.shutterMs ?? '–'} ms, ${r.targets?.wbKelvin ?? '–'} K` : `match apply: residual ${residualLine(r.residual)}${r.reasons?.length ? ` (${r.reasons.join('; ')})` : ''}`;
   const base = `pro ${r.control} ${p.command.value ?? ''} → ${r.supported === false ? 'UNSUPPORTED' : `achieved ${r.achieved ?? '–'}`}${r.clamped ? ' (clamped)' : ''}${r.reason ? ` · ${r.reason}` : ''}`;
-  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''} · ${p.moveCycleMs} ms`;
+  const settle = r.framesToApply != null ? ` · applied after ${r.framesToApply} frames (${r.settleMs} ms${r.settled === false ? ', NOT SETTLED' : ''})` : '';
+  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''}${settle} · ${p.moveCycleMs} ms`;
 }
+const PRO_TYPES = ['pro', 'match', 'stage', 'survey', 'orientation'];
 
 /** Pro mode controls: only what the camera reports as supported is live; the rest is greyed with its reason. */
 function ProPanel({ s, cameraProfile, push }) {
@@ -105,6 +110,7 @@ export default function ControllerScreen() {
   const [tick, setTick] = useState(0);
   const [cameraProfile, setCameraProfile] = useState(null);
   const [stage, setStage] = useState(null);
+  const [orientation, setOrientation] = useState('portrait');
   const sess = useRef(null);
   const video = useRef(null);
 
@@ -137,7 +143,10 @@ export default function ControllerScreen() {
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       createRoom: () => new Room({ adaptiveStream: false, dynacast: false }),
       onEvent: (kind, p) => {
-        if (kind === 'ack') { setLastAck(p); push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? proAckLine(p) : ackLine(p)); }
+        if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
+        else if (kind === 'orientation') { if (p.ok) setOrientation(p.orientation); push(p.ok ? `orientation ${p.orientation} (camera rotation ${p.camera?.rotation}°, ${p.camera?.width}×${p.camera?.height}, mounted ${p.camera?.physical})${p.camera?.mismatch ? ` · MOUNT WARNING: ${p.camera.warning}. Fix: ${p.camera.fix}` : ''}` : `orientation ${p.requested} REFUSED: ${p.reason}`); }
+        else if (kind === 'link') push(`link ${p.state}${p.detail ? ` (${p.detail})` : ''}`);
+        else if (kind === 'clockStep') push(`CLOCK STEP ${p.stepMs} ms between syncs`);
         else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
         else if (kind === 'stage') { setStage(p); push(`stage ${p ?? 'none'}`); }
         else if (kind === 'match') push(p.ok ? `match cameras: targets ISO ${p.targets.iso}, ${p.targets.shutterMs} ms, ${p.targets.wbKelvin} K; ${p.results.map((r) => `${r.from}: ${residualLine(r.residual)}`).join('; ')}` : `match cameras failed: ${p.reason}`);
@@ -199,7 +208,7 @@ export default function ControllerScreen() {
       )}
       {status === 'connecting' && <p className="v-muted">Connecting to the rehearsal room…</p>}
 
-      <div style={{ background: '#000', borderRadius: 16, aspectRatio: '9 / 16', maxHeight: 420, width: '100%', overflow: 'hidden', display: 'grid', placeItems: 'center', position: 'relative' }}>
+      <div style={{ background: '#000', borderRadius: 16, aspectRatio: orientation === 'landscape' ? '16 / 9' : '9 / 16', maxHeight: 420, width: '100%', overflow: 'hidden', display: 'grid', placeItems: 'center', position: 'relative' }}>
         <video ref={video} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: remote ? 'block' : 'none' }} />
         {!remote && <span className="v-muted" style={{ padding: 12, textAlign: 'center' }}>{live ? 'Waiting for the camera phone to publish…' : 'The phone’s picture appears here once you join and the phone is in Camera mode.'}</span>}
       </div>
@@ -211,6 +220,12 @@ export default function ControllerScreen() {
         {lastAck && <span>last move cycle {lastAck.moveCycleMs} ms (includes the move) · command latency {lastAck.commandLatencyMs ?? '–'} ms · ack leg {lastAck.ackLegMs ?? '–'} ms (server clock)</span>}
         {lastAck?.ack.result?.shot && <span>camera shot: {lastAck.ack.result.shot.zoom}x at ({lastAck.ack.result.shot.cx}, {lastAck.ack.result.shot.cy}) · {lastAck.ack.result.frameSource}</span>}
         {soak && <span>soak running: move {soak.moves} at {soak.minutes} min</span>}
+        {lastAck?.ack.result?.mismatch && <span style={{ color: '#ff9f1c' }}>MOUNT: {lastAck.ack.result.warning}. Fix: {lastAck.ack.result.fix}</span>}
+      </div>
+
+      <div className="v-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={mono}>show orientation{soak || stage ? ' (locked while the soak or a stage runs)' : ''}:</span>
+        {ORIENTATIONS.map((o) => <Btn key={o} tone={o === orientation ? 'teal' : 'ghost'} label={o === orientation ? `[${o}]` : o} disabled={!live || !!soak || !!stage} onPress={() => run(s.setOrientation(o))} />)}
       </div>
 
       <div className="v-row" style={{ flexWrap: 'wrap' }}>

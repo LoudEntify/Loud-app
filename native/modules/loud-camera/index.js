@@ -50,6 +50,15 @@ export function move(kind, mode, steps, requested) { return native ? native.move
 export function setPro(control, value = null) { return native ? native.setPro(control, value) : missing(); }
 /** The camera's current exposure and colour as the HAL reports them (for Match cameras): { iso, shutterMs, wbKelvin, colorGains, focusDiopters }. */
 export function proRead() { return native ? native.proRead() : missing(); }
+/**
+ * The show's orientation, 'portrait' | 'landscape' (src/spike/orientation.js):
+ * the next frame is upright in it, with no re-orientation from device
+ * rotation or gravity afterwards. Resolves with { orientation, rotation,
+ * sensorOrientation, width, height }. The runtime refuses it while live.
+ */
+export function setOrientation(orientation) { return native ? native.setOrientation(orientation) : missing(); }
+/** One gravity reading for the setup mount check: { available, x, y, z, sensor, chosen } (classify with src/spike/orientation.js). Never called during a show. */
+export function gravityCheck() { return native ? native.gravityCheck() : missing(); }
 export function cancelMove() { return native ? native.cancelMove() : missing(); }
 export function resetFraming() { return native ? native.resetFraming() : missing(); }
 export function getState() { return native ? native.getState() : null; }

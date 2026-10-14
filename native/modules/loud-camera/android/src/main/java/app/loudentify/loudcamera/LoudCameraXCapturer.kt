@@ -1,7 +1,12 @@
 package app.loudentify.loudcamera
 
 import android.content.Context
+import android.graphics.Matrix
 import android.graphics.Rect
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.CameraCaptureSession
@@ -38,6 +43,7 @@ import androidx.core.content.ContextCompat
 import livekit.org.webrtc.CapturerObserver
 import livekit.org.webrtc.JavaI420Buffer
 import livekit.org.webrtc.SurfaceTextureHelper
+import livekit.org.webrtc.TextureBufferImpl
 import livekit.org.webrtc.VideoCapturer
 import livekit.org.webrtc.VideoFrame
 import livekit.org.webrtc.VideoSink
@@ -111,6 +117,11 @@ class LoudCameraXCapturer(
     var framesAtStart = 0L
     var refusedReason: String? = null
     var lastRequestedDeviceZoom: Double? = null
+    // Timing diagnostics: how late each step was applied and the longest gap between frames during the move (a jerk shows up here).
+    var maxStepLateMs = 0L
+    var lateSteps = 0
+    var maxFrameGapMs = 0L
+    var lastFrameAtMs = 0L
   }
 
   private var observer: CapturerObserver? = null
@@ -124,6 +135,18 @@ class LoudCameraXCapturer(
   @Volatile var cameraId: String? = null
   @Volatile var frameSource: String = "cpu"
   @Volatile var frameSourceReason: String? = null
+  // Orientation (docs/DECISIONS.md 2026-10-14): the published frame is
+  // upright in the orientation the artist chose, computed from the sensor
+  // orientation and that choice only. `rotation` is the fixed rotation
+  // applied to every frame; device rotation and the gravity sensor never
+  // touch it during a show.
+  @Volatile var orientation: String = "portrait"
+  @Volatile var sensorOrientation: Int = 90
+  // Pan path on the hardware source: "region" when the HAL honours an
+  // off-centre crop region, "gpu" when it re-centres (probed at start).
+  @Volatile var panPath: String = "region"
+  @Volatile private var regionProbe: Map<String, Any?>? = null
+  @Volatile private var hwZoom = 1.0
   // Fallback: the paths still to try, in order, when one fails to bind or
   // delivers no frames (docs/DECISIONS.md 2026-10-14). `frameSourceFellBack`
   // is reported in every state sample so the record says a path was skipped.
@@ -351,12 +374,16 @@ class LoudCameraXCapturer(
     readCharacteristics(info)
     frameSource = chooseFrameSource(wantTexture, attempt)
     if (fallbackLog.isNotEmpty()) frameSourceReason = "${fallbackLog.joinToString("; ")}; now $frameSource (${frameSourceReason ?: "chosen"})"
-    rotation = try { cam.cameraInfo.getSensorRotationDegrees(Surface.ROTATION_0) } catch (e: Exception) { 90 }
+    sensorOrientation = try { cam.cameraInfo.getSensorRotationDegrees(Surface.ROTATION_0) } catch (e: Exception) { 90 }
+    rotation = rotationFor(orientation)
     if (wantTexture) {
       val h = helper!!
-      h.setFrameRotation(rotation)
+      // The rotation is applied to the texture itself (uprightTexture), so
+      // the frame's rotation metadata stays 0 and nothing downstream can
+      // re-orient it.
+      h.setFrameRotation(0)
       h.startListening(VideoSink { frame -> onTextureFrame(frame) })
-      if (frameSource == "hardware") pushRegion(null)
+      if (frameSource == "hardware") { pushRegion(null); probeRegionOffset() }
     }
     Log.i(TAG, "bound camera $cameraId frameSource=$frameSource (${frameSourceReason ?: "chosen"}) rotation=$rotation")
   }
@@ -394,6 +421,86 @@ class LoudCameraXCapturer(
     frameSourceReason = if (attempt == "hardware") "hardware requested (FREEFORM crop, max digital zoom $maxDigitalZoom)" else "FREEFORM crop region, max digital zoom $maxDigitalZoom"
     return "hardware"
   }
+
+  // ── orientation ───────────────────────────────────────────────
+  /** The fixed rotation that makes the sensor's frame upright in the chosen orientation (sensor 90° → portrait 90, landscape 0). */
+  private fun rotationFor(o: String): Int = if (o == "landscape") (sensorOrientation + 270) % 360 else sensorOrientation
+
+  /**
+   * Set the show's orientation (portrait | landscape). Allowed any time
+   * the JS side allows it (it refuses while a soak or a stage runs); the
+   * next frame is upright in the new orientation, the crop region and
+   * the GPU crop follow (display-frame fractions are re-mapped).
+   */
+  fun setOrientation(o: String): Map<String, Any?> {
+    val next = if (o == "landscape") "landscape" else "portrait"
+    orientation = next
+    rotation = rotationFor(next)
+    if (frameSource == "hardware") pushRegion(null)
+    return mapOf("orientation" to orientation, "rotation" to rotation, "sensorOrientation" to sensorOrientation, "width" to displayWidth(), "height" to displayHeight())
+  }
+  private fun portraitOutput() = rotation == 90 || rotation == 270
+  private fun displayWidth() = if (portraitOutput()) min(outputWidth, outputHeight) else max(outputWidth, outputHeight)
+  private fun displayHeight() = if (portraitOutput()) max(outputWidth, outputHeight) else min(outputWidth, outputHeight)
+
+  /**
+   * One gravity reading (setup only, never during a show): which way the
+   * phone is physically held, so the controller can warn when a phone is
+   * mounted the other way from the chosen orientation. Raw x, y, z in
+   * the device frame; the JS side classifies (src/spike/orientation.js).
+   */
+  fun gravityCheck(): Map<String, Any?> {
+    val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return mapOf("available" to false, "reason" to "no sensor service")
+    val sensor = sm.getDefaultSensor(Sensor.TYPE_GRAVITY) ?: sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return mapOf("available" to false, "reason" to "no gravity or accelerometer sensor")
+    val latch = CountDownLatch(1)
+    var values: FloatArray? = null
+    val listener = object : SensorEventListener {
+      override fun onSensorChanged(event: SensorEvent) { if (values == null) { values = event.values.clone(); latch.countDown() } }
+      override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+    sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+    try { latch.await(700, TimeUnit.MILLISECONDS) } finally { sm.unregisterListener(listener) }
+    val v = values ?: return mapOf("available" to false, "reason" to "no gravity reading within 700 ms")
+    return mapOf("available" to true, "sensor" to sensor.name, "x" to round3(v[0].toDouble()), "y" to round3(v[1].toDouble()), "z" to round3(v[2].toDouble()), "chosen" to orientation)
+  }
+
+  // ── region probe: does this HAL honour an off-centre crop region? ──
+  /**
+   * SCALER_CROPPING_TYPE FREEFORM promises an off-centre region; some
+   * HALs advertise it and re-centre anyway (pans then never move). Push
+   * a top-left window at 1.5x, read the applied region back over the
+   * next frames, and route pans through the GPU crop when the offset was
+   * ignored. Costs the first ~0.5 s at 1.5x; the result is in every
+   * state sample (`regionProbe`, `panPath`).
+   */
+  private fun probeRegionOffset() {
+    val a = activeArray ?: return
+    val test = floatArrayOf(0f, 0f, 0.667f, 0.667f)
+    val (want, _) = regionFor(test)
+    appliedRegion = null
+    crop = test; pushRegion(null)
+    val started = SystemClock.elapsedRealtime()
+    val poll = object : Runnable {
+      override fun run() {
+        val got = appliedRegion
+        val elapsed = SystemClock.elapsedRealtime() - started
+        val settled = got != null && got != a && (got.width() < a.width() * 0.9)
+        if (!settled && elapsed < 1200) { main.postDelayed(this, 50); return }
+        val aw = a.width().toDouble(); val ah = a.height().toDouble()
+        val honoured = got != null && settled && abs(got.exactCenterX().toDouble() - want.exactCenterX()) < aw * 0.03 && abs(got.exactCenterY().toDouble() - want.exactCenterY()) < ah * 0.03
+        val centred = got != null && settled && abs(got.exactCenterX().toDouble() - a.exactCenterX()) < aw * 0.03 && abs(got.exactCenterY().toDouble() - a.exactCenterY()) < ah * 0.03
+        regionProbe = mapOf(
+          "requested" to rectMap(want), "applied" to got?.let { rectMap(it) }, "settled" to settled, "honoured" to honoured, "centred" to centred, "ms" to elapsed
+        )
+        panPath = if (honoured) "region" else "gpu"
+        frameSourceReason = "${frameSourceReason ?: ""}; crop-region offset ${if (honoured) "honoured" else if (centred) "ignored (HAL re-centres): pans via GPU crop" else if (!settled) "unknown (no region reported in ${elapsed} ms): pans via GPU crop" else "not matched: pans via GPU crop"}"
+        Log.i(TAG, "region probe: honoured=$honoured centred=$centred settled=$settled applied=$got wanted=$want")
+        crop = floatArrayOf(0f, 0f, 1f, 1f); hwZoom = 1.0; pushRegion(null)
+      }
+    }
+    main.postDelayed(poll, 100)
+  }
+  private fun rectMap(r: Rect) = mapOf("left" to r.left, "top" to r.top, "right" to r.right, "bottom" to r.bottom)
 
   private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
     override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
@@ -507,8 +614,7 @@ class LoudCameraXCapturer(
           achievedPlanned = round3(idx * evStep)
           val fut = cam.cameraControl.setExposureCompensationIndex(idx)
           fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) Log.w(TAG, "ev", e) } }, Executor { it.run() })
-          val planned = achievedPlanned; val why = reason; val cl = clamped
-          main.postDelayed({ done(proResult(control, value, planned, cl, why, supported = true)) }, 150)
+          settleThen(control, value, achievedPlanned, clamped, reason, null, idx.toDouble(), done)
           return
         }
         "lock", "unlock" -> {
@@ -541,9 +647,52 @@ class LoudCameraXCapturer(
     } catch (e: Exception) {
       done(proResult(control, value, null, false, "pro $control threw: ${e.message}", supported = true)); return
     }
-    // Let the HAL report a few frames with the new request before reading back.
-    val planned = achievedPlanned; val why = reason; val cl = clamped; val fpsEx = fpsExpected
-    main.postDelayed({ done(proResult(control, value, planned, cl, why, supported = true, fpsExpected = fpsEx)) }, 150)
+    settleThen(control, value, achievedPlanned, clamped, reason, fpsExpected, achievedPlanned, done)
+  }
+
+  /**
+   * Answer only once a capture result reflects the request (the readback
+   * of the previous build was one command stale: the HAL reports the
+   * NEW value a few frames after the request lands). Polls the latest
+   * result every frame until the control's reported value matches what
+   * was planned, up to 1.5 s, and records frames-to-apply and settle
+   * time; on timeout the answer says so and carries the last reported
+   * value.
+   */
+  private fun settleThen(control: String, requested: Any?, planned: Double?, clamped: Boolean, reason: String?, fpsExpected: Double?, target: Double?, done: (Map<String, Any?>) -> Unit) {
+    val startedMs = SystemClock.elapsedRealtime()
+    val startFrames = frames
+    val name = requested as? String
+    val poll = object : Runnable {
+      override fun run() {
+        val elapsed = SystemClock.elapsedRealtime() - startedMs
+        val ok = reflects(control, name, target)
+        if (ok || elapsed >= 1500) {
+          val extra = mapOf("framesToApply" to (frames - startFrames), "settleMs" to elapsed, "settled" to ok)
+          val why = if (ok) reason else listOfNotNull(reason, "the HAL had not reported the new $control after ${elapsed} ms (${frames - startFrames} frames)").joinToString("; ")
+          done(proResult(control, requested, planned, clamped, why, supported = true, fpsExpected = fpsExpected) + extra)
+          return
+        }
+        main.postDelayed(this, 33)
+      }
+    }
+    main.postDelayed(poll, 33)
+  }
+
+  /** Does the latest capture result reflect the control just set? */
+  private fun reflects(control: String, lockName: String?, target: Double?): Boolean {
+    val near = { got: Double?, want: Double?, tol: Double -> got != null && want != null && abs(got - want) <= max(tol, abs(want) * 0.03) }
+    return when (control) {
+      "enable", "disable" -> true
+      "iso" -> near(iso?.toDouble(), target, 2.0)
+      "shutter" -> near(exposureNs?.let { it / 1e6 }, target, 0.05)
+      "focus" -> near(focusDistance, target, 0.05)
+      "wb" -> { val g = proColorGains; val want = target?.let { kelvinToGains(it) }; g != null && want != null && near(g.red.toDouble(), want.red.toDouble(), 0.03) && near(g.blue.toDouble(), want.blue.toDouble(), 0.03) }
+      "ev" -> proEvIndex != null && target != null && proEvIndex == target.roundToInt()
+      "lock" -> when (lockName) { "ae" -> proAeLock == true; "awb" -> proAwbLock == true; "af" -> proAfMode == CameraMetadata.CONTROL_AF_MODE_OFF; else -> true }
+      "unlock" -> when (lockName) { "ae" -> proAeLock == false; "awb" -> proAwbLock == false; "af" -> proAfMode != null && proAfMode != CameraMetadata.CONTROL_AF_MODE_OFF; else -> true }
+      else -> true
+    }
   }
 
   @OptIn(ExperimentalCamera2Interop::class)
@@ -636,22 +785,37 @@ class LoudCameraXCapturer(
     accountFrame(nowMs)
     advancePlan(nowMs)
     val c = crop
-    if (frameSource == "gpu" && (c[2] < 0.999f || c[3] < 0.999f)) {
-      val buffer = frame.buffer
-      val w = buffer.width; val h = buffer.height
-      val r = toSensorRect(frame.rotation, c)
-      val cx = (r[0] * w).roundToInt().coerceIn(0, w - 2); val cy = (r[1] * h).roundToInt().coerceIn(0, h - 2)
-      val cw = max(2, (r[2] * w).roundToInt()).coerceAtMost(w - cx); val ch = max(2, (r[3] * h).roundToInt()).coerceAtMost(h - cy)
-      // A TextureBuffer crop is a change to the texture transform matrix,
-      // applied when the encoder draws the texture: no pixels move here.
-      val cropped = buffer.cropAndScale(cx, cy, cw, ch, w, h)
-      val out = VideoFrame(cropped, frame.rotation, frame.timestampNs)
-      obs.onFrameCaptured(out)
-      cropped.release()
-    } else {
-      obs.onFrameCaptured(frame)
-    }
+    // 1. Upright, in the chosen orientation: a rotation of the texture
+    //    transform (the same matrix a renderer would apply), so the frame
+    //    the encoder sees is 1080x1920 portrait or 1920x1080 landscape
+    //    with rotation metadata 0. No pixels move.
+    val upright = uprightTexture(frame.buffer)
+    // 2. The GPU crop: the gpu source's zoom+pan, or the pan on a hardware
+    //    source whose HAL re-centres regions. Display-frame fractions
+    //    apply directly to the upright buffer.
+    val gpuCrop = (frameSource == "gpu" || (frameSource == "hardware" && panPath == "gpu")) && (c[2] < 0.999f || c[3] < 0.999f)
+    val buffer: VideoFrame.Buffer = if (gpuCrop) {
+      val w = upright.width; val h = upright.height
+      val cx = (c[0] * w).roundToInt().coerceIn(0, w - 2); val cy = (c[1] * h).roundToInt().coerceIn(0, h - 2)
+      val cw = max(2, (c[2] * w).roundToInt()).coerceAtMost(w - cx); val ch = max(2, (c[3] * h).roundToInt()).coerceAtMost(h - cy)
+      upright.cropAndScale(cx, cy, cw, ch, w, h)
+    } else upright
+    val out = VideoFrame(buffer, 0, frame.timestampNs)
+    obs.onFrameCaptured(out)
+    if (buffer !== upright) buffer.release()
+    if (upright !== frame.buffer) upright.release()
     convertMsTotal += (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000.0
+  }
+
+  /** The texture rotated by the fixed `rotation` (width and height swapped for 90/270); the same buffer when no rotation is needed. */
+  private fun uprightTexture(buffer: VideoFrame.Buffer): VideoFrame.Buffer {
+    if (rotation == 0 || buffer !is TextureBufferImpl) return buffer
+    val m = Matrix()
+    m.preTranslate(0.5f, 0.5f)
+    m.preRotate(rotation.toFloat())
+    m.preTranslate(-0.5f, -0.5f)
+    val swap = rotation == 90 || rotation == 270
+    return buffer.applyTransformMatrix(m, if (swap) buffer.height else buffer.width, if (swap) buffer.width else buffer.height)
   }
 
   // ── frame path: cpu ──────────────────────────────────────────
@@ -664,7 +828,6 @@ class LoudCameraXCapturer(
     advancePlan(nowMs)
 
     val w = image.width; val h = image.height
-    rotation = image.imageInfo.rotationDegrees
     outputWidth = w; outputHeight = h
     val i420 = JavaI420Buffer.allocate(w, h)
     try {
@@ -682,6 +845,8 @@ class LoudCameraXCapturer(
       buffer = i420.cropAndScale(cx, cy, cw, ch, w, h)
       i420.release()
     }
+    // The cpu path keeps the fixed `rotation` as frame metadata: the
+    // encoder rotates I420 buffers itself. It is the comparison path only.
     val frame = VideoFrame(buffer, rotation, SystemClock.elapsedRealtimeNanos())
     obs.onFrameCaptured(frame)
     frame.release()
@@ -776,7 +941,8 @@ class LoudCameraXCapturer(
   private fun pushRegion(p: Plan?) {
     val cam = camera ?: return
     if (activeArray == null) return
-    val (rect, clamped) = regionFor(crop)
+    val window = if (panPath == "gpu") { val w = (1.0 / max(1.0, hwZoom)).toFloat(); floatArrayOf((1f - w) / 2f, (1f - w) / 2f, w, w) } else crop
+    val (rect, clamped) = regionFor(window)
     hwClamped = clamped
     val last = hwRegion
     if (last != null && last == rect) return
@@ -822,9 +988,14 @@ class LoudCameraXCapturer(
     val p = plan ?: return
     if (p.startMs == 0L) p.startMs = nowMs
     val elapsed = nowMs - p.startMs
+    if (p.lastFrameAtMs != 0L) p.maxFrameGapMs = max(p.maxFrameGapMs, nowMs - p.lastFrameAtMs)
+    p.lastFrameAtMs = nowMs
     var idx = p.applied
     while (idx + 1 < p.steps.size && p.steps[idx + 1].atMs <= elapsed) idx += 1
     if (idx > p.applied) {
+      val late = elapsed - p.steps[idx].atMs
+      if (late > p.maxStepLateMs) p.maxStepLateMs = late
+      if (late > 50) p.lateSteps += 1
       applyStep(p, p.steps[idx])
       p.applied = idx
     }
@@ -835,10 +1006,17 @@ class LoudCameraXCapturer(
   }
 
   private fun applyStep(p: Plan, s: Step) {
-    if (frameSource == "hardware") {
+    if (frameSource == "hardware" && panPath == "region") {
       // The step's deviceZoom is 1 by construction (zoomPlan.realise): the
       // window carries the zoom, the HAL applies it, nothing is digital.
       s.crop?.let { c -> crop = c; pushRegion(p) }
+      return
+    }
+    if (frameSource == "hardware") {
+      // The HAL re-centres regions: the region carries only the (centred)
+      // zoom, the GPU crop carries the pan (JS plans this as the gpu caps).
+      s.deviceZoom?.let { z -> if (abs(hwZoom - z) > 0.0005) { hwZoom = z; pushRegion(p) } }
+      s.crop?.let { c -> crop = c; digitalFactor = if (c[2] > 0f) 1.0 / c[2] else 1.0 }
       return
     }
     s.deviceZoom?.let { z ->
@@ -859,7 +1037,7 @@ class LoudCameraXCapturer(
   }
 
   fun resetCrop() {
-    crop = floatArrayOf(0f, 0f, 1f, 1f); digitalFactor = 1.0
+    crop = floatArrayOf(0f, 0f, 1f, 1f); digitalFactor = 1.0; hwZoom = 1.0
     if (frameSource == "hardware") pushRegion(null)
   }
 
@@ -867,7 +1045,7 @@ class LoudCameraXCapturer(
   private fun currentDeviceZoom(): Double? {
     if (frameSource == "hardware") {
       val applied = appliedCropMap()?.get("zoom") as? Double
-      return applied ?: (if (crop[2] > 0f) 1.0 / crop[2] else 1.0)
+      return applied ?: (if (panPath == "gpu") hwZoom else if (crop[2] > 0f) 1.0 / crop[2] else 1.0)
     }
     val zs = camera?.cameraInfo?.zoomState?.value
     return zs?.zoomRatio?.toDouble() ?: reportedZoomRatio
@@ -936,7 +1114,12 @@ class LoudCameraXCapturer(
       "stepsPlanned" to p.steps.size,
       "stepsApplied" to (p.applied + 1),
       "cancelled" to (cancelled != null),
-      "appliedCrop" to appliedCropMap()
+      "appliedCrop" to appliedCropMap(),
+      "panPath" to panPath,
+      "orientation" to orientation,
+      "maxStepLateMs" to p.maxStepLateMs,
+      "lateSteps" to p.lateSteps,
+      "maxFrameGapMs" to p.maxFrameGapMs
     )
   }
 
@@ -968,7 +1151,9 @@ class LoudCameraXCapturer(
       "focusDistance" to focusDistance,
       "aeState" to aeState,
       "afState" to afState,
-      "width" to outputWidth, "height" to outputHeight, "rotation" to rotation,
+      "width" to displayWidth(), "height" to displayHeight(), "rotation" to rotation,
+      "sensorOrientation" to sensorOrientation, "orientation" to orientation,
+      "panPath" to panPath, "regionProbe" to regionProbe,
       "fps" to round3(measuredFps),
       "frames" to frames,
       "droppedFrames" to droppedFrames,

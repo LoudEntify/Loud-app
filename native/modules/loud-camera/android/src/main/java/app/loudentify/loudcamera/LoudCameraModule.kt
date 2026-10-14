@@ -143,6 +143,17 @@ class LoudCameraModule : Module() {
     }
     AsyncFunction("proRead") { -> capturer?.proRead() }
 
+    // Orientation (docs/DECISIONS.md 2026-10-14): portrait | landscape,
+    // fixed for the show; the JS side refuses it while live.
+    AsyncFunction("setOrientation") { orientation: String, promise: Promise ->
+      val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
+      main.post { promise.resolve(cap.setOrientation(orientation)) }
+    }
+    // One gravity reading for the setup mismatch warning (blocks up to 700 ms off the main thread).
+    AsyncFunction("gravityCheck") { ->
+      capturer?.gravityCheck() ?: mapOf("available" to false, "reason" to "camera not running")
+    }
+
     AsyncFunction("cancelMove") { -> capturer?.cancelMove("cancelled"); null }
     AsyncFunction("resetFraming") { -> capturer?.resetCrop(); null }
     Function("getState") { -> capturer?.state() }

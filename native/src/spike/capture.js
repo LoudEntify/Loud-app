@@ -47,7 +47,11 @@ export class CaptureBuffer {
   intent(decisionId, intent) { return this.push('B5', { kind: 'intent', decision_id: decisionId, ...intent }); }
   /** The native result carries its own `kind` (zoom | pan); the record's kind is 'result', so the result's goes to `move_kind`. */
   result(decisionId, result) { const { kind: moveKind, ...rest } = result || {}; return this.push('B5', { ...rest, kind: 'result', move_kind: moveKind ?? rest.move_kind ?? null, decision_id: decisionId }); }
-  clock(offset) { return this.push('B12', { offset_ms: offset.offsetMs, error_bound_ms: offset.errorBoundMs, rtt_ms: offset.rttMs, samples: offset.samples }); }
+  /** `extra` carries `step_ms` when this sync moved the offset by more than a second from the last one (a stepped device clock: every server-clock latency in between is suspect). */
+  clock(offset, extra = {}) { return this.push('B12', { offset_ms: offset.offsetMs, error_bound_ms: offset.errorBoundMs, rtt_ms: offset.rttMs, samples: offset.samples, ...extra }); }
+  /** LINK: the LiveKit connection changed state (reconnecting, reconnected, disconnected); STALL: the JS thread was blocked for `lag_ms`. Both are what a slow command is read against. */
+  link(state, detail = null) { return this.push('LINK', { state, detail }); }
+  stall(lagMs) { return this.push('STALL', { lag_ms: lagMs }); }
   cost(counters) { return this.push('COST', counters); }
   /** Take everything buffered so far as one batch (NDJSON text), leaving the buffer empty. */
   drain() {

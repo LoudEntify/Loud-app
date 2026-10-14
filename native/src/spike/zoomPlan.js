@@ -91,11 +91,19 @@ export function capsFor(profile, state = null) {
   const dz = profile?.deviceZoom;
   if (src === 'hardware') {
     const max = Number.isFinite(state?.deviceZoomMax) ? state.deviceZoomMax : (Number.isFinite(dz?.max) ? dz.max : 1);
-    return { frameSource: src, deviceZoom: { available: max > 1.0001, min: 1, max }, digitalMax: DIGITAL_ZOOM_MAX };
+    // panPath 'gpu': the HAL advertised FREEFORM but re-centres every
+    // region (the capturer's start-up probe, docs/DECISIONS.md 2026-10-14),
+    // so the region carries only a centred zoom and the GPU crop carries
+    // the pan: planned like the gpu source, with the region's zoom range.
+    const panPath = state?.panPath === 'gpu' ? 'gpu' : 'region';
+    return { frameSource: src, panPath, deviceZoom: { available: max > 1.0001, min: 1, max }, digitalMax: DIGITAL_ZOOM_MAX };
   }
   const available = Boolean(dz?.available) && Number.isFinite(dz.max) && dz.max > (dz.min ?? 1) && dz.max > 1.0001;
-  return { frameSource: src, deviceZoom: available ? { available: true, min: dz.min ?? 1, max: dz.max } : { available: false, min: 1, max: 1 }, digitalMax: DIGITAL_ZOOM_MAX };
+  return { frameSource: src, panPath: 'crop', deviceZoom: available ? { available: true, min: dz.min ?? 1, max: dz.max } : { available: false, min: 1, max: 1 }, digitalMax: DIGITAL_ZOOM_MAX };
 }
+
+/** True when one HAL crop region carries both the zoom and the pan (the hardware source with a HAL that honours an off-centre region). */
+export function regionCarriesPan(caps) { return caps?.frameSource === 'hardware' && caps?.panPath !== 'gpu'; }
 
 /** Decide how a zoom target will be reached on this device and where it lands: the device range, then the quality ceiling, then the digital cap. */
 export function chooseZoomMode(profile, target, caps = capsFor(profile)) {
@@ -125,7 +133,8 @@ export function chooseZoomMode(profile, target, caps = capsFor(profile)) {
  */
 export function realise(shot, caps) {
   const win = shotWindow(shot);
-  if (caps.frameSource === 'hardware') return { mode: 'region', deviceZoom: 1, crop: win, digitalFactor: r4(shot.zoom) };
+  if (regionCarriesPan(caps)) return { mode: 'region', deviceZoom: 1, crop: win, digitalFactor: r4(shot.zoom) };
+  const hybrid = caps.frameSource === 'hardware';   // region (centred) for the zoom, GPU crop for the pan
   const dev = caps.deviceZoom;
   const off = Math.max(Math.abs(shot.cx - 0.5), Math.abs(shot.cy - 0.5));
   // The largest centred device field of view that still contains the window.
@@ -134,7 +143,7 @@ export function realise(shot, caps) {
   const cw = Math.min(1, r4(win.w * d));
   const x = clamp(r4((win.x - origin) * d), 0, 1 - cw); const y = clamp(r4((win.y - origin) * d), 0, 1 - cw);
   const digitalFactor = r4(1 / cw);
-  const mode = !dev.available ? 'digital' : digitalFactor > 1.001 ? 'device+crop' : 'device';
+  const mode = !dev.available ? 'digital' : digitalFactor > 1.001 ? (hybrid ? 'region+crop' : 'device+crop') : (hybrid ? 'region' : 'device');
   return { mode, deviceZoom: r4(d), crop: { x, y, w: cw, h: cw }, digitalFactor };
 }
 
@@ -142,9 +151,9 @@ export function realise(shot, caps) {
 export function unrealisable(shot, caps) {
   const r = realise(shot, caps);
   if (caps.frameSource === 'hardware' && shot.zoom > caps.deviceZoom.max + 1e-6) return `crop region cannot go past ${caps.deviceZoom.max}x on this camera`;
-  if (caps.frameSource !== 'hardware' && r.digitalFactor > caps.digitalMax + 1e-6) {
+  if (!regionCarriesPan(caps) && r.digitalFactor > caps.digitalMax + 1e-6) {
     return caps.deviceZoom.available
-      ? `off-centre framing needs a ${r.digitalFactor}x crop of the device-zoomed frame, past the ${caps.digitalMax}x cap (device zoom is always centred on this frame source)`
+      ? `off-centre framing needs a ${r.digitalFactor}x crop of the device-zoomed frame, past the ${caps.digitalMax}x cap (${caps.frameSource === 'hardware' ? 'this HAL re-centres crop regions, so a pan is a crop of the zoomed frame' : 'device zoom is always centred on this frame source'})`
       : `digital crop ${r.digitalFactor}x is past the ${caps.digitalMax}x cap and this camera has no device zoom`;
   }
   return null;

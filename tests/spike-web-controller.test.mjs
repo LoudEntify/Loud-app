@@ -196,7 +196,8 @@ test('report has the phone report keys; stop uploads the controller batch throug
   assert.ok(lines.slice(1).every((l) => Number.isFinite(l.t_server_ms)));
 
   const r = s.report();
-  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'stage', 'stageChanges', 'frameSource', 'profile', 'cameraProfile', 'clock', 'latency', 'shots', 'pro', 'match', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
+  assert.deepEqual(Object.keys(r), ['role', 'deviceId', 'sessionId', 'appVersion', 'stage', 'stageChanges', 'frameSource', 'profile', 'cameraProfile', 'clock', 'latency', 'shots', 'pro', 'match', 'orientation', 'slowCommands', 'link', 'stalls', 'clockSteps', 'cost', 'storage', 'uploads', 'lastState', 'writtenAt', 'reportUpload']);
+  assert.deepEqual(r.orientation, { chosen: 'portrait', camera: null, mount: null, log: [], panPath: null, regionProbe: null });
   assert.equal(r.role, 'controller'); assert.equal(r.deviceId, 'web-chrome-141-mac-10-15'); assert.equal(r.appVersion, 'web-test');
   assert.equal(r.latency.moveCycleMs.n, 1); assert.deepEqual(r.cost, { on: null, off: null, samples: 0 });
   assert.equal(r.storage.batches, 1); assert.equal(r.storage.failed, 0); assert.equal(r.storage.records, 4);
@@ -267,4 +268,41 @@ test('the controller report is also uploaded to the bucket as JSON, and a refusa
   s.fetch = async (url, init) => (url.endsWith('/api/spike/upload-url') ? { ok: false, status: 503, json: async () => ({ error: 'Bucket "director-spike" does not exist on this project.' }) } : base(url, init));
   const refused = await s.uploadReport();
   assert.equal(refused.ok, false); assert.match(refused.error, /director-spike/);
+});
+
+test('orientation: sent to the camera and taken from its ack (with the mount check); locked once a stage or the soak runs; a slow leg out is diagnosed', async () => {
+  const events = [];
+  const { s, room, published, advance, now } = makeSession({ onEvent: (k, p) => events.push([k, p]) });
+  await s.connect();
+  const p = s.setOrientation('landscape');
+  const wire = decode(published[0].bytes);
+  assert.equal(wire.type, 'orientation'); assert.equal(wire.orientation, 'landscape');
+  advance(120);
+  const result = { kind: 'orientation', requested: 'landscape', achieved: 'landscape', refused: false, rotation: 0, sensorOrientation: 90, width: 1920, height: 1080, physical: 'portrait', mismatch: true, warning: 'this phone is mounted portrait but the show is landscape: viewers would see its picture turned on its side', fix: 'turn the phone on its side, or set the show to Portrait before going live' };
+  room.emit(EVENTS.DataReceived, encode(ack({ command: wire, receivedAt: wire.sentAt + 30, startedAt: wire.sentAt + 31, completedAt: wire.sentAt + 900, result, diag: { receivedLocalMs: 5, offsetMs: 0, stallMs: null, linkEvents: [] } })), { identity: 'spike-camera-1' }, undefined, TOPIC);
+  const r = await p;
+  assert.equal(r.ok, true); assert.equal(r.orientation, 'landscape'); assert.equal(r.camera.mismatch, true); assert.equal(s.orientation, 'landscape');
+  assert.equal(s.shots, 0, 'an orientation ack is not a shot');
+  assert.equal(s.report().orientation.chosen, 'landscape'); assert.equal(s.report().orientation.mount.physical, 'portrait'); assert.equal(s.report().orientation.log.length, 1);
+  // the camera refuses while live
+  const q = s.setOrientation('portrait');
+  const w2 = decode(published[1].bytes);
+  room.emit(EVENTS.DataReceived, encode(ack({ command: w2, receivedAt: 1, startedAt: 2, completedAt: 3, result: { kind: 'orientation', requested: 'portrait', achieved: 'landscape', refused: true, reason: 'orientation is locked while live (stage A is running): set it before the show' } })), { identity: 'spike-camera-1' }, undefined, TOPIC);
+  const r2 = await q;
+  assert.equal(r2.ok, false); assert.equal(r2.refused, true); assert.match(r2.reason, /locked while live/); assert.equal(s.orientation, 'landscape');
+  // locked here too once a stage is set: nothing goes on the wire
+  await s.setStage('A');
+  const r3 = await s.setOrientation('portrait');
+  assert.equal(r3.ok, false); assert.match(r3.reason, /locked while stage A is running/); assert.equal(published.length, 3, 'the stage command, not an orientation command');
+  // a slow leg out: server clock says 30 s, the local clocks agree, no link event, no stall → logged with the bare verdict
+  const z = await s.zoom(2, 2000);
+  const zw = decode(published[3].bytes);
+  room.emit(EVENTS.DataReceived, encode(ack({ command: zw, receivedAt: zw.sentAt + 30000, startedAt: zw.sentAt + 30001, completedAt: zw.sentAt + 32000, result: { kind: 'zoom', mode: 'region', requested: 2, achieved: 2 }, diag: { receivedLocalMs: now() + 30000, offsetMs: 1000, stallMs: null, linkEvents: [] } })), { identity: 'spike-camera-1' }, undefined, TOPIC);
+  const slow = events.find(([k]) => k === 'slowCommand')[1];
+  assert.equal(slow.commandLatencyMs, 30000); assert.match(slow.verdict, /stalled with no connection-state change/);
+  assert.equal(s.report().slowCommands.length, 1); assert.equal(s.report().slowCommands[0].decisionId, z.decisionId);
+  // connection-state changes are kept for the report and the diagnosis
+  room.emit(EVENTS.Reconnecting); room.emit(EVENTS.Reconnected);
+  assert.deepEqual(s.report().link.map((l) => l.state), ['reconnecting', 'reconnected']);
+  await s.stop();
 });

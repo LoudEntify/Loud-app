@@ -17,6 +17,7 @@ import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
 import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
 import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
+import { ORIENTATIONS } from '../../src/spike/orientation';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
 
@@ -63,18 +64,22 @@ const LOCK_ROWS = [['ae', 'AE', 'lockAe'], ['awb', 'AWB', 'lockAwb'], ['af', 'AF
 function proAckLine(p) {
   const r = p.ack.result || {};
   if (p.command.type === 'stage') return `stage ${r.achieved} on the camera`;
+  if (p.command.type === 'orientation') return r.refused ? `orientation ${r.requested} REFUSED by the camera: ${r.reason}` : `orientation ${r.achieved} on the camera (rotation ${r.rotation}°, ${r.width}×${r.height}) · mounted ${r.physical}${r.mismatch ? ` · MOUNT WARNING: ${r.warning}. Fix: ${r.fix}` : ''}`;
   if (p.command.type === 'survey') return `camera capability: ${r.profile?.hardwareLevel ?? '?'} level, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}`;
   if (p.command.type === 'match') return r.phase === 'read' ? `match read: ISO ${r.targets?.iso ?? '–'}, ${r.targets?.shutterMs ?? '–'} ms, ${r.targets?.wbKelvin ?? '–'} K` : `match apply: residual ${residualLine(r.residual)}${r.reasons?.length ? ` (${r.reasons.join('; ')})` : ''}`;
   const base = `pro ${r.control} ${p.command.value ?? ''} → ${r.supported === false ? 'UNSUPPORTED' : `achieved ${r.achieved ?? '–'}`}${r.clamped ? ' (clamped)' : ''}${r.reason ? ` · ${r.reason}` : ''}`;
-  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''} · ${p.moveCycleMs} ms`;
+  const settle = r.framesToApply != null ? ` · applied after ${r.framesToApply} frames (${r.settleMs} ms${r.settled === false ? ', NOT SETTLED' : ''})` : '';
+  return `${base}${r.warnings?.length ? ` · WARN ${r.warnings.join(' | ')}` : ''}${r.fpsExpected ? ` · fps expected ${r.fpsExpected}` : ''}${settle} · ${p.moveCycleMs} ms`;
 }
+const PRO_TYPES = ['pro', 'match', 'stage', 'survey', 'orientation'];
 
 /** The camera's log line for a move it ran (or refused). */
 function resultLine(p) {
   const r = p.result;
   if (r.refused) return `refused ${p.command.type} ${p.command.direction}: ${r.reason}`;
   const what = p.command.type === 'pan' ? `moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame at ${r.zoomAtPan}x` : `${r.achieved}x${r.releasedCrop ? ' (crop released)' : ''}`;
-  return `did ${p.command.type}: ${r.mode}${r.path ? ` [${r.path}]` : ''} ${what} in ${r.actualDurationMs} ms, ${r.frameSource}, dropped ${r.droppedFrames}${r.reason ? ` (${r.reason})` : ''}`;
+  const timing = r.maxStepLateMs != null ? `, steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late), frame gap ≤${r.maxFrameGapMs} ms` : '';
+  return `did ${p.command.type}: ${r.mode}${r.path ? ` [${r.path}]` : ''} ${what} in ${r.actualDurationMs} ms, ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''}, dropped ${r.droppedFrames}${timing}${r.reason ? ` (${r.reason})` : ''}`;
 }
 function Btn({ label, onPress, tone = 'ghost', small }) {
   const bg = tone === 'teal' ? styles.btnTeal : tone === 'orange' ? styles.btnOrange : styles.btnGhostDark;
@@ -142,6 +147,10 @@ export default function ZoomSpike() {
   // Pro mode (controller role): the camera's capability as it reported it, the current test stage.
   const [cameraProfile, setCameraProfile] = useState(null);
   const [stage, setStage] = useState(null);
+  // The show's orientation (controller: chosen here; camera: as applied) and the camera's one-off mount check.
+  const [orientation, setOrientation] = useState('portrait');
+  const [mount, setMount] = useState(null);
+  const [soakOn, setSoakOn] = useState(false);
   const sess = useRef(null);
 
   const push = (line) => setLog((l) => [`${new Date().toISOString().slice(11, 19)} ${line}`, ...l].slice(0, 60));
@@ -172,8 +181,13 @@ export default function ZoomSpike() {
       onEvent: (kind, p) => {
         if (kind === 'profile') setProfile(p);
         else if (kind === 'state') setState(p);
-        else if (kind === 'ack') { setLastAck(p); push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? proAckLine(p) : ackLine(p)); }
-        else if (kind === 'result') push(['pro', 'match', 'stage', 'survey'].includes(p.command.type) ? `did ${p.command.type} ${p.command.control ?? p.command.phase ?? p.command.stage ?? ''}: ${p.result.supported === false ? 'unsupported' : `achieved ${p.result.achieved ?? p.result.targets?.iso ?? '–'}`}${p.result.reason ? ` (${p.result.reason})` : ''}` : resultLine(p));
+        else if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
+        else if (kind === 'result') push(PRO_TYPES.includes(p.command.type) ? `did ${p.command.type} ${p.command.control ?? p.command.phase ?? p.command.stage ?? p.command.orientation ?? ''}: ${p.result.supported === false ? 'unsupported' : p.result.refused ? `REFUSED (${p.result.reason})` : `achieved ${p.result.achieved ?? p.result.targets?.iso ?? '–'}`}${p.result.framesToApply != null ? ` after ${p.result.framesToApply} frames` : ''}${p.result.reason && !p.result.refused ? ` (${p.result.reason})` : ''}` : resultLine(p));
+        else if (kind === 'orientation') { if (p.ok !== false) setOrientation(p.orientation); push(p.ok === false ? `orientation ${p.requested} REFUSED: ${p.reason}` : `orientation ${p.orientation}${p.rotation != null ? ` (rotation ${p.rotation}°, ${p.width}×${p.height})` : ''}${p.camera?.mismatch ? ` · MOUNT WARNING: ${p.camera.warning}. Fix: ${p.camera.fix}` : ''}`); }
+        else if (kind === 'mount') { setMount(p); push(p.warning ? `MOUNT WARNING: ${p.warning}. Fix: ${p.fix}` : `mount check: phone held ${p.physical}, show ${p.chosen}: agree`); }
+        else if (kind === 'link') push(`link ${p.state}${p.detail ? ` (${p.detail})` : ''}`);
+        else if (kind === 'stall') push(`JS thread stalled ${p.lagMs} ms`);
+        else if (kind === 'clockStep') push(`CLOCK STEP ${p.stepMs} ms between syncs`);
         else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
         else if (kind === 'stage') { setStage(p); push(`stage ${p ?? 'none'}`); }
         else if (kind === 'match') push(p.ok ? `match cameras: targets ISO ${p.targets.iso}, ${p.targets.shutterMs} ms, ${p.targets.wbKelvin} K; ${p.results.map((r) => `${r.from}: ${residualLine(r.residual)}`).join('; ')}` : `match cameras failed: ${p.reason}`);
@@ -186,7 +200,7 @@ export default function ZoomSpike() {
         else if (kind === 'upload') push(`batch ${p.ok ? 'ok' : 'FAILED'} ${p.records ?? ''} rec ${p.gzBytes ?? ''} B gz ${p.error || p.status || ''}`);
         else if (kind === 'reportUpload') { /* logged by finish() */ }
         else if (kind === 'collect') setCollect(p);
-        else if (kind === 'soak') push(p.done ? `soak done after ${p.moves} moves` : `soak move ${p.moves} at ${p.minutes} min`);
+        else if (kind === 'soak') { setSoakOn(!p.done); push(p.done ? `soak done after ${p.moves} moves` : `soak move ${p.moves} at ${p.minutes} min`); }
         else if (kind === 'error') push(`error: ${p}`);
         else if (kind === 'disconnected') { setStatus(`disconnected (${p})`); }
       },
@@ -290,7 +304,8 @@ export default function ZoomSpike() {
       <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
         <Text style={[styles.bodyDark, { fontWeight: '700' }]}>{mode.toUpperCase()} · {status}</Text>
         {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.qualityCeiling?.zoom != null ? ` · 1080p ceiling ${profile.qualityCeiling.zoom}x` : ''}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ' · no lens switch'} · frame path {profile.frameSource?.eligible ?? '?'}</Text>}
-        {st && <Text style={mono}>B4 {st.frameSource} · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.width}×{st.height}@{st.fps} · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
+        {st && <Text style={mono}>B4 {st.frameSource}{st.frameSource === 'hardware' ? ` (pans ${st.panPath})` : ''} · {st.orientation} {st.width}×{st.height} rot {st.rotation}° · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.fps} fps · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
+        {mount?.warning && <Text style={[mono, { color: '#ff9f1c' }]}>MOUNT: {mount.warning}. Fix: {mount.fix}</Text>}
         {st && <Text style={mono}>light EV {fx(st.sceneEv, 1)} · ISO {st.iso ?? '–'} · {fx(st.exposureMs, 1)} ms · f/{st.aperture ?? '–'}{st.frameSource === 'hardware' ? ` · region ${st.appliedCrop ? `${fx(st.appliedCrop.w, 3)}@${fx(st.appliedCrop.x, 3)},${fx(st.appliedCrop.y, 3)}` : '–'} pushes ${st.regionPushes}` : ''}</Text>}
         {st?.pro?.enabled && <Text style={mono}>PRO on · AE {st.pro.aeMode ?? '?'}{st.pro.aeLock ? ' locked' : ''} · AWB {st.pro.awbMode ?? '?'}{st.pro.awbLock ? ' locked' : ''} · AF {st.pro.afMode ?? '?'} · ISO {st.pro.iso ?? '–'} · {st.pro.shutterMs ?? '–'} ms · WB {st.pro.wbKelvin ?? '–'} K · focus {st.pro.focusDiopters ?? '–'} dpt · EV {st.pro.evStops ?? 0} · frame {st.pro.frameDurationMs ?? '–'} ms</Text>}
         <Text style={mono}>stage {stage ?? 'none'}{mode === 'controller' ? '' : ' (set by the controller)'}</Text>
@@ -304,9 +319,13 @@ export default function ZoomSpike() {
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
               {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} small label={`pan ${d}`} tone="orange" onPress={() => s?.pan(d).catch((e) => push(String(e)))} />)}
             </View>
+            <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+              <Text style={mono}>show orientation{soakOn || stage ? ' (locked while the soak or a stage runs)' : ''}:</Text>
+              {ORIENTATIONS.map((o) => <Btn key={o} small tone={o === orientation ? 'teal' : 'ghost'} label={o === orientation ? `[${o}]` : o} onPress={() => s?.setOrientation(o).catch((e) => push(String(e)))} />)}
+            </View>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
-              <Btn small label="Start 20-min soak" onPress={() => s?.startSoak(20)} />
-              <Btn small label="Stop soak" onPress={() => s?.stopSoak()} />
+              <Btn small label="Start 20-min soak" onPress={() => { setSoakOn(true); s?.startSoak(20); }} />
+              <Btn small label="Stop soak" onPress={() => { setSoakOn(false); s?.stopSoak(); }} />
               {STAGES.map((x) => <Btn key={x} small label={stage === x ? `[Stage ${x}]` : `Stage ${x}`} onPress={() => s?.setStage(x).catch((e) => push(String(e)))} />)}
             </View>
             <ProPanel s={s} cameraProfile={cameraProfile} push={push} />

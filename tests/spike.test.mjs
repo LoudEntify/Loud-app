@@ -34,8 +34,8 @@ test('zoom mode: digital fallback only when device zoom is unavailable, capped a
 });
 
 test('caps: the hardware source takes its zoom range from the crop region, the others from the profile', () => {
-  assert.deepEqual(hwCaps, { frameSource: 'hardware', deviceZoom: { available: true, min: 1, max: 4 }, digitalMax: DIGITAL_ZOOM_MAX });
-  assert.deepEqual(gpuCaps, { frameSource: 'gpu', deviceZoom: { available: true, min: 0.6, max: 8 }, digitalMax: DIGITAL_ZOOM_MAX });
+  assert.deepEqual(hwCaps, { frameSource: 'hardware', panPath: 'region', deviceZoom: { available: true, min: 1, max: 4 }, digitalMax: DIGITAL_ZOOM_MAX });
+  assert.deepEqual(gpuCaps, { frameSource: 'gpu', panPath: 'crop', deviceZoom: { available: true, min: 0.6, max: 8 }, digitalMax: DIGITAL_ZOOM_MAX });
   assert.deepEqual(cpuNoZoom.deviceZoom, { available: false, min: 1, max: 1 });
   assert.equal(capsFor(deviceProfile, null).frameSource, 'cpu');
 });
