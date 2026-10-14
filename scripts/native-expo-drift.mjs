@@ -19,7 +19,9 @@
 //                      to run or to print JSON (a broken install)
 //                                             → an ERROR annotation, exit 1.
 //
-// Only the drift check is softened. `expo-doctor` and the `expo export`
+// Only the drift check is softened. `expo-doctor` (run with
+// EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK so it does not repeat this
+// check with its own all-or-nothing severity) and the `expo export`
 // bundle compile that follow it in .github/workflows/ci.yml still fail
 // the job on their own.
 //
