@@ -2,6 +2,14 @@
 
 Claude Code adds blockers here with exact steps. Tick them off, then tell Claude Code "NEEDS_KOREY updated" in the session.
 
+## Dolly-zoom experiment: send 3 or 4 phone clips (blocks the real-footage verdict only)
+
+The offline dolly-zoom experiment (branch `experiment/dolly-zoom`, folder `experiments/dolly_zoom/`) is built and tested on a synthetic clip. Judging whether it looks convincing needs real footage. Nothing in the sandbox can reach staging storage, so the clips must come from you.
+
+- [ ] **Record 3 or 4 clips on your phone.** Each 10 to 20 seconds, mid shot, one performer, camera locked off on a tripod if you can. Landscape or portrait both work. Your own footage only: not pilot recordings, not another artist's.
+- [ ] **Attach them in the Claude Code session chat** (paperclip or drag and drop). Claude Code will place them in the sandbox. If the chat won't take video, upload to any personal cloud folder and paste the share links into the session.
+- [ ] **Say "dolly clips attached"** in the session. Claude Code then runs the experiment on them and reports back.
+
 ## Blocking right now: the staging database URL has the wrong password
 
 The `staging` workflow originally failed at "Apply migrations to staging" with "Access token not provided" — it was still using `supabase link` with an account-wide personal access token. Fixed: `.github/workflows/staging.yml` and `promote.yml` now connect straight to each environment's own database with `supabase db push --db-url`, never a token that can see every Supabase project in the account, guarded by a repository variable that checks the URL points at the right project before anything runs.
