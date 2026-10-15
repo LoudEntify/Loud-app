@@ -40,6 +40,8 @@
 //
 // PRD rows 15, 16, 127. S&I: Real-time media.
 
+import { regionFor } from './region.js';
+
 export const DIGITAL_ZOOM_MAX = 1.2;
 export const EASINGS = ['linear', 'ease-in-out', 'ease-out'];
 export const FRAME_SOURCES = ['auto', 'hardware', 'gpu', 'cpu'];
@@ -96,7 +98,11 @@ export function capsFor(profile, state = null) {
     // so the region carries only a centred zoom and the GPU crop carries
     // the pan: planned like the gpu source, with the region's zoom range.
     const panPath = state?.panPath === 'gpu' ? 'gpu' : 'region';
-    return { frameSource: src, panPath, deviceZoom: { available: max > 1.0001, min: 1, max }, digitalMax: DIGITAL_ZOOM_MAX };
+    // The sensor the region is cut from, and the content rotation it is turned by (the same numbers the camera was given).
+    const lens = (profile?.lenses || []).find((l) => l.id === (state?.cameraId ?? profile?.primaryCameraId)) || (profile?.lenses || [])[0] || null;
+    const active = lens?.sensor?.activeArray ?? null;
+    const region = active ? { rotation: Number.isFinite(state?.rotation) ? state.rotation : 90, active, maxDigitalZoom: lens?.sensor?.maxDigitalZoom ?? 4 } : null;
+    return { frameSource: src, panPath, region, deviceZoom: { available: max > 1.0001, min: 1, max }, digitalMax: DIGITAL_ZOOM_MAX };
   }
   const available = Boolean(dz?.available) && Number.isFinite(dz.max) && dz.max > (dz.min ?? 1) && dz.max > 1.0001;
   return { frameSource: src, panPath: 'crop', deviceZoom: available ? { available: true, min: dz.min ?? 1, max: dz.max } : { available: false, min: 1, max: 1 }, digitalMax: DIGITAL_ZOOM_MAX };
@@ -176,7 +182,10 @@ export function movePlan({ from, to, durationMs, easing = 'ease-in-out', stepMs 
     const shot = { zoom: r4(Math.exp(lerp(lf, lt, t))), cx: r4(lerp(from.cx, to.cx, t)), cy: r4(lerp(from.cy, to.cy, t)) };
     const r = realise(shot, caps);
     shots.push(shot);
-    steps.push({ atMs: Math.round((i / n) * durationMs), deviceZoom: r.deviceZoom, crop: [r.crop.x, r.crop.y, r.crop.w, r.crop.h] });
+    const step = { atMs: Math.round((i / n) * durationMs), deviceZoom: r.deviceZoom, crop: [r.crop.x, r.crop.y, r.crop.w, r.crop.h] };
+    // On the hardware path with one region carrying the pan, the step also names the sensor region itself (region.js), so the phone applies it as given.
+    if (regionCarriesPan(caps) && caps.region) step.region = regionFor({ crop: r.crop, rotation: caps.region.rotation, active: caps.region.active, maxDigitalZoom: caps.region.maxDigitalZoom }).rect;
+    steps.push(step);
   }
   return { steps, shots };
 }

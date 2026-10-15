@@ -108,7 +108,7 @@ class LoudCameraXCapturer(
   }
 
   /** One step of a planned move. Fractions are in the DISPLAY frame (0..1). */
-  class Step(val atMs: Long, val deviceZoom: Double?, val crop: FloatArray?)
+  class Step(val atMs: Long, val deviceZoom: Double?, val crop: FloatArray?, val region: IntArray? = null)
 
   class Plan(val kind: String, val mode: String, val steps: List<Step>, val requested: Double, val onDone: (Map<String, Any?>) -> Unit) {
     var startMs = 0L
@@ -223,6 +223,10 @@ class LoudCameraXCapturer(
   // target is pinned, so it cannot change with the device), and `correction` is what is still
   // missing: builtIn + correction ≡ rotation (mod 360). The state reports every one of these.
   @Volatile var builtInRotation: Int? = null
+  // Region reassertion (15 Oct): the camera reported a region other than the one we asked for, for several results running: the request is sent again (counted, visible in the state).
+  @Volatile var regionReasserts = 0
+  private var reassertFrames = 0
+  private var lastReassertMs = 0L
   @Volatile var correction = 0
   @Volatile var uprightMethod = "none"
   @Volatile var bufferClass = ""
@@ -536,6 +540,7 @@ class LoudCameraXCapturer(
       aeState = result.get(CaptureResult.CONTROL_AE_STATE)
       afState = result.get(CaptureResult.CONTROL_AF_STATE)
       appliedRegion = result.get(CaptureResult.SCALER_CROP_REGION)
+      checkRegionApplied(SystemClock.elapsedRealtime())
       if (proEnabled) {
         // Pro mode on: the colour and lock state the HAL actually applied
         // (nothing here runs while pro mode is off).
@@ -579,7 +584,9 @@ class LoudCameraXCapturer(
         "disable" -> {
           proOptions.clear(); proEnabled = false
           proColorGains = null; proFrameDurationNs = null; proAeLock = null; proAwbLock = null; proAeMode = null; proAwbMode = null; proAfMode = null; proEvIndex = null
-          Camera2CameraControl.from(cam.cameraControl).clearCaptureRequestOptions()
+          // Not clearCaptureRequestOptions(): that dropped the crop region, and the
+          // region was then never sent again (15 Oct: planned crop, applied full sensor).
+          applyCaptureOptions(cam, null)
           cam.cameraControl.setExposureCompensationIndex(0)
           done(proResult(control, value, null, false, null, supported = true)); return
         }
@@ -718,14 +725,47 @@ class LoudCameraXCapturer(
   }
 
   @OptIn(ExperimentalCamera2Interop::class)
-  private fun pushPro(cam: Camera) {
+  private fun pushPro(cam: Camera) = applyCaptureOptions(cam, null)
+
+  /**
+   * The ONE writer of the camera-control request options. CameraX's
+   * setCaptureRequestOptions replaces the whole set, so the crop region and
+   * the pro options must always be sent together: writing either alone
+   * silently dropped the other (15 Oct: a pro change or a disable left the
+   * region at the full sensor). Sends the crop region on the hardware path
+   * and every pro option that is set.
+   */
+  @OptIn(ExperimentalCamera2Interop::class)
+  private fun applyCaptureOptions(cam: Camera, p: Plan?) {
     val b = CaptureRequestOptions.Builder()
+    val rect = hwRegion
+    if (frameSource == "hardware" && rect != null) b.setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, rect)
     for ((k, v) in proOptions) {
       @Suppress("UNCHECKED_CAST")
       b.setCaptureRequestOption(k as CaptureRequest.Key<Any>, v)
     }
     val fut = Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(b.build())
-    fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) Log.w(TAG, "pro options", e) } }, Executor { it.run() })
+    fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e)) { if (p != null) p.refusedReason = "capture options refused: ${e.cause?.message ?: e.message}" else Log.w(TAG, "capture options", e) } } }, Executor { it.run() })
+  }
+
+  /**
+   * The applied region against the requested one, on every result. A region
+   * that differs by more than 3% of the sensor on any edge for 8 results running
+   * is sent again (at most every 500 ms): the request is re-asserted, the count
+   * is in the state, and a region the HAL legitimately adjusts shows up there.
+   */
+  private fun checkRegionApplied(nowMs: Long) {
+    val want = hwRegion; val got = appliedRegion; val a = activeArray
+    if (frameSource != "hardware" || want == null || got == null || a == null) { reassertFrames = 0; return }
+    val tx = a.width() * 0.03; val ty = a.height() * 0.03
+    val same = abs(got.left - want.left) <= tx && abs(got.right - want.right) <= tx && abs(got.top - want.top) <= ty && abs(got.bottom - want.bottom) <= ty
+    if (same) { reassertFrames = 0; return }
+    reassertFrames += 1
+    if (reassertFrames >= 8 && nowMs - lastReassertMs >= 500) {
+      reassertFrames = 0; lastReassertMs = nowMs; regionReasserts += 1
+      Log.w(TAG, "region not applied: asked $want, camera reports $got: sending the request again (${regionReasserts})")
+      main.post { camera?.let { applyCaptureOptions(it, null) } }
+    }
   }
 
   /** The current exposure and colour as the HAL reports them (Match cameras, phase read). Turns the extra reads on. */
@@ -996,21 +1036,23 @@ class LoudCameraXCapturer(
   }
 
   @OptIn(ExperimentalCamera2Interop::class)
-  private fun pushRegion(p: Plan?) {
-    val cam = camera ?: return
+  private fun pushRegion(p: Plan?, force: Boolean = false) {
+    if (camera == null) return
     if (activeArray == null) return
     val window = if (panPath == "gpu") { val w = (1.0 / max(1.0, hwZoom)).toFloat(); floatArrayOf((1f - w) / 2f, (1f - w) / 2f, w, w) } else crop
     val (rect, clamped) = regionFor(window)
     hwClamped = clamped
+    pushRect(rect, p, force)
+  }
+
+  /** Send one sensor region (from the JS plan, or computed here as a fallback). Skips an identical request unless forced. */
+  private fun pushRect(rect: Rect, p: Plan?, force: Boolean = false) {
+    val cam = camera ?: return
     val last = hwRegion
-    if (last != null && last == rect) return
+    if (!force && last != null && last == rect) return
     hwRegion = rect
     hwPushes += 1
-    try {
-      val opts = CaptureRequestOptions.Builder().setCaptureRequestOption(CaptureRequest.SCALER_CROP_REGION, rect).build()
-      val fut = Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(opts)
-      fut.addListener({ try { fut.get() } catch (e: Exception) { if (!isCancellation(e) && p != null) p.refusedReason = "crop region $rect refused: ${e.cause?.message ?: e.message}" } }, Executor { it.run() })
-    } catch (e: Exception) { if (p != null) p.refusedReason = "crop region threw: ${e.message}" }
+    try { applyCaptureOptions(cam, p) } catch (e: Exception) { if (p != null) p.refusedReason = "crop region threw: ${e.message}" }
   }
 
   /** CameraX cancels the previous setZoomRatio / options future whenever a newer value lands: at 30 steps a second that is expected, not a refusal. */
@@ -1067,7 +1109,11 @@ class LoudCameraXCapturer(
     if (frameSource == "hardware" && panPath == "region") {
       // The step's deviceZoom is 1 by construction (zoomPlan.realise): the
       // window carries the zoom, the HAL applies it, nothing is digital.
-      s.crop?.let { c -> crop = c; pushRegion(p) }
+      // The plan names the sensor region itself (region.js); it is applied as given.
+      s.crop?.let { c -> crop = c }
+      val rg = s.region
+      if (rg != null) { pushRect(Rect(rg[0], rg[1], rg[2], rg[3]), p); return }
+      pushRegion(p)
       return
     }
     if (frameSource == "hardware") {
@@ -1212,6 +1258,7 @@ class LoudCameraXCapturer(
       "width" to displayWidth(), "height" to displayHeight(), "rotation" to rotation,
       "sensorOrientation" to sensorOrientation, "orientation" to orientation,
       "contentRotation" to rotation, "builtInRotation" to builtInRotation, "correction" to correction, "uprightMethod" to uprightMethod,
+      "requestedRegion" to hwRegion?.let { rectMap(it) }, "regionReasserts" to regionReasserts,
       "bufferClass" to bufferClass, "emittedWidth" to emittedWidth, "emittedHeight" to emittedHeight,
       "panPath" to panPath, "regionProbe" to regionProbe,
       "fps" to round3(measuredFps),

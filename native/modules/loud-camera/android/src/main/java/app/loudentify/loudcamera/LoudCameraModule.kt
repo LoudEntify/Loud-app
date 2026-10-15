@@ -128,7 +128,8 @@ class LoudCameraModule : Module() {
         LoudCameraXCapturer.Step(
           (s["atMs"] as Number).toLong(),
           (s["deviceZoom"] as? Number)?.toDouble(),
-          if (c != null && c.size == 4) floatArrayOf(c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), c[3].toFloat()) else null
+          if (c != null && c.size == 4) floatArrayOf(c[0].toFloat(), c[1].toFloat(), c[2].toFloat(), c[3].toFloat()) else null,
+          (s["region"] as? List<Number>)?.takeIf { it.size == 4 }?.let { r -> IntArray(4) { r[it].toInt() } }
         )
       }, requested) { r -> promise.resolve(r) }
       if (!cap.startMove(plan)) promise.reject(CodedException("ERR_MOVING", "a move is already in progress", null))
