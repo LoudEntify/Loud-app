@@ -3,7 +3,7 @@
 // diagnosis and the diagnostic records (14 Oct retest build).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS } from '../native/src/spike/orientation.js';
+import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, quarterTurn } from '../native/src/spike/orientation.js';
 import { orientationCommand, ack, encode, decode, slowCommandDiagnosis, SLOW_COMMAND_MS } from '../native/src/spike/commands.js';
 import { capsFor, realise, regionCarriesPan, panPlan, zoomPlan, unrealisable, SHOT_HOME } from '../native/src/spike/zoomPlan.js';
 import { CaptureBuffer } from '../native/src/spike/capture.js';
@@ -97,4 +97,82 @@ test('the buffer records link changes, stalls and a stepped clock as their own s
   b.link('reconnecting'); b.stall(2400); b.clock({ offsetMs: 30000, errorBoundMs: 20, rttMs: 40, samples: 5 }, { step_ms: 30000 }); b.clock({ offsetMs: 30010, errorBoundMs: 20, rttMs: 40, samples: 5 });
   assert.deepEqual(b.records.map((r) => r.stream), ['LINK', 'STALL', 'B12', 'B12']);
   assert.equal(b.records[0].state, 'reconnecting'); assert.equal(b.records[1].lag_ms, 2400); assert.equal(b.records[2].step_ms, 30000); assert.equal('step_ms' in b.records[3], false);
+});
+
+// ── the frame plan: width, height and rotation for both choices (14 Oct retest: the picture came out sideways and squashed) ──
+const UPRIGHT = { x: 0.58, y: 9.757, z: 0.716 };       // phone standing up, as logged on the G35
+const ON_SIDE = { x: 9.757, y: 0.58, z: 0.716 };       // phone lying on its long edge, landscape-left
+const ON_SIDE_R = { x: -9.757, y: 0.58, z: 0.716 };    // landscape-right
+
+test('the plan: portrait is 1080x1920 at the sensor rotation, landscape 1920x1080 a quarter turn less, on both sensor mountings', () => {
+  // Moto G35: sensor orientation 90. Portrait: content rotated 90, a 1080-wide, 1920-tall frame. Landscape: 0, 1920 wide, 1080 tall.
+  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 90 }), { orientation: 'portrait', sensorOrientation: 90, desiredRotation: 90, width: 1080, height: 1920 });
+  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 90 }), { orientation: 'landscape', sensorOrientation: 90, desiredRotation: 0, width: 1920, height: 1080 });
+  // A sensor mounted the other way round: 270 for portrait, 180 for landscape.
+  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 270 }), { orientation: 'portrait', sensorOrientation: 270, desiredRotation: 270, width: 1080, height: 1920 });
+  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 270 }), { orientation: 'landscape', sensorOrientation: 270, desiredRotation: 180, width: 1920, height: 1080 });
+  // Anything that is not 'landscape' is portrait, and a sensor reading is snapped to a quarter turn.
+  assert.equal(orientationPlan({ orientation: 'sideways', sensorOrientation: 90 }).orientation, 'portrait');
+  assert.equal(uprightRotation('portrait', 88), 90); assert.equal(uprightRotation('landscape', 92), 0);
+  assert.equal(quarterTurn(-90), 270); assert.equal(quarterTurn(NaN), 0);
+});
+
+test('the frame is never the wrong shape: portrait is tall and landscape is wide, for both phone sensor mountings', () => {
+  for (const sensor of [90, 270]) {
+    for (const o of ['portrait', 'landscape']) {
+      const p = orientationPlan({ orientation: o, sensorOrientation: sensor });
+      assert.equal(p.width > p.height, o === 'landscape', `${o} sensor ${sensor}: ${p.width}x${p.height}`);
+      // the content rotation is a quarter turn exactly when the shape is swapped from the raw landscape sensor
+      assert.equal(p.desiredRotation % 180 === 90, o === 'portrait', `${o} sensor ${sensor}: rotation ${p.desiredRotation}`);
+      assert.equal(p.width * p.height, 1920 * 1080);
+    }
+  }
+  // portrait is tall, landscape is wide, whichever way the phone is held
+  assert.ok(orientationPlan({ orientation: 'portrait' }).height > orientationPlan({ orientation: 'portrait' }).width);
+  assert.ok(orientationPlan({ orientation: 'landscape' }).width > orientationPlan({ orientation: 'landscape' }).height);
+});
+
+test('how the phone is held does not change the plan: upright and on its side give the same frame, and only the mount check differs', () => {
+  const plan = orientationPlan({ orientation: 'portrait', sensorOrientation: 90 });
+  const landPlan = orientationPlan({ orientation: 'landscape', sensorOrientation: 90 });
+  assert.equal(physicalOrientation(UPRIGHT), 'portrait');
+  assert.equal(physicalOrientation(ON_SIDE), 'landscape-left');
+  assert.equal(physicalOrientation(ON_SIDE_R), 'landscape-right');
+  // The plan is a function of the choice and the sensor only: there is no gravity argument to pass.
+  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 90 }), plan);
+  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 90 }), landPlan);
+  // Portrait with the phone upright: no warning. Landscape with the phone on its side: no warning.
+  assert.equal(orientationMismatch('portrait', physicalOrientation(UPRIGHT)).mismatch, false);
+  assert.equal(orientationMismatch('landscape', physicalOrientation(ON_SIDE)).mismatch, false);
+  assert.equal(orientationMismatch('landscape', physicalOrientation(ON_SIDE_R)).mismatch, false);
+  // The mismatch cases warn, and the frame stays the chosen shape (a correctly proportioned sideways picture, never a squashed one).
+  assert.equal(orientationMismatch('landscape', physicalOrientation(UPRIGHT)).mismatch, true);
+  assert.equal(orientationMismatch('portrait', physicalOrientation(ON_SIDE)).mismatch, true);
+  assert.ok(landPlan.width > landPlan.height, 'landscape frame is wide even with the phone upright');
+});
+
+test('the texture correction: whatever rotation the camera pipeline already applies, the result is the chosen orientation', () => {
+  for (const builtIn of [0, 90, 180, 270]) {
+    for (const o of ['portrait', 'landscape']) {
+      for (const sensor of [90, 270]) {
+        const desired = uprightRotation(o, sensor);
+        const corr = textureCorrection(desired, builtIn);
+        assert.equal((builtIn + corr) % 360, desired, `built-in ${builtIn}, ${o}, sensor ${sensor}`);
+      }
+    }
+  }
+  // no built-in rotation (the raw sensor): the correction is the content rotation itself
+  assert.equal(textureCorrection(90, 0), 90); assert.equal(textureCorrection(0, 0), 0);
+  // a camera that already turns the picture upright for portrait needs no further turn
+  assert.equal(textureCorrection(90, 90), 0);
+});
+
+test('the capturer is told the plan, not its own guess: the rotation the JS side computes is the number the native module receives', async () => {
+  // runtime.applyOrientation is the only caller of LoudCamera.setOrientation; it passes the plan's rotation.
+  const { readFileSync } = await import('node:fs');
+  const runtime = readFileSync(new URL('../native/src/spike/runtime.js', import.meta.url), 'utf8');
+  assert.match(runtime, /const plan = orientationPlan\(\{ orientation: o, sensorOrientation: st\.sensorOrientation \?\? 90 \}\);/);
+  assert.match(runtime, /LoudCamera\.setOrientation\(plan\.orientation, plan\.desiredRotation\)/);
+  const mod = readFileSync(new URL('../native/modules/loud-camera/index.js', import.meta.url), 'utf8');
+  assert.match(mod, /export function setOrientation\(orientation, desiredRotation\)/);
 });

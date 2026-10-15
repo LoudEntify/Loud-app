@@ -19,7 +19,7 @@ import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
 import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
-import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch } from './orientation';
+import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan } from './orientation';
 import { capsFor, zoomPlan, panPlan, tightnessFor, PAN_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
@@ -183,8 +183,10 @@ export class SpikeSession {
     this.track = track;
     this.onEvent('published', { trackSid: pub.trackSid });
     this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
-    // Setup-time mount check for the default orientation (one gravity reading, never repeated during the show).
-    this.checkMount().catch((e) => this.onEvent('error', `mount check: ${String(e?.message || e)}`));
+    // The default orientation's frame plan goes to the capturer first, then the setup-time mount check (one gravity reading, never repeated during the show).
+    this.applyOrientation(this.orientation)
+      .catch((e) => this.onEvent('error', `orientation plan: ${String(e?.message || e)}`))
+      .finally(() => this.checkMount().catch((e) => this.onEvent('error', `mount check: ${String(e?.message || e)}`)));
     let announced = null;
     this.stateSub = LoudCamera.addStateListener((s) => {
       this.lastState = s;
@@ -240,16 +242,28 @@ export class SpikeSession {
     this.onEvent('orientation', r);
     return r;
   }
+  /**
+   * Hand the camera the frame plan for `o` (orientation.js orientationPlan):
+   * the content rotation and the frame size come from the plan, the camera
+   * applies exactly those numbers. The sensor orientation is the camera's own.
+   */
+  async applyOrientation(o) {
+    const st = LoudCamera.getState() || this.lastState || {};
+    const plan = orientationPlan({ orientation: o, sensorOrientation: st.sensorOrientation ?? 90 });
+    const info = await LoudCamera.setOrientation(plan.orientation, plan.desiredRotation);
+    return { plan, info };
+  }
   /** Camera: apply the orientation unless live, then the one gravity reading for the mount warning. */
   async runOrientation(m) {
     const want = normaliseOrientation(m.orientation);
     if (this.live()) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: `orientation is locked while live (${this.stage ? `stage ${this.stage} is running` : 'a move is running'}): set it before the show` };
-    const info = await LoudCamera.setOrientation(want);
-    this.orientation = want; this.orientationInfo = info;
+    const { plan, info } = await this.applyOrientation(want);
+    if (info?.refused) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: info.reason };
+    this.orientation = want; this.orientationInfo = { ...info, plan };
     const mount = await this.checkMount();
     this.orientationLog.push({ orientation: want, atMs: Date.now(), serverMs: this.serverNow(), rotation: info?.rotation ?? null, physical: mount.physical, mismatch: mount.mismatch });
     this.onEvent('orientation', { ok: true, orientation: want, ...info, ...mount });
-    return { kind: 'orientation', requested: want, achieved: want, supported: true, refused: false, reason: mount.warning, rotation: info?.rotation ?? null, sensorOrientation: info?.sensorOrientation ?? null, width: info?.width ?? null, height: info?.height ?? null, physical: mount.physical, mismatch: mount.mismatch, warning: mount.warning, fix: mount.fix };
+    return { kind: 'orientation', requested: want, achieved: want, supported: true, refused: false, reason: mount.warning, rotation: plan.desiredRotation, sensorOrientation: plan.sensorOrientation, width: plan.width, height: plan.height, correction: info?.correction ?? null, builtInRotation: info?.builtInRotation ?? null, physical: mount.physical, mismatch: mount.mismatch, warning: mount.warning, fix: mount.fix };
   }
 
   sampleCost() {

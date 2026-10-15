@@ -26,6 +26,50 @@ export function frameSizeFor(o, longEdge = 1920, shortEdge = 1080) {
   return normaliseOrientation(o) === 'landscape' ? { width: longEdge, height: shortEdge } : { width: shortEdge, height: longEdge };
 }
 
+/** Quarter-turn of an angle (any integer degrees) as 0 | 90 | 180 | 270. */
+export function quarterTurn(deg) {
+  const d = Number(deg);
+  if (!Number.isFinite(d)) return 0;
+  return ((Math.round(d / 90) * 90) % 360 + 360) % 360;
+}
+
+/**
+ * The content rotation (degrees clockwise) that makes the sensor's frame
+ * upright in the chosen orientation. Portrait is the sensor orientation
+ * itself (90 on the Moto G35: the sensor is landscape, the phone upright);
+ * landscape is that less a quarter turn (0 on the G35: the phone on its
+ * side). This is the ONLY place the mapping is written: the capturer is
+ * handed the number, it does not derive its own.
+ */
+export function uprightRotation(orientation, sensorOrientation = 90) {
+  const s = quarterTurn(sensorOrientation);
+  return normaliseOrientation(orientation) === 'landscape' ? (s + 270) % 360 : s;
+}
+
+/**
+ * Everything the camera is told for one orientation: the content rotation,
+ * and the frame size that rotation produces (portrait 1080x1920, landscape
+ * 1920x1080). The swap of width and height follows the rotation, so a
+ * picture is never published at the wrong shape.
+ */
+export function orientationPlan({ orientation, sensorOrientation = 90 } = {}) {
+  const o = normaliseOrientation(orientation);
+  const desiredRotation = uprightRotation(o, sensorOrientation);
+  const { width, height } = frameSizeFor(o);
+  return { orientation: o, sensorOrientation: quarterTurn(sensorOrientation), desiredRotation, width, height };
+}
+
+/**
+ * The texture correction still needed after the camera pipeline has
+ * already rotated the texture by `builtInRotation` (measured on the first
+ * frame by the capturer; the preview target is pinned, so it does not
+ * change with the device). Applying the correction on top of the built-in
+ * rotation gives `desiredRotation` again: builtIn + correction ≡ desired (mod 360).
+ */
+export function textureCorrection(desiredRotation, builtInRotation = 0) {
+  return (((quarterTurn(desiredRotation) - quarterTurn(builtInRotation)) % 360) + 360) % 360;
+}
+
 /**
  * Which way the phone is physically held, from one gravity reading in
  * Android's device frame (x along the short edge, positive to the right;

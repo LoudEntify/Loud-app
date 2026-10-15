@@ -145,9 +145,10 @@ class LoudCameraModule : Module() {
 
     // Orientation (docs/DECISIONS.md 2026-10-14): portrait | landscape,
     // fixed for the show; the JS side refuses it while live.
-    AsyncFunction("setOrientation") { orientation: String, promise: Promise ->
+    // The JS side computes the plan (orientation.js orientationPlan) and passes the content rotation; the capturer applies that number.
+    AsyncFunction("setOrientation") { orientation: String, desiredRotation: Int, promise: Promise ->
       val cap = capturer ?: run { promise.reject(CodedException("ERR_NOT_RUNNING", "start() first", null)); return@AsyncFunction }
-      main.post { promise.resolve(cap.setOrientation(orientation)) }
+      main.post { promise.resolve(cap.setOrientation(orientation, desiredRotation)) }
     }
     // One gravity reading for the setup mismatch warning (blocks up to 700 ms off the main thread).
     AsyncFunction("gravityCheck") { ->

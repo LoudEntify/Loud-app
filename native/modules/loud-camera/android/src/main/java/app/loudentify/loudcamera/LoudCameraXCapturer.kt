@@ -55,6 +55,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
@@ -216,6 +217,17 @@ class LoudCameraXCapturer(
   @Volatile var outputWidth = 0
   @Volatile var outputHeight = 0
   @Volatile var rotation = 0
+  // Orientation, part 2 (docs/DECISIONS.md 2026-10-15). `rotation` is the content rotation the
+  // JS plan asked for (orientation.js orientationPlan). The camera pipeline may already rotate
+  // the texture by `builtInRotation` (measured once on the first texture frame; the preview
+  // target is pinned, so it cannot change with the device), and `correction` is what is still
+  // missing: builtIn + correction ≡ rotation (mod 360). The state reports every one of these.
+  @Volatile var builtInRotation: Int? = null
+  @Volatile var correction = 0
+  @Volatile var uprightMethod = "none"
+  @Volatile var bufferClass = ""
+  @Volatile var emittedWidth = 0
+  @Volatile var emittedHeight = 0
   @Volatile var convertMsTotal = 0.0
   private var lastFrameMs = 0L
   private var framesAtLastSample = 0L
@@ -332,7 +344,9 @@ class LoudCameraXCapturer(
     if (attempt != "cpu" && helper == null) frameSourceReason = "no SurfaceTextureHelper from WebRTC: CPU path"
 
     val useCase: UseCase = if (wantTexture) {
-      val builder = Preview.Builder().setResolutionSelector(resolution)
+      // Target rotation pinned to natural portrait: CameraX would otherwise
+      // follow the display, and the texture transform with it.
+      val builder = Preview.Builder().setResolutionSelector(resolution).setTargetRotation(Surface.ROTATION_0)
       Camera2Interop.Extender(builder)
         .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
         .setSessionCaptureCallback(captureCallback)
@@ -355,6 +369,7 @@ class LoudCameraXCapturer(
       preview
     } else {
       val builder = ImageAnalysis.Builder()
+        .setTargetRotation(Surface.ROTATION_0)
         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
         .setResolutionSelector(resolution)
@@ -375,6 +390,7 @@ class LoudCameraXCapturer(
     frameSource = chooseFrameSource(wantTexture, attempt)
     if (fallbackLog.isNotEmpty()) frameSourceReason = "${fallbackLog.joinToString("; ")}; now $frameSource (${frameSourceReason ?: "chosen"})"
     sensorOrientation = try { cam.cameraInfo.getSensorRotationDegrees(Surface.ROTATION_0) } catch (e: Exception) { 90 }
+    // Default content rotation until the JS plan arrives (same formula as orientation.js uprightRotation).
     rotation = rotationFor(orientation)
     if (wantTexture) {
       val h = helper!!
@@ -427,18 +443,24 @@ class LoudCameraXCapturer(
   private fun rotationFor(o: String): Int = if (o == "landscape") (sensorOrientation + 270) % 360 else sensorOrientation
 
   /**
-   * Set the show's orientation (portrait | landscape). Allowed any time
-   * the JS side allows it (it refuses while a soak or a stage runs); the
-   * next frame is upright in the new orientation, the crop region and
-   * the GPU crop follow (display-frame fractions are re-mapped).
+   * Set the show's frame plan: the orientation and the content rotation the
+   * JS side computed (orientation.js). Allowed any time the JS side allows it
+   * (it refuses while a soak or a stage runs). The next frame is upright in it;
+   * the crop region and the GPU crop follow (display-frame fractions).
    */
-  fun setOrientation(o: String): Map<String, Any?> {
+  fun setOrientation(o: String, desired: Int): Map<String, Any?> {
+    if (desired !in listOf(0, 90, 180, 270)) return mapOf("refused" to true, "reason" to "content rotation $desired is not a quarter turn")
     val next = if (o == "landscape") "landscape" else "portrait"
     orientation = next
-    rotation = rotationFor(next)
+    rotation = desired
     if (frameSource == "hardware") pushRegion(null)
-    return mapOf("orientation" to orientation, "rotation" to rotation, "sensorOrientation" to sensorOrientation, "width" to displayWidth(), "height" to displayHeight())
+    Log.i(TAG, "orientation $orientation: content rotation $rotation, built-in ${builtInRotation}, correction ${correctionNow()}")
+    return mapOf(
+      "orientation" to orientation, "rotation" to rotation, "sensorOrientation" to sensorOrientation,
+      "width" to displayWidth(), "height" to displayHeight(), "correction" to correctionNow(), "builtInRotation" to builtInRotation,
+    )
   }
+  private fun correctionNow(): Int = ((rotation - (builtInRotation ?: 0)) % 360 + 360) % 360
   private fun portraitOutput() = rotation == 90 || rotation == 270
   private fun displayWidth() = if (portraitOutput()) min(outputWidth, outputHeight) else max(outputWidth, outputHeight)
   private fun displayHeight() = if (portraitOutput()) max(outputWidth, outputHeight) else min(outputWidth, outputHeight)
@@ -789,7 +811,7 @@ class LoudCameraXCapturer(
     //    transform (the same matrix a renderer would apply), so the frame
     //    the encoder sees is 1080x1920 portrait or 1920x1080 landscape
     //    with rotation metadata 0. No pixels move.
-    val upright = uprightTexture(frame.buffer)
+    val (upright, metaRotation) = uprightTexture(frame.buffer)
     // 2. The GPU crop: the gpu source's zoom+pan, or the pan on a hardware
     //    source whose HAL re-centres regions. Display-frame fractions
     //    apply directly to the upright buffer.
@@ -800,22 +822,58 @@ class LoudCameraXCapturer(
       val cw = max(2, (c[2] * w).roundToInt()).coerceAtMost(w - cx); val ch = max(2, (c[3] * h).roundToInt()).coerceAtMost(h - cy)
       upright.cropAndScale(cx, cy, cw, ch, w, h)
     } else upright
-    val out = VideoFrame(buffer, 0, frame.timestampNs)
+    val out = VideoFrame(buffer, metaRotation, frame.timestampNs)
+    emittedWidth = buffer.width; emittedHeight = buffer.height
     obs.onFrameCaptured(out)
     if (buffer !== upright) buffer.release()
     if (upright !== frame.buffer) upright.release()
     convertMsTotal += (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000.0
   }
 
-  /** The texture rotated by the fixed `rotation` (width and height swapped for 90/270); the same buffer when no rotation is needed. */
-  private fun uprightTexture(buffer: VideoFrame.Buffer): VideoFrame.Buffer {
-    if (rotation == 0 || buffer !is TextureBufferImpl) return buffer
+  /**
+   * Upright in the chosen orientation, through the texture transform (no
+   * pixels move). Returns the buffer and the rotation metadata to publish
+   * with it: a texture is corrected by `correction` and published with
+   * metadata 0; any other buffer keeps the full `rotation` as metadata (the
+   * encoder rotates it) and says so in `uprightMethod`, never silently.
+   * The output size is the chosen orientation's frame (1080x1920 or
+   * 1920x1080), so a rotated picture is never squashed.
+   */
+  private fun uprightTexture(buffer: VideoFrame.Buffer): Pair<VideoFrame.Buffer, Int> {
+    bufferClass = buffer.javaClass.simpleName
+    if (buffer !is TextureBufferImpl) {
+      uprightMethod = "metadata (not a texture)"
+      correction = rotation
+      return buffer to rotation
+    }
+    if (builtInRotation == null) {
+      builtInRotation = builtInRotationOf(buffer.transformMatrix)
+      Log.i(TAG, "built-in texture rotation ${builtInRotation} (content rotation $rotation)")
+    }
+    val corr = correctionNow()
+    correction = corr
+    uprightMethod = "texture"
+    val w = displayWidth(); val h = displayHeight()
+    if (corr == 0 && buffer.width == w && buffer.height == h) return buffer to 0
     val m = Matrix()
     m.preTranslate(0.5f, 0.5f)
-    m.preRotate(rotation.toFloat())
+    m.preRotate(corr.toFloat())
     m.preTranslate(-0.5f, -0.5f)
-    val swap = rotation == 90 || rotation == 270
-    return buffer.applyTransformMatrix(m, if (swap) buffer.height else buffer.width, if (swap) buffer.width else buffer.height)
+    return buffer.applyTransformMatrix(m, w, h) to 0
+  }
+
+  /**
+   * The rotation a texture transform already applies, in degrees clockwise
+   * on screen: the direction the texture's x axis is sent in. Logged with the
+   * full matrix and its determinant, so a mirrored transform shows on the device.
+   */
+  private fun builtInRotationOf(m: Matrix): Int {
+    val p = floatArrayOf(0f, 0f, 1f, 0f)
+    m.mapPoints(p)
+    val deg = Math.toDegrees(atan2((p[3] - p[1]).toDouble(), (p[2] - p[0]).toDouble()))
+    val v = FloatArray(9); m.getValues(v)
+    Log.i(TAG, "texture transform: x axis to ${"%.1f".format(deg)} deg, matrix ${v.joinToString(",") { "%.3f".format(it) }}, det ${"%.3f".format(v[0] * v[4] - v[1] * v[3])}")
+    return ((deg / 90.0).roundToInt() * 90 % 360 + 360) % 360
   }
 
   // ── frame path: cpu ──────────────────────────────────────────
@@ -1153,6 +1211,8 @@ class LoudCameraXCapturer(
       "afState" to afState,
       "width" to displayWidth(), "height" to displayHeight(), "rotation" to rotation,
       "sensorOrientation" to sensorOrientation, "orientation" to orientation,
+      "contentRotation" to rotation, "builtInRotation" to builtInRotation, "correction" to correction, "uprightMethod" to uprightMethod,
+      "bufferClass" to bufferClass, "emittedWidth" to emittedWidth, "emittedHeight" to emittedHeight,
       "panPath" to panPath, "regionProbe" to regionProbe,
       "fps" to round3(measuredFps),
       "frames" to frames,
