@@ -138,9 +138,15 @@ jobs:
         working-directory: native
       - name: Expo dependencies (patch drift warns, anything else fails)
         run: node scripts/native-expo-drift.mjs native
+      # expo-doctor repeats the dependency-version check and fails on a patch
+      # mismatch (today's Expo patches turned every branch red again); the
+      # drift step above already runs that check with the right severity,
+      # so doctor keeps its other 20 checks and skips this one.
       - name: Expo doctor
         run: npx expo-doctor
         working-directory: native
+        env:
+          EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK: 1
       - name: Compile the iOS and Android bundles
         run: npx expo export --platform ios --platform android --output-dir /tmp/expo-export
         working-directory: native
