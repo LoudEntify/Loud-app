@@ -27,3 +27,15 @@ A public-domain photo with gentle sway. Tests that the pipeline runs. Not a look
 - Option 2 uses a stand-in depth proxy, not Depth Anything Small. Swap `depth_proxy_bands()` when weights are available.
 - The clean plate assumes a locked camera and a performer who moves away from the background at some point.
 - Timings are CPU only. No GPU was available.
+
+## Current run (v2)
+
+```bash
+python dolly.py --input work/clip.mp4 --out-dir out/clip --cache-dir cache/clip \
+  --rvm-onnx models/rvm_mobilenetv3_fp32.onnx --variant grow --trigger 4.0
+python dolly.py ... --variant shrink --zoom-start 1.5 --trigger 4.0   # reuses the cache
+```
+
+- Input must be upright. Pre-rotate phone clips with ffmpeg (OpenCV ignores the rotation tag).
+- RVM weights: `rvm_mobilenetv3_fp32.onnx` from the RobustVideoMatting v1.0.0 release.
+- Outputs: `side_by_side_<variant>.mp4` (original | V1 | V2 | V3), `stats_<variant>.json`, and frames.

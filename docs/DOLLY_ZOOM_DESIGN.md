@@ -1,75 +1,118 @@
 # Dolly zoom: offline experiment and design note
 
-Status: experiment only. Branch `experiment/dolly-zoom`. No app code, no migrations, nothing deployed, not merged. Code lives in `experiments/dolly_zoom/`.
+Status: experiment only. Branch `experiment/dolly-zoom`. No app code, no migrations, nothing deployed, not merged. Code lives in `experiments/dolly_zoom/`. Korey approved dolly zoom as a rare "big moment" technique, added alongside the existing shot grammar without changing it.
 
-## What the experiment is for
+## Versions compared
 
-Decide whether a simulated dolly zoom looks convincing on real Loudentify footage before anything is built live. The verdict still needs real clips. See the open item in `docs/NEEDS_KOREY.md`.
+Each run produces one side-by-side MP4: original, V1, V2, V3.
 
-## What was built
+- **V1, performer/background split.** MediaPipe Selfie Segmentation mask. The performer stays at constant scale, and the background is a clean plate scaled by the background law.
+- **V2, layered parallax.** MediaPipe mask. The background is split into five horizontal bands at assumed depths, each scaled separately. **The depth source is a stand-in proxy, not Depth Anything Small.** The model weights are on a host the sandbox cannot reach, so V2 does not test the model.
+- **V3, split with a matting model.** Robust Video Matting (MobileNetV3, ONNX) mask with exponential temporal smoothing (weight 0.6 on the previous frame). Same split compositing as V1.
 
-- **Option 1, performer/background split.** MediaPipe Selfie Segmentation (legacy model bundled with the pip wheel) gives a soft subject mask. The performer stays at scale 1. The background is a clean plate (temporal median of background-only pixels, locked camera assumed), scaled by the background law below. Revealed edges show a blurred, enlarged copy of the frame.
-- **Option 2, layered parallax.** The background is split into five horizontal bands at assumed depths. Each band is scaled by the same law, far bands first, with the blurred fill underneath. **The depth source is a stand-in proxy, not Depth Anything Small.** The Hugging Face host is blocked from the sandbox, so the weights could not be downloaded. Option 2 results here do not test the model.
-- **Background law.** scale(d) = ((ds - m) * d) / (ds * (d - m)). The zoom term m ramps from 0 to m_end over 1.5 s with smoothstep easing. The defaults are ds = 3, d = 8, m_end = 0.9, which shrinks the background to about 0.79 at the end of the ramp.
-- **Trigger.** Original footage until the chosen timestamp, then the 1.5 s ramp, then the end state holds.
-- **Slight crop.** A 3% centre crop ramps in with the effect. This is a digital zoom and enlarges the performer by up to 3%. See the decisions below.
+## Variants of the effect
 
-## Results so far
+- **Grow (default).** Dolly out and zoom in. The background grows behind a constant-size performer (background output scale 1.27 at the end of the 1.5 s ramp). The enlarged background covers the whole frame, so no picture is needed beyond the frame edge.
+- **Shrink.** Used only when the device starts at 1.3x zoom or more. Simulated here with a 1.5x start. The camera zooms out during the effect, the background shrinks to exactly the full frame at the end, and the performer is kept at the 1.5x size by the compositor. The revealed background is real picture from the full clip. The performer's pixels are upscaled 1.5x, so the performer is softer than the background.
 
-Tested on one synthetic clip only: a public-domain photo with gentle sway, 15 s, 720x960, 30 fps. This checks that the pipeline runs. It does not show whether the effect looks right.
+Neither variant uses blurred fill at the frame edges, and neither uses a digital crop.
 
-| Measure | Value |
+Background law: scale(d) = ((ds - m) * d) / (ds * (d - m)). Defaults ds = 3, d = 8. Grow ramps m to 0.9. Shrink solves m for a 1/1.5 background scale, giving m = 1.333.
+
+## Test clip
+
+One clip so far: 12.3 s, 1080p portrait, one performer, hand gestures, no instrument, short hair. Processed at 720x1280. Trigger at 4.0 s. The synthetic clip from the earlier round is no longer used.
+
+Clips 2 to 4 have not arrived. Results below rest on this one clip.
+
+## Results
+
+Edge flicker is the mean change in alpha between frames, measured on edge pixels. Lower is steadier.
+
+| Matte | Edge flicker |
 |---|---|
-| One-off clean plate (per clip) | 16 s on 4-core CPU |
-| Segmentation and alpha, every frame | 47 ms mean, 77 ms p95 |
-| Option 1 composite, effect frames | 184 ms mean, 231 ms p95 |
-| Option 2 composite, effect frames | 262 ms mean, 301 ms p95 |
-| GPU | Not available in sandbox, not measured |
+| MediaPipe (V1, V2) | 0.180 |
+| RVM raw | 0.209 |
+| RVM smoothed (V3) | 0.104 |
 
-The live budget at 30 fps is 33 ms per frame. The current code is about 5 to 8 times too slow for live use on CPU. Offline it is fine: one 1.5 s effect is about 45 frames, roughly 8 to 12 s of CPU.
+Smoothing roughly halves the RVM flicker. Raw RVM is steadier than MediaPipe only after smoothing.
 
-Visual findings on the synthetic clip:
+Visual findings at the end of the grow ramp:
 
-- The scaled background shows a dark rectangle at the photo edge. This is an artifact of the test canvas, not of the method, but it shows the edge fill behaves as intended.
-- A grey halo sits above the performer's hair. Segmentation loses hair edges and the halo carries into the composite. Both options show it.
-- Option 1 and Option 2 look almost the same. Expected: the stand-in depth adds little beyond the subject mask.
+- **Head and hair.** All three versions give a clean outline on this clip. The hair is short, so this clip does not test hair properly.
+- **Background near the subject.** V1 and V2 show grey smears where the clean plate is blurred. V3 shows a doubled edge on the red box. Likely cause: soft matte values let the unscaled frame mix with the scaled background. Not yet verified. A fix is to composite the unscaled frame only where the matte is confident.
+- **Movement.** The hands moved through the mask. No failure was counted on this clip beyond the table-area issues above.
+- **Instruments and mic stands.** Not present in this clip. Still untested.
+- **Shrink.** The reveal uses real picture from the clip. The performer is visibly softer than the background.
 
-## Expected failure modes (to confirm on real clips)
+## Cost, measured on CPU
 
-- **Hair.** Segmentation halo at the crown and flyaways. Likely visible at the 1.5 s ramp.
-- **Instruments and mic stands.** A guitar neck or mic stand crosses the mask boundary. It may be cut out, or it may ghost when the background shrinks.
-- **Fast movement.** Mask lag at arm swings. The clean plate also fails if the performer stands still for the whole clip, because the performer gets baked into the plate.
-- **Moving camera.** The clean plate assumes a locked camera. Handheld phone footage will smear.
-- **Lighting changes.** Spotlights on the background change the plate.
+Effect window, 720x1280, 4-core CPU, per frame:
 
-## Decisions and open questions for Korey
+| Part | Grow | Shrink |
+|---|---|---|
+| MediaPipe mask (every frame) | 61 ms | 61 ms |
+| RVM mask (every frame) | 186 ms | 186 ms |
+| V1 composite | 45 ms | 54 ms |
+| V2 composite | 182 ms | 203 ms |
+| V3 composite | 45 ms | 49 ms |
+| One-off clean plate per clip | 25 s | reused |
 
-1. **Slight crop versus "lens zoom only".** `docs/CLAUDE.md` section 5 says zoom is lens zoom only, never digital. The crop is digital and enlarges the performer. Recommend zero crop with edge fill, unless the test shows the fill is visibly worse.
-2. **New shot type versus "do not change the shot grammar".** Section 5 says the AI director's shot grammar must not change. A dolly zoom is a new shot type. Needs a product call on whether it becomes a switchable shot.
-3. **Which footage counts.** Only Korey's own phone clips, as instructed. No pilot recordings or other artists' footage.
+Per frame total: V1 about 106 ms, V2 about 243 ms, V3 about 235 ms. Scaled to 1080p by pixel count, multiply by 2.25.
+
+The live budget at 30 fps is 33 ms per frame. Nothing here runs live on CPU.
+
+## GPU estimate from published figures
+
+No GPU is available in the sandbox, so these are not measured here.
+
+- **RVM.** The repo's own table gives model throughput, not end-to-end time. At "HD", 104 FPS on a GTX 1080 Ti (FP32) and 172 FPS on an RTX 3090 (FP16). That is roughly 6 to 10 ms per frame for the model alone. The README does not define "HD" in pixels, so the frame size behind these numbers is unverified. Source: the RVM README, <https://github.com/PeterL1n/RobustVideoMatting>. The paper quotes 76 FPS at 4K on a 1080 Ti.
+- **MediaPipe selfie segmentation.** Google reports about 34 ms per frame on a Pixel 6 CPU, and about the same on GPU, so the GPU does not help on that phone. Source: <https://developers.google.com/edge/mediapipe/solutions/vision/image_segmenter/index>. A third-party blog claims 1 to 3 ms on WebGPU with a laptop, but it cites no method, so it is unverified.
+- **Compositing.** The composite is a few warps and blends per frame. It maps well to a GPU shader. Not measured.
+
+Working assumption for pricing: about 10 ms per frame for matting on a modern GPU at HD, plus a few milliseconds for compositing. That is roughly 15 ms per effect frame.
+
+## Pricing unit per show
+
+Each dolly moment ramps for 1.5 s, which is 45 frames at 30 fps.
+
+- On CPU, V1 costs about 4.8 s of compute per dolly moment at 720p.
+- On a GPU at the working assumption, about 0.7 s per dolly moment.
+
+The price per GPU second is not known here, so the cost in dollars is left open.
+
+One design point matters for cost. The experiment holds the end state after the ramp, so compositing would run for the rest of the shot. A live version should either return to the plain view after the ramp, or hold the end state as a static frame. This is a product call.
+
+## Decisions and open questions
+
+1. **Shot grammar.** Dolly zoom is approved as a rare big-moment technique alongside the existing shot grammar. Recorded in `docs/DECISIONS.md`.
+2. **Clips 2 to 4.** Needed before judging across performers and instruments. Steps are in `docs/NEEDS_KOREY.md`.
+3. **Hold after ramp.** Decide whether the effect returns to the plain view or holds (see cost).
+4. **Matte edge fix.** Confirm the doubled-edge cause on the red box, then test a confident-only composite.
 
 ## Design: running the effect in the egress compositor
 
-- The egress already renders the directed view in a headless browser (`components/EgressPage.jsx`). The effect is a per-frame warp and composite, so it fits a WebGL fragment shader on that page, with segmentation on the GPU through MediaPipe's web runtime. This is a proposal to measure, not a built path.
-- The show must never stop. If the effect fails at any point, the page falls back to the plain directed view and records the fallback. This follows section 4, rule 1.
-- The effect is triggered by the show's director log, so the recording shows the same cut the audience saw.
-- Target: under 33 ms per frame at 720x960 on the egress host. Measure the GPU path before committing to it.
+- The egress already renders the directed view in a headless browser (`components/EgressPage.jsx`). The effect is a per-frame warp and composite, so it fits a WebGL shader on that page. Segmentation or matting would run on the GPU through MediaPipe's or ONNX's web runtime. This is a proposal to measure, not a built path.
+- The show must never stop. If the effect fails, the page falls back to the plain directed view and records the fallback. This follows section 4, rule 1 of `docs/CLAUDE.md`.
+- The effect is triggered from the show's director log, so the recording shows the same cut the audience saw.
+- Target: under 33 ms per frame at 720p on the egress host. Measure the GPU path before committing.
 
 ## Tiers
 
-- **Option 1 for all shows.** One segmentation pass, one plate per camera position. Cheapest path that still gives the effect.
-- **Option 2 as premium.** Needs a real depth model, which means the GPU path and a model license check. Charge for it only after Option 2 proves better than Option 1 on real clips.
+- **Option 1 (V1 or V3) for all shows.** Cheapest path. V3 needs the matting model and its extra GPU cost.
+- **Option 2 as premium.** Needs a real depth model and a license check. Charge only after it beats V1 on real clips.
 
 ## Assisted optical dolly zoom
 
-A moving camera on a gimbal, with device zoom counter-moving so the performer stays the same size. Uses lens zoom only, which fits section 5. The performer's size comes from the subject mask, and the zoom is adjusted from that. Not built. It needs a gimbal integration and a camera API that exposes lens zoom on each phone model.
+A moving camera on a gimbal, with device zoom counter-moving so the performer stays the same size. Uses lens zoom only, which fits section 5 of `docs/CLAUDE.md`. Not built. Needs gimbal integration and a camera API that exposes lens zoom per phone model.
 
 ## Option 3: 3D reprojection, post-show highlights only
 
-Reproject the scene in 3D from a depth estimate, then render a virtual dolly. Too slow and too heavy for live use. Only for offline highlight clips after the show, from the recording. Not started.
+Reproject the scene in 3D from a depth estimate, then render a virtual dolly. Too slow and heavy for live. Only for offline highlight clips after the show. Not started.
 
 ## Next steps
 
-1. Korey adds 3 or 4 phone clips to the session (see `docs/NEEDS_KOREY.md`).
-2. Run `experiments/dolly_zoom/dolly.py` on each clip with the trigger time set for it.
-3. Record which failure modes appear on real footage, and pick Option 1 or Option 2 for the next step.
+1. Korey attaches clips 2 to 4 in the session.
+2. Run `experiments/dolly_zoom/dolly.py` on each clip, grow and shrink, at a chosen trigger.
+3. Check the doubled-edge cause and the table-area smears on real clips.
+4. Decide the hold-after-ramp behaviour and the price unit.

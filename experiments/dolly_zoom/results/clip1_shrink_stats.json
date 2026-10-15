@@ -1,0 +1,62 @@
+{
+  "input": "clip1_720x1280.mp4",
+  "resolution": [
+    720,
+    1280
+  ],
+  "fps": 30.0,
+  "frames": 368,
+  "variant": "shrink",
+  "params": {
+    "ds": 3.0,
+    "d": 8.0,
+    "m_end": 1.3333,
+    "zoom_start": 1.5,
+    "bg_output_scale_at_end": {
+      "grow_background": null,
+      "shrink_background": 1.0
+    },
+    "trigger_s": 4.0,
+    "effect_s": 1.5,
+    "layers": 6,
+    "ema": 0.6
+  },
+  "one_off_seconds": {
+    "clean_plate": 24.74
+  },
+  "mask_ms_per_frame_all_frames": {
+    "mediapipe_ms_per_frame": {
+      "mean": 60.52,
+      "p95": 92.07
+    },
+    "rvm_ms_per_frame": {
+      "mean": 185.61,
+      "p95": 246.06
+    }
+  },
+  "versions_effect_window_ms_per_frame": {
+    "v1_mediapipe_split": {
+      "ms_mean": 53.99,
+      "ms_p95": 73.02,
+      "edge_flicker_mean_abs_alpha_delta": 0.18004535260414883
+    },
+    "v2_layered_stand_in_depth": {
+      "ms_mean": 203.46,
+      "ms_p95": 280.05,
+      "edge_flicker_mean_abs_alpha_delta": 0.18004535260414883
+    },
+    "v3_rvm_smoothed_split": {
+      "ms_mean": 48.91,
+      "ms_p95": 64.4,
+      "edge_flicker_mean_abs_alpha_delta": 0.10436155562788979
+    },
+    "v3_rvm_raw_unsmoothed": {
+      "edge_flicker_mean_abs_alpha_delta": 0.20944072546726678
+    }
+  },
+  "hardware": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "cpu_count": 4,
+    "gpu": "none available in sandbox, not measured"
+  }
+}

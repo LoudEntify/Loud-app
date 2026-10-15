@@ -7,6 +7,7 @@ Claude Code adds blockers here with exact steps. Tick them off, then tell Claude
 The offline dolly-zoom experiment (branch `experiment/dolly-zoom`, folder `experiments/dolly_zoom/`) is built and tested on a synthetic clip. Judging whether it looks convincing needs real footage. Nothing in the sandbox can reach staging storage, so the clips must come from you.
 
 - [ ] **Record 3 or 4 clips on your phone.** Each 10 to 20 seconds, mid shot, one performer, camera locked off on a tripod if you can. Landscape or portrait both work. Your own footage only: not pilot recordings, not another artist's.
+- [x] **Clip 1 received** (`VID_20261015_120336.mp4`, 12 s, 1080p portrait). Clips 2 to 4 still needed, same rules.
 - [ ] **Attach them in the Claude Code session chat** (paperclip or drag and drop). Claude Code will place them in the sandbox. If the chat won't take video, upload to any personal cloud folder and paste the share links into the session.
 - [ ] **Say "dolly clips attached"** in the session. Claude Code then runs the experiment on them and reports back.
 
