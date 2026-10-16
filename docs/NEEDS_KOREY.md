@@ -116,6 +116,50 @@ The app is in `native/` (Expo). Cloud builds happen on Expo's EAS service; nothi
 
 Everything below is staging only. Nothing here touches production, main or pilot-freeze-v2.
 
+### Paused 16 October 2026, for about two weeks (business plan)
+
+The build is paused. The last code commit on `spike/native-device-zoom` is `fff449d`, which passed `ci` and `android-spike`. The commit that adds this section is the final one on the branch. Nothing is merged to staging, main or pilot-freeze-v2, and no check-ins are armed.
+
+**What the spike has proven** (Moto G35, Android 16, controller in Chrome on a Mac; figures from the 14 and 15 October reports)
+
+- **Frame rate on the hardware path:** 30.0 to 30.2 fps. 22 dropped frames in about 30 minutes (14 Oct); 67 dropped of 44,769 frames, about 0.15 percent, in a 25-minute run (15 Oct). Frame conversion about 0.4 ms per frame.
+- **CPU and battery:** the whole app used about 147 percent of one CPU share with collection on (15 Oct) and 180 percent (14 Oct). Battery fell 8 percent in 25 minutes. Thermal state stayed at moderate. Collection-off figures were not captured.
+- **Device zoom:** device range 1x to 4x. The 1080p ceiling holds at 2.1x, so 5x lands at 2.1x, as designed. Zoom accuracy was not checked against an outside reference; the camera reports what it applied.
+- **Command latency:** controller to phone, server clock, 53 moves on 15 Oct: median 27 ms, 90th percentile 40 ms, slowest 573 ms. Ack leg median 32 ms. A move cycle is 2 to 3 seconds by design, because it includes the move.
+- **The 30-second command (14 Oct):** not seen again. The 15 Oct reports record no slow commands. The cause is not confirmed.
+- **Pro mode on this phone (LIMITED level):** ISO and shutter are honoured. Frames to apply: 2 for enable, 7 to 9 for each control. Settled in 226 to 284 ms, every change settled (15 Oct). Manual white balance is unsupported (no MANUAL_POST_PROCESSING), but AWB lock works. Focus, exposure compensation and the locks are supported.
+- **Collection and storage:** about 0.4 MB per hour gzipped from the phone, 12 MB per hour raw (about 30 to 1). About 0.04 MB per hour from the controller.
+- **Clock sync:** error bound about plus or minus 40 ms on the phone (round trip 80 ms) and 27 ms on the laptop (round trip 53 ms). Offsets stayed steady within each run.
+- **Squashed picture:** fixed and verified on the 1d96b44 retest.
+
+**Fixed but not yet retested on the phone** (items 1 to 3 of the last retest)
+
+1. **Upside-down landscape:** the mount is read from the gravity sensor, and the plan picks the 0 or 180 degree variant. Tested for all four mounts in both orientations (fff449d).
+2. **Stale mount warning:** clears on the phone and the controller once the mount resolves.
+3. **Pans:** refused below 1.5x with a reason. Default travel is 12 percent of the visible frame. A pan now names where the picture moves, so the framing moves the other way; this reverses the framing direction used before 16 October.
+
+**Unfinished or untested**
+
+- **iPhone:** no build route. EAS device builds need the paid Apple Developer account; the free route needs a Mac with Xcode. The Swift side is written but uncompiled.
+- **Lens switching:** the G35 reports three cameras (back 0, front 1, back 2 with a 10x maximum), but only lens 0 has been used. No lens switch has been recorded.
+- **Full pro mode:** tested only on a LIMITED-level phone. A FULL-level phone would expose manual white balance and has not been tried.
+- **Director data migrations:** written, not applied, and awaiting your approval. The spike has written only to the director-spike bucket.
+- **The GPU pan path:** for a phone whose HAL re-centres crop regions. The 1.2x digital cap limits it to about 5 percent of the wide frame off-centre at 2x, so pans there are short. Untested on such a phone.
+- **The mount lock:** the mount is read again until the first stage or move. A phone turned after that keeps its plan for the show.
+
+**Resume here: 5-minute retest for items 1 to 3**
+
+Install the APK from the latest green android-spike run after this commit (artifact `loudentify-release-apk`). Open the spike screen fresh, choose Camera on the phone, and Join as Controller on the laptop.
+
+1. **Mount (2 minutes).** Choose landscape with the phone on its side, top to the left: the picture is upright. Turn the phone so its top is to the right: within about 5 seconds the picture turns upright by itself. Choose portrait with the phone upright: upright. Turn it upside down: it corrects within about 5 seconds.
+2. **Warning (1 minute).** Choose landscape with the phone standing up: the MOUNT warning and its fix appear on the phone and the laptop. Lay the phone on its side: both clear within about 5 seconds, and nothing stale remains.
+3. **Pans (2 minutes).** At 1x press pan left: the log says the pan is for zoomed framings. Press 2x. Pan left: the picture slides left on screen. Pan right, pan up and pan down each slide the picture that way, about a tenth of the screen each. Repeat in landscape.
+4. **Report and stop.** Send both reports.
+
+If any pan slides the picture the wrong way, say which direction and which orientation first: the direction convention changed on 16 October and is the one thing to confirm.
+
+**Next steps after that:** test lens switching and FULL-level pro mode on a phone that has them, and decide on the director data migrations.
+
 - [ ] **Create the private bucket `director-spike`** in the staging Supabase dashboard (Storage → New bucket → name `director-spike`, Public bucket OFF, no file size limit needed). It must be created in the dashboard: an SQL insert into `storage.buckets` has failed silently on this project before. Until it exists, `/api/spike/upload-url` answers 503 with this exact instruction and the phones keep buffering.
 - [ ] **Build the Android app with the native module** (Expo Go cannot run it). On a computer with Node 22, from the branch:
   ```
