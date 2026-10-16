@@ -1,7 +1,7 @@
 // Unit tests for the platform-free spike modules in native/src/spike.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseZoomMode, capsFor, realise, unrealisable, shotWindow, shotRoom, zoomPlan, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX, PAN_DEFAULTS, SHOT_HOME } from '../native/src/spike/zoomPlan.js';
+import { chooseZoomMode, capsFor, realise, unrealisable, shotWindow, shotRoom, zoomPlan, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX, PAN_DEFAULTS, SHOT_HOME, MIN_PAN_ZOOM } from '../native/src/spike/zoomPlan.js';
 import { zoomCommand, panCommand, ack, encode, decode, roundTripMs, ackLatencies, summariseLatencies, TOPIC } from '../native/src/spike/commands.js';
 import { pickOffset, measureOffset, toServerMs } from '../native/src/spike/clock.js';
 import { CaptureBuffer, uploadDue, objectPath, BATCH_EVERY_MS, STATE_SAMPLE_MS, MAX_BUFFER_RECORDS } from '../native/src/spike/capture.js';
@@ -80,45 +80,36 @@ test('a zoom is a smooth move between shots: monotonic, ends exactly on target, 
   assert.equal(hw.mode, 'region'); assert.ok(hw.steps.every((st) => st.deviceZoom === 1)); assert.deepEqual(hw.steps[2].crop, [0.25, 0.25, 0.5, 0.5]);
 });
 
-test('pan at 1x: tightens to the pan window and moves in one eased move, nothing snaps', () => {
+test('pan at 1x is refused with a clear reason: panning is for zoomed framings (docs/DECISIONS.md 2026-10-16)', () => {
   const p = panPlan({ direction: 'right', shot: SHOT_HOME, caps: hwCaps, durationMs: 3000, stepMs: 100 });
-  assert.equal(p.refused, false); assert.equal(p.path, 'tighten-pan'); assert.equal(p.tightened, true); assert.equal(p.zoom, 1.1905); assert.equal(p.window, 0.84);
-  assert.equal(p.travelRequested, 0.0672); assert.equal(p.travel, 0.0672); assert.equal(p.room, 0.08);
-  assert.equal(p.steps.length, 30);
-  assert.ok(p.steps[0].crop[2] > 0.99, 'first step is almost the full frame');
-  for (let i = 1; i < p.steps.length; i += 1) {
-    const a = p.steps[i - 1].crop; const b = p.steps[i].crop;
-    assert.ok(b[2] <= a[2] + 1e-9, 'window only shrinks');
-    assert.ok(b[0] + b[2] / 2 >= a[0] + a[2] / 2 - 1e-9, 'centre only moves right');
-    assert.ok(Math.abs(b[2] - a[2]) < 0.03, 'no step changes the window by more than a few percent');
-  }
-  assert.ok(p.steps.every((st) => inFrame(st.crop)));
-  assert.deepEqual(p.to, { zoom: 1.1905, cx: 0.5672, cy: 0.5 });
-  // on the gpu source the same pan trades device zoom for crop on the same frames (the old pull-back, now implicit)
-  const g = panPlan({ direction: 'right', shot: SHOT_HOME, caps: gpuCaps, durationMs: 300, stepMs: 100 });
-  assert.equal(g.mode, 'device+crop'); assert.ok(g.steps.every((st) => st.deviceZoom >= 1 && st.deviceZoom <= 1.2));
-  assert.ok(g.realised.digitalFactor <= DIGITAL_ZOOM_MAX + 1e-4);
+  assert.equal(p.refused, true); assert.match(p.reason, /panning is for zoomed framings: zoom to 1\.5x or more first/);
+  assert.equal(p.travel, 0); assert.equal(p.to, null); assert.deepEqual(p.steps, []); assert.equal(p.zoom, 1);
+  assert.equal(MIN_PAN_ZOOM, 1.5);
+  // at 1.5x and above the same pan is allowed
+  assert.equal(panPlan({ direction: 'right', shot: { zoom: 1.5, cx: 0.5, cy: 0.5 }, caps: hwCaps }).refused, false);
 });
 
-test('pan at 2x measures from the shot: a fixed share of the visible frame, no tightening', () => {
+test('pan at 2x: the picture moves the named way, the framing the other way, measured from the shot', () => {
   const two = { zoom: 2, cx: 0.5, cy: 0.5 };
   const p = panPlan({ direction: 'left', shot: two, caps: hwCaps, durationMs: 300, stepMs: 100 });
-  assert.equal(p.path, 'pan'); assert.equal(p.tightened, false); assert.equal(p.travel, 0.04); assert.equal(p.room, 0.25);
-  assert.deepEqual(p.to, { zoom: 2, cx: 0.46, cy: 0.5 });
-  assert.deepEqual(p.steps[2].crop, [0.21, 0.25, 0.5, 0.5]);
-  // a second pan starts from the shot the first one left
+  assert.equal(p.path, 'pan'); assert.equal(p.tightened, false); assert.equal(p.travel, 0.06); assert.equal(p.room, 0.25);
+  // 'left' moves the picture left on screen: the framing moves right
+  assert.deepEqual(p.to, { zoom: 2, cx: 0.56, cy: 0.5 });
+  const last = p.steps[p.steps.length - 1].crop;
+  assert.ok(Math.abs(last[0] + last[2] / 2 - 0.56) < 1e-3, 'the last step is centred on the new framing');
+  // a second pan starts from the shot the first one left; 'up' moves the picture up, so the framing moves down
   const q = panPlan({ direction: 'up', shot: p.to, caps: hwCaps, durationMs: 300, stepMs: 100 });
-  assert.deepEqual(q.from, p.to); assert.deepEqual(q.to, { zoom: 2, cx: 0.46, cy: 0.46 });
+  assert.deepEqual(q.from, p.to); assert.deepEqual(q.to, { zoom: 2, cx: 0.56, cy: 0.56 });
   assert.equal(panPlan({ direction: 'down', degree: 0.5, shot: two, caps: hwCaps, durationMs: 100, stepMs: 100 }).travel, 0.25);
   assert.throws(() => panPlan({ direction: 'sideways', shot: two, caps: hwCaps }));
   assert.throws(() => panPlan({ direction: 'left', shot: two }));
 });
 
 test('a pan into a frame edge is refused with a reason, and the shot is untouched', () => {
-  const atEdge = { zoom: 1.1905, cx: 0.4328, cy: 0.5 };
+  const atEdge = { zoom: 2, cx: 0.7, cy: 0.5 };          // 0.05 of the frame to the right of the window
   const r = panPlan({ direction: 'left', shot: atEdge, caps: hwCaps, durationMs: 300, stepMs: 100 });
-  assert.equal(r.refused, true); assert.match(r.reason, /^at frame edge: left has 0.0128 of the frame left and this pan needs 0.0672$/);
-  assert.equal(r.travel, 0); assert.equal(r.travelRequested, 0.0672); assert.deepEqual(r.steps, []); assert.equal(r.to, null); assert.deepEqual(r.from, atEdge);
+  assert.equal(r.refused, true); assert.match(r.reason, /^at frame edge: the picture cannot move left any further \(0\.05 of the frame left, this pan needs 0\.06\)$/);
+  assert.equal(r.travel, 0); assert.equal(r.travelRequested, 0.06); assert.deepEqual(r.steps, []); assert.equal(r.to, null); assert.deepEqual(r.from, atEdge);
   // the way back is open
   assert.equal(panPlan({ direction: 'right', shot: atEdge, caps: hwCaps, durationMs: 300, stepMs: 100 }).refused, false);
   // on a gpu/cpu source a pan can also be refused by the digital cap: device zoom is centred, so a far off-centre window needs more crop than 1.2x
@@ -128,13 +119,13 @@ test('a pan into a frame edge is refused with a reason, and the shot is untouche
   assert.match(panPlan({ direction: 'left', shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: cpuNoZoom, durationMs: 300, stepMs: 100 }).reason, /no device zoom/);
 });
 
-test('pan defaults are clearly visible and the same share of the picture at every zoom', () => {
-  assert.equal(PAN_DEFAULTS.degree, 0.08); assert.equal(PAN_DEFAULTS.window, 0.84);
-  const one = panPlan({ direction: 'left', shot: SHOT_HOME, caps: hwCaps });
-  assert.ok(one.travel >= 0.06, 'default travel at 1x is at least 6% of the frame');
-  assert.ok(one.travel / one.window > 0.079 && one.travel / one.window < 0.081, 'eight percent of the visible frame');
+test('pan defaults are clearly visible at 2x: 12 percent of the visible frame, the same share at every zoom', () => {
+  assert.equal(PAN_DEFAULTS.degree, 0.12); assert.equal(PAN_DEFAULTS.window, 0.84);
   const two = panPlan({ direction: 'left', shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: hwCaps });
-  assert.ok(Math.abs(two.travel * 2 - 0.08) < 1e-3, 'eight percent of the visible frame at 2x too');
+  assert.equal(two.travel, 0.06, 'six percent of the wide frame at 2x');
+  assert.ok(two.travel / two.window >= 0.1, 'at least a tenth of the visible frame');
+  const three = panPlan({ direction: 'left', shot: { zoom: 3, cx: 0.5, cy: 0.5 }, caps: hwCaps });
+  assert.ok(Math.abs(three.travel / three.window - 0.12) < 1e-3, 'the same share of the visible frame at 3x');
 });
 
 test('tightness is the fraction of the wide reference field of view', () => {

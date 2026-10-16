@@ -3,7 +3,7 @@
 // diagnosis and the diagnostic records (14 Oct retest build).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, quarterTurn } from '../native/src/spike/orientation.js';
+import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, quarterTurn, mountOf, nextMountPlan } from '../native/src/spike/orientation.js';
 import { orientationCommand, ack, encode, decode, slowCommandDiagnosis, SLOW_COMMAND_MS } from '../native/src/spike/commands.js';
 import { capsFor, realise, regionCarriesPan, panPlan, zoomPlan, unrealisable, SHOT_HOME } from '../native/src/spike/zoomPlan.js';
 import { CaptureBuffer } from '../native/src/spike/capture.js';
@@ -64,12 +64,13 @@ test('capsFor: a hardware source whose HAL re-centres regions plans like the gpu
   // on the pure region path the same shot is one region
   assert.equal(realise({ zoom: 2, cx: 0.54, cy: 0.5 }, region).mode, 'region');
   // a pan at 2x on the hybrid path: steps carry both a device zoom and a crop, and the shot moves
-  const pan = panPlan({ direction: 'right', shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: hybrid });
-  assert.equal(pan.refused, false); assert.equal(pan.mode, 'region+crop'); assert.equal(pan.to.cx, 0.54);
+  // (on this path the 1.2x digital cap allows about 5 percent of the wide frame off-centre at 2x; the test pan is 4 percent of it)
+  const pan = panPlan({ direction: 'right', degree: 0.08, shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: hybrid });
+  assert.equal(pan.refused, false); assert.equal(pan.mode, 'region+crop'); assert.equal(pan.to.cx, 0.46, "'right' moves the picture right: the framing moves left");
   assert.ok(pan.steps.every((s) => s.deviceZoom >= 1 && s.crop[2] <= 1));
-  assert.ok(pan.steps[pan.steps.length - 1].crop[0] > 0, 'the last step is cropped off-centre');
+  { const c = pan.steps[pan.steps.length - 1].crop; assert.ok(Math.abs(c[0] + c[2] / 2 - 0.5) > 0.01, 'the last step is cropped off-centre'); }
   // a second pan the same way would need more than the 1.2x crop cap: refused with the hybrid reason
-  const twice = panPlan({ direction: 'right', shot: pan.to, caps: hybrid });
+  const twice = panPlan({ direction: 'right', degree: 0.08, shot: pan.to, caps: hybrid });
   assert.equal(twice.refused, true); assert.match(twice.reason, /this HAL re-centres crop regions, so a pan is a crop of the zoomed frame/);
   assert.equal(unrealisable({ zoom: 2, cx: 0.5, cy: 0.5 }, hybrid), null);
   // zooms are unchanged by the pan path: 5x still lands on the 2.1x ceiling
@@ -106,11 +107,11 @@ const ON_SIDE_R = { x: -9.757, y: 0.58, z: 0.716 };    // landscape-right
 
 test('the plan: portrait is 1080x1920 at the sensor rotation, landscape 1920x1080 a quarter turn less, on both sensor mountings', () => {
   // Moto G35: sensor orientation 90. Portrait: content rotated 90, a 1080-wide, 1920-tall frame. Landscape: 0, 1920 wide, 1080 tall.
-  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 90 }), { orientation: 'portrait', sensorOrientation: 90, desiredRotation: 90, width: 1080, height: 1920 });
-  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 90 }), { orientation: 'landscape', sensorOrientation: 90, desiredRotation: 0, width: 1920, height: 1080 });
+  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 90 }), { orientation: 'portrait', sensorOrientation: 90, mount: { physical: 'unknown', known: false, inverted: false }, desiredRotation: 90, width: 1080, height: 1920 });
+  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 90 }), { orientation: 'landscape', sensorOrientation: 90, mount: { physical: 'unknown', known: false, inverted: false }, desiredRotation: 0, width: 1920, height: 1080 });
   // A sensor mounted the other way round: 270 for portrait, 180 for landscape.
-  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 270 }), { orientation: 'portrait', sensorOrientation: 270, desiredRotation: 270, width: 1080, height: 1920 });
-  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 270 }), { orientation: 'landscape', sensorOrientation: 270, desiredRotation: 180, width: 1920, height: 1080 });
+  assert.deepEqual(orientationPlan({ orientation: 'portrait', sensorOrientation: 270 }), { orientation: 'portrait', sensorOrientation: 270, mount: { physical: 'unknown', known: false, inverted: false }, desiredRotation: 270, width: 1080, height: 1920 });
+  assert.deepEqual(orientationPlan({ orientation: 'landscape', sensorOrientation: 270 }), { orientation: 'landscape', sensorOrientation: 270, mount: { physical: 'unknown', known: false, inverted: false }, desiredRotation: 180, width: 1920, height: 1080 });
   // Anything that is not 'landscape' is portrait, and a sensor reading is snapped to a quarter turn.
   assert.equal(orientationPlan({ orientation: 'sideways', sensorOrientation: 90 }).orientation, 'portrait');
   assert.equal(uprightRotation('portrait', 88), 90); assert.equal(uprightRotation('landscape', 92), 0);
@@ -171,8 +172,74 @@ test('the capturer is told the plan, not its own guess: the rotation the JS side
   // runtime.applyOrientation is the only caller of LoudCamera.setOrientation; it passes the plan's rotation.
   const { readFileSync } = await import('node:fs');
   const runtime = readFileSync(new URL('../native/src/spike/runtime.js', import.meta.url), 'utf8');
-  assert.match(runtime, /const plan = orientationPlan\(\{ orientation: o, sensorOrientation: st\.sensorOrientation \?\? 90 \}\);/);
+  assert.match(runtime, /const plan = orientationPlan\(\{ orientation: o, sensorOrientation: st\.sensorOrientation \?\? 90, physical \}\);/);
   assert.match(runtime, /LoudCamera\.setOrientation\(plan\.orientation, plan\.desiredRotation\)/);
   const mod = readFileSync(new URL('../native/modules/loud-camera/index.js', import.meta.url), 'utf8');
   assert.match(mod, /export function setOrientation\(orientation, desiredRotation\)/);
+});
+
+// ── the four mounts (15 Oct: landscape with the top to the right came out upside down) ──
+const GRAVITY = {
+  'portrait': { x: 0.58, y: 9.757, z: 0.716 },
+  'portrait-down': { x: -0.58, y: -9.757, z: 0.716 },
+  'landscape-left': { x: 9.757, y: 0.58, z: 0.716 },
+  'landscape-right': { x: -9.757, y: -0.58, z: 0.716 },
+};
+
+test('the four mounts, both orientations, G35 sensor 90: the rotation that makes the picture upright, from the gravity reading', () => {
+  const table = { 'portrait': 90, 'portrait-down': 270, 'landscape-left': 0, 'landscape-right': 180 };
+  for (const [physical, want] of Object.entries(table)) {
+    const reading = physicalOrientation(GRAVITY[physical]);
+    assert.equal(reading, physical, `gravity for ${physical} reads back as ${reading}`);
+    const o = physical.startsWith('portrait') ? 'portrait' : 'landscape';
+    const plan = orientationPlan({ orientation: o, sensorOrientation: 90, physical: reading });
+    assert.equal(plan.desiredRotation, want, `${o} on ${physical}`);
+    assert.equal(plan.mount.known, true);
+    assert.equal(plan.mount.inverted, want === 270 || want === 180, `${physical} is inverted for the base only when a half turn is needed`);
+    assert.equal(plan.width, o === 'portrait' ? 1080 : 1920); assert.equal(plan.height, o === 'portrait' ? 1920 : 1080);
+  }
+});
+
+test('the four mounts with the other sensor mounting (270): each is still the half turn of its partner', () => {
+  const table = { 'portrait': 270, 'portrait-down': 90, 'landscape-left': 180, 'landscape-right': 0 };
+  for (const [physical, want] of Object.entries(table)) {
+    const o = physical.startsWith('portrait') ? 'portrait' : 'landscape';
+    assert.equal(orientationPlan({ orientation: o, sensorOrientation: 270, physical }).desiredRotation, want, `${o} on ${physical}`);
+  }
+});
+
+test('the measured case: landscape-right at the 270 built-in rotation needs a correction of 270, and the picture is then upright', () => {
+  const plan = orientationPlan({ orientation: 'landscape', sensorOrientation: 90, physical: 'landscape-right' });
+  assert.equal(plan.desiredRotation, 180);
+  assert.equal(textureCorrection(plan.desiredRotation, 270), 270);
+  assert.equal((270 + textureCorrection(plan.desiredRotation, 270)) % 360, 180);
+  // the old plan (no mount) gave 0 there, and 0 is the upside-down picture for that mount
+  assert.equal(orientationPlan({ orientation: 'landscape', sensorOrientation: 90 }).desiredRotation, 0);
+});
+
+test('a mismatch or a flat phone keeps the base plan and says it has no mount decision', () => {
+  assert.deepEqual(mountOf('landscape', 'portrait'), { physical: 'portrait', known: false, inverted: false });
+  assert.deepEqual(mountOf('portrait', 'landscape-right'), { physical: 'landscape-right', known: false, inverted: false });
+  assert.deepEqual(mountOf('landscape', 'flat'), { physical: 'flat', known: false, inverted: false });
+  assert.deepEqual(mountOf('portrait', undefined), { physical: 'unknown', known: false, inverted: false });
+  assert.equal(orientationPlan({ orientation: 'landscape', sensorOrientation: 90, physical: 'flat' }).desiredRotation, 0);
+  assert.equal(orientationPlan({ orientation: 'portrait', sensorOrientation: 90, physical: 'landscape-left' }).desiredRotation, 90);
+});
+
+test('setup-time mount watch: a mount change applies after two equal readings, a flat reading never does, and the lock freezes it', () => {
+  // start upright, the phone is turned round to inverted
+  let st = { planInverted: false, pending: null };
+  const r1 = nextMountPlan({ planInverted: st.planInverted, reading: mountOf('portrait', 'portrait-down'), pending: st.pending });
+  assert.equal(r1.apply, false, 'one reading is not enough');
+  assert.equal(r1.pending, true);
+  const r2 = nextMountPlan({ planInverted: r1.inverted, reading: mountOf('portrait', 'portrait-down'), pending: r1.pending });
+  assert.equal(r2.apply, true, 'two equal readings apply it');
+  assert.equal(r2.inverted, true);
+  // flat readings and unknown readings never change the plan
+  assert.equal(nextMountPlan({ planInverted: true, reading: mountOf('portrait', 'flat'), pending: null }).apply, false);
+  assert.equal(nextMountPlan({ planInverted: true, reading: mountOf('portrait', 'unknown'), pending: null }).apply, false);
+  // once locked (stage or move), nothing changes whatever the reading says
+  assert.equal(nextMountPlan({ planInverted: false, reading: mountOf('portrait', 'portrait-down'), pending: true, locked: true }).apply, false);
+  // a reading that goes back to the applied mount clears the pending change
+  assert.equal(nextMountPlan({ planInverted: false, reading: mountOf('portrait', 'portrait'), pending: true }).pending, null);
 });

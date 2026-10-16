@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { WebControllerSession, browserDeviceId, browserProfile, absoluteUploadUrl, EVENTS, ROLE } from '../lib/spike/controllerSession.js';
-import { TOPIC, decode, encode, ack } from '../native/src/spike/commands.js';
+import { TOPIC, decode, encode, ack, mountStatus } from '../native/src/spike/commands.js';
 import { clockUpstreamBase, fetchUpstreamClock } from '../lib/spike/clockUpstream.js';
 
 const UA_MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -147,7 +147,7 @@ test('zoom and pan go out as the phone protocol with server-clock timestamps; ac
 
   const pan = await s.pan('left');
   const pw = decode(published[1].bytes);
-  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 0.08); assert.equal(pw.window, 0.84); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
+  assert.equal(pw.type, 'pan'); assert.equal(pw.direction, 'left'); assert.equal(pw.degree, 0.12); assert.equal(pw.window, 0.84); assert.equal(pw.durationMs, 3000); assert.equal(pw.id, pan.id);
   const fast = await s.zoom(1, 400, 'ease-out');
   assert.equal(decode(published[2].bytes).easing, 'ease-out'); assert.equal(fast.durationMs, 400);
 
@@ -168,8 +168,9 @@ test('the soak alternates zoom in, pan, zoom out, pan like the phone and stops a
   assert.ok(soakTimer);
   for (let i = 0; i < 3; i += 1) { advance(30000); soakTimer.fn(); }
   await Promise.resolve();
+  // pans only at 2x (docs/DECISIONS.md 2026-10-16): zoom in, pan left, pan right, zoom out
   const types = published.map((p) => decode(p.bytes)).map((m) => (m.type === 'zoom' ? `zoom${m.target}` : `pan-${m.direction}`));
-  assert.deepEqual(types, ['zoom2', 'pan-left', 'zoom1', 'pan-up']);
+  assert.deepEqual(types, ['zoom2', 'pan-left', 'pan-right', 'zoom1']);
   advance(21 * 60000); soakTimer.fn();
   assert.equal(s.soak, null);
   assert.equal(published.length, 4);
@@ -304,5 +305,22 @@ test('orientation: sent to the camera and taken from its ack (with the mount che
   // connection-state changes are kept for the report and the diagnosis
   room.emit(EVENTS.Reconnecting); room.emit(EVENTS.Reconnected);
   assert.deepEqual(s.report().link.map((l) => l.state), ['reconnecting', 'reconnected']);
+  await s.stop();
+});
+
+test('the controller shows the camera mount warning and clears it when the camera reports the mount resolved', async () => {
+  const events = [];
+  const { s, room } = makeSession({ onEvent: (k, p) => events.push([k, p]) });
+  await s.connect();
+  const warn = mountStatus({ chosen: 'landscape', physical: 'portrait', mismatch: true, warning: 'mounted portrait but the show is landscape', fix: 'turn the phone on its side', desiredRotation: 0 });
+  room.emit(EVENTS.DataReceived, encode(warn), { identity: 'spike-camera-1' }, undefined, TOPIC);
+  assert.equal(s.mount.mismatch, true); assert.match(s.mount.warning, /mounted portrait/);
+  assert.equal(events.filter(([k]) => k === 'mount').length, 1);
+  // the phone turned to the right mount: the next report says so, and the warning goes with it
+  const ok = mountStatus({ chosen: 'landscape', physical: 'landscape-left', mismatch: false, warning: null, fix: null, desiredRotation: 0 });
+  room.emit(EVENTS.DataReceived, encode(ok), { identity: 'spike-camera-1' }, undefined, TOPIC);
+  assert.equal(s.mount.mismatch, false); assert.equal(s.mount.warning, null);
+  // a mount message never counts as an ack or a latency
+  assert.equal(s.latencies.length, 0);
   await s.stop();
 });

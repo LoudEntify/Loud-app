@@ -54,7 +54,17 @@ export const SHOT_HOME = Object.freeze({ zoom: 1, cx: 0.5, cy: 0.5 });
  * has room to move (0.84 = 1.19x, within the digital cap on phones that
  * have to crop for it).
  */
-export const PAN_DEFAULTS = { degree: 0.08, window: 0.84, durationMs: 3000, easing: 'ease-in-out' };
+export const PAN_DEFAULTS = { degree: 0.12, window: 0.84, durationMs: 3000, easing: 'ease-in-out' };
+/**
+ * Pans are a technique for zoomed framings (docs/DECISIONS.md 2026-10-16):
+ * below this zoom the 1.2x digital limit leaves a pan too small to see, so a
+ * pan at a wider shot is refused with that reason, never made into a near-
+ * invisible move. 1.5x is the least zoom at which the default pan is clearly
+ * visible on a phone.
+ */
+export const MIN_PAN_ZOOM = 1.5;
+/** The direction a pan names is where the PICTURE moves on screen; the framing (the window) moves the other way. */
+const FRAMING_MOVE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const PAN_DIRECTIONS = ['up', 'down', 'left', 'right'];
 const r4 = (v) => +v.toFixed(4);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -201,13 +211,14 @@ export function zoomPlan({ profile, caps = capsFor(profile), shot = SHOT_HOME, t
 }
 
 /**
- * A pan: the shot's window moves `degree` of the visible frame in
- * `direction` over `durationMs`. A shot wider than `window` (1x, say)
- * first tightens to `window` so there is room to move; the tightening
- * is part of the same eased move, not a snap before it. Refused (no
- * steps, `refused: true`, the reason in `reason`) when the window would
- * hit a frame edge or this frame source cannot realise the end framing;
- * `travelRequested` says what was asked, `room` what was there.
+ * A pan: the PICTURE moves `degree` of the visible frame in `direction` over
+ * `durationMs` ('left' moves the picture to the left on screen, so the framing
+ * moves right: the same on every orientation and mount, because the window is
+ * judged in the display frame, which the sensor region is mapped from). Only
+ * on a zoomed shot (MIN_PAN_ZOOM and above): a pan at a wider shot is refused
+ * with a reason. Refused (no steps, `refused: true`, the reason in `reason`)
+ * when the framing would hit a frame edge or this frame source cannot realise
+ * the end framing; `travelRequested` says what was asked, `room` what was there.
  */
 export function panPlan({
   direction, degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing,
@@ -215,21 +226,29 @@ export function panPlan({
 }) {
   if (!PAN_DIRECTIONS.includes(direction)) throw new Error(`unknown pan direction ${direction}`);
   if (!caps) throw new Error('panPlan needs caps (zoomPlan.capsFor)');
+  if (shot.zoom < MIN_PAN_ZOOM - 1e-6) {
+    return {
+      path: 'pan', from: shot, window: null, zoom: shot.zoom, tightened: false, travelRequested: 0, room: null, direction,
+      refused: true, reason: `panning is for zoomed framings: zoom to ${MIN_PAN_ZOOM}x or more first (at ${shot.zoom}x a pan is too small to see)`,
+      to: null, travel: 0, mode: null, steps: [], shots: [],
+    };
+  }
   const w0 = clamp(window, 0.2, 0.98);
   const zoom = r4(Math.max(shot.zoom, 1 / w0));
   const tightened = zoom > shot.zoom + 1e-6;
   const start = { zoom, cx: shot.cx, cy: shot.cy };   // the framing the pan measures from: the shot, tightened if it had to be
   const w = r4(1 / zoom);
   const travel = r4(clamp(degree, 0, 1) * w);
-  const room = shotRoom(start, direction);
+  const framing = FRAMING_MOVE[direction];           // the way the framing (the window) moves
+  const room = shotRoom(start, framing);
   const to = {
     zoom,
-    cx: r4(start.cx + (direction === 'right' ? travel : direction === 'left' ? -travel : 0)),
-    cy: r4(start.cy + (direction === 'down' ? travel : direction === 'up' ? -travel : 0)),
+    cx: r4(start.cx + (framing === 'right' ? travel : framing === 'left' ? -travel : 0)),
+    cy: r4(start.cy + (framing === 'down' ? travel : framing === 'up' ? -travel : 0)),
   };
   const base = { path: tightened ? 'tighten-pan' : 'pan', from: shot, window: w, zoom, tightened, travelRequested: travel, room, direction };
   if (travel > room + 1e-4) {
-    return { ...base, refused: true, reason: `at frame edge: ${direction} has ${Math.max(0, room)} of the frame left and this pan needs ${travel}`, to: null, travel: 0, mode: null, steps: [], shots: [] };
+    return { ...base, refused: true, reason: `at frame edge: the picture cannot move ${direction} any further (${Math.max(0, room)} of the frame left, this pan needs ${travel})`, to: null, travel: 0, mode: null, steps: [], shots: [] };
   }
   const why = unrealisable(to, caps);
   if (why) return { ...base, refused: true, reason: why, to: null, travel: 0, mode: null, steps: [], shots: [] };

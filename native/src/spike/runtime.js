@@ -17,9 +17,12 @@ import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
-import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId } from './commands';
+import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
-import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan } from './orientation';
+import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
+
+/** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
+export const MOUNT_WATCH_MS = 2000;
 import { capsFor, zoomPlan, panPlan, tightnessFor, PAN_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
@@ -100,13 +103,15 @@ export class SpikeSession {
     // is what the capturer answered (rotation, sensor orientation, size);
     // `mountCheck` the one gravity reading taken at setup.
     this.orientation = DEFAULT_ORIENTATION; this.orientationInfo = null; this.mountCheck = null; this.orientationLog = [];
+    // The mount decision: the plan's 180 choice, the reading waiting for a second look, the lock (first stage or move), the plan and the last warning key.
+    this.planInverted = false; this.pendingInverted = null; this.locked = false; this.plan = null; this.mountKey = null;
     // Slow-command diagnostics: LiveKit connection-state changes, JS-thread
     // stalls (camera), clock steps, and every command whose leg out was slow.
     this.linkEvents = []; this.stalls = []; this.clockSteps = []; this.slowCommands = []; this.lastTick = 0;
   }
 
   /** Live = the orientation is locked: a stage is running, a move is in progress, or (controller) the soak is on. */
-  live() { return Boolean(this.stage || this.moving || this.soak); }
+  live() { return Boolean(this.stage || this.moving || this.soak || this.locked); }
 
   /** Remember a LiveKit connection-state change (both roles), for the slow-command diagnosis and the report. */
   noteLink(state, detail = null) {
@@ -183,10 +188,10 @@ export class SpikeSession {
     this.track = track;
     this.onEvent('published', { trackSid: pub.trackSid });
     this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
-    // The default orientation's frame plan goes to the capturer first, then the setup-time mount check (one gravity reading, never repeated during the show).
-    this.applyOrientation(this.orientation)
-      .catch((e) => this.onEvent('error', `orientation plan: ${String(e?.message || e)}`))
-      .finally(() => this.checkMount().catch((e) => this.onEvent('error', `mount check: ${String(e?.message || e)}`)));
+    // Setup: one gravity reading picks the mount, the plan for it goes to the capturer, and until the lock (the first stage or move) the plan follows the mount.
+    this.setupMount().catch((e) => this.onEvent('error', `orientation setup: ${String(e?.message || e)}`));
+    this.mountTimer = setInterval(() => this.watchMount().catch(() => {}), MOUNT_WATCH_MS);
+    this.timers.push(this.mountTimer);
     let announced = null;
     this.stateSub = LoudCamera.addStateListener((s) => {
       this.lastState = s;
@@ -211,16 +216,65 @@ export class SpikeSession {
     this.onEvent('clock', o);
   }
 
-  // ── orientation (docs/DECISIONS.md 2026-10-14, src/spike/orientation.js) ──
-  /** One gravity reading, classified against the chosen orientation; the warning (if any) goes to the screen and into the report. Setup only. */
+  // ── orientation (docs/DECISIONS.md 2026-10-14 and 2026-10-15, src/spike/orientation.js) ──
+  /**
+   * One gravity reading, classified against the chosen orientation and the
+   * mount. The warning (if any) goes to the screen, the report, and the
+   * controller, and a change of it is sent at once: a resolved mount clears it.
+   */
   async checkMount() {
     let g = null;
     try { g = await LoudCamera.gravityCheck(); } catch (e) { g = { available: false, reason: String(e?.message || e) }; }
     const physical = g?.available ? physicalOrientation(g) : 'unknown';
     const mm = orientationMismatch(this.orientation, physical);
-    this.mountCheck = { ...mm, gravity: g, atMs: Date.now(), serverMs: this.serverNow() };
-    this.onEvent('mount', this.mountCheck);
+    const mount = mountOf(this.orientation, physical);
+    this.mountCheck = { ...mm, mount, known: mount.known, inverted: mount.inverted, gravity: g, atMs: Date.now(), serverMs: this.serverNow() };
+    const key = `${physical}|${mm.mismatch}|${mm.warning}|${this.orientation}`;
+    if (key !== this.mountKey) {
+      this.mountKey = key;
+      this.onEvent('mount', this.mountCheck);
+      this.publishMount().catch(() => {});
+    }
     return this.mountCheck;
+  }
+  /** Camera → controller: the current mount and warning (mountStatus), so the controller's warning follows the phone. */
+  async publishMount() {
+    const m = this.mountCheck;
+    if (!m || !this.room || this.role !== 'camera') return;
+    await this.room.localParticipant.publishData(encode(mountStatus({ chosen: this.orientation, physical: m.physical, mismatch: m.mismatch, warning: m.warning, fix: m.fix, desiredRotation: this.plan?.desiredRotation ?? null, atMs: Date.now() })), { reliable: true, topic: TOPIC });
+  }
+  /** Setup: one reading, then the plan for that mount. */
+  async setupMount() {
+    const m = await this.checkMount();
+    await this.applyOrientation(this.orientation, m.physical);
+  }
+  /** Before the lock, the plan follows the mount: a reading that differs from the applied mount must agree twice (nextMountPlan) before it is applied. */
+  async watchMount() {
+    if (this.locked || this.role !== 'camera') return;
+    const m = await this.checkMount();
+    if (this.locked || this.live()) return;
+    const step = nextMountPlan({ planInverted: this.planInverted, reading: m, pending: this.pendingInverted, locked: this.locked });
+    this.pendingInverted = step.pending;
+    if (step.apply) { this.planInverted = step.inverted; await this.applyOrientation(this.orientation, m.physical); }
+  }
+  /**
+   * Lock time: the first stage or move. One last reading, the plan for that
+   * mount, then the mount is frozen for the session. A move already running
+   * freezes without a reading (it must not change the picture underneath).
+   */
+  async lockMount() {
+    if (this.locked) return;
+    if (this.role === 'camera' && !this.moving) {
+      const m = await this.checkMount();
+      if (m.known && m.inverted !== this.planInverted) { this.planInverted = m.inverted; await this.applyOrientation(this.orientation, m.physical); }
+    }
+    this.freezeMount();
+  }
+  freezeMount() {
+    if (this.locked) return;
+    this.locked = true;
+    clearInterval(this.mountTimer);
+    this.onEvent('locked', { orientation: this.orientation, inverted: this.planInverted, rotation: this.plan?.desiredRotation ?? null });
   }
   /**
    * Controller: choose the show's orientation. Locked once the soak or a
@@ -243,27 +297,32 @@ export class SpikeSession {
     return r;
   }
   /**
-   * Hand the camera the frame plan for `o` (orientation.js orientationPlan):
-   * the content rotation and the frame size come from the plan, the camera
-   * applies exactly those numbers. The sensor orientation is the camera's own.
+   * Hand the camera the frame plan for `o` and the mount it was made for
+   * (orientation.js orientationPlan): the content rotation and the frame size
+   * come from the plan, the camera applies exactly those numbers. The sensor
+   * orientation is the camera's own.
    */
-  async applyOrientation(o) {
+  async applyOrientation(o, physical = this.mountCheck?.physical ?? 'unknown') {
     const st = LoudCamera.getState() || this.lastState || {};
-    const plan = orientationPlan({ orientation: o, sensorOrientation: st.sensorOrientation ?? 90 });
+    const plan = orientationPlan({ orientation: o, sensorOrientation: st.sensorOrientation ?? 90, physical });
+    if (plan.mount.known) this.planInverted = plan.mount.inverted;
+    this.plan = plan;
     const info = await LoudCamera.setOrientation(plan.orientation, plan.desiredRotation);
     return { plan, info };
   }
-  /** Camera: apply the orientation unless live, then the one gravity reading for the mount warning. */
+  /** Camera: apply the orientation unless live. The mount is read once for the new choice, and the plan is made for that mount. */
   async runOrientation(m) {
     const want = normaliseOrientation(m.orientation);
     if (this.live()) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: `orientation is locked while live (${this.stage ? `stage ${this.stage} is running` : 'a move is running'}): set it before the show` };
-    const { plan, info } = await this.applyOrientation(want);
-    if (info?.refused) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: info.reason };
-    this.orientation = want; this.orientationInfo = { ...info, plan };
+    const previous = this.orientation;
+    this.orientation = want;                       // the mismatch and the mount are judged against the new choice
     const mount = await this.checkMount();
-    this.orientationLog.push({ orientation: want, atMs: Date.now(), serverMs: this.serverNow(), rotation: info?.rotation ?? null, physical: mount.physical, mismatch: mount.mismatch });
+    const { plan, info } = await this.applyOrientation(want, mount.physical);
+    if (info?.refused) { this.orientation = previous; return { kind: 'orientation', requested: want, achieved: previous, supported: true, refused: true, reason: info.reason }; }
+    this.orientationInfo = { ...info, plan };
+    this.orientationLog.push({ orientation: want, atMs: Date.now(), serverMs: this.serverNow(), rotation: plan.desiredRotation, physical: mount.physical, mismatch: mount.mismatch, inverted: plan.mount.inverted });
     this.onEvent('orientation', { ok: true, orientation: want, ...info, ...mount });
-    return { kind: 'orientation', requested: want, achieved: want, supported: true, refused: false, reason: mount.warning, rotation: plan.desiredRotation, sensorOrientation: plan.sensorOrientation, width: plan.width, height: plan.height, correction: info?.correction ?? null, builtInRotation: info?.builtInRotation ?? null, physical: mount.physical, mismatch: mount.mismatch, warning: mount.warning, fix: mount.fix };
+    return { kind: 'orientation', requested: want, achieved: want, supported: true, refused: false, reason: mount.warning, rotation: plan.desiredRotation, sensorOrientation: plan.sensorOrientation, width: plan.width, height: plan.height, inverted: plan.mount.inverted, correction: info?.correction ?? null, builtInRotation: info?.builtInRotation ?? null, physical: mount.physical, mismatch: mount.mismatch, warning: mount.warning, fix: mount.fix };
   }
 
   sampleCost() {
@@ -362,8 +421,9 @@ export class SpikeSession {
     const started = Date.now(); let i = 0;
     const tick = () => {
       if (Date.now() - started > minutes * 60000) { this.stopSoak(); this.onEvent('soak', { done: true, moves: i }); return; }
+      // Pans only on the zoomed framing (zoomPlan MIN_PAN_ZOOM): zoom in, pan left, pan right, zoom out.
       const k = i % 4; i += 1;
-      const p = k === 0 ? this.zoom(2, 2000) : k === 1 ? this.pan(i % 8 < 4 ? 'left' : 'right', { durationMs: 3000 }) : k === 2 ? this.zoom(1, 2000) : this.pan('up', { degree: 0.04, durationMs: 2500 });
+      const p = k === 0 ? this.zoom(2, 2000) : k === 1 ? this.pan('left', { durationMs: 3000 }) : k === 2 ? this.pan('right', { durationMs: 3000 }) : this.zoom(1, 2000);
       p.catch((e) => this.onEvent('error', String(e?.message || e)));
       this.onEvent('soak', { done: false, moves: i, minutes: +((Date.now() - started) / 60000).toFixed(1) });
     };
@@ -411,7 +471,7 @@ export class SpikeSession {
     const receivedLocal = Date.now();
     const receivedAt = this.serverNow() ?? receivedLocal;
     this.onEvent('command', m);
-    if (m.type === 'stage') this.setStage(m.stage);
+    if (m.type === 'stage') { await this.lockMount(); this.setStage(m.stage); }
     if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, control: m.control ?? null, value: m.value ?? null, phase: m.phase ?? null, targets: m.targets ?? null, stage_requested: m.stage ?? null, orientation_requested: m.orientation ?? null, source: m.source ?? null, received_from: 'data-channel', received_local_ms: receivedLocal, offset_at_receipt_ms: this.offset?.offsetMs ?? null });
     const startedAt = this.serverNow() ?? Date.now();
     let result;
@@ -471,6 +531,7 @@ export class SpikeSession {
   }
 
   async execute(m) {
+    this.freezeMount();
     const receivedLocal = Date.now();
     const receivedAt = this.serverNow() ?? receivedLocal;
     this.onEvent('command', m);

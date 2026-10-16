@@ -5,13 +5,14 @@
 // full sensor (the 15 Oct report: a pan applied the full sensor after the first move).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { regionFor, windowOfRect, insideActive, toSensorRect, bandOf } from '../native/src/spike/region.js';
+import { regionFor, windowOfRect, insideActive, toSensorRect, bandOf, displayWindowOf } from '../native/src/spike/region.js';
+import { shotWindow as sw } from '../native/src/spike/zoomPlan.js';
 import { capsFor, panPlan, shotWindow, zoomPlan, SHOT_HOME, PAN_DEFAULTS } from '../native/src/spike/zoomPlan.js';
 
 const ACTIVE = { left: 0, top: 0, width: 4080, height: 3072 };
 const profile = { primaryCameraId: '0', lenses: [{ id: '0', facing: 'back', sensor: { activeArray: ACTIVE, maxDigitalZoom: 4 } }], deviceZoom: { available: true, min: 1, max: 4 }, qualityCeiling: { zoom: 2.1 } };
 const capsFor4 = (rotation) => capsFor(profile, { frameSource: 'hardware', panPath: 'region', deviceZoomMax: 4, cameraId: '0', rotation });
-const EDGE = /at frame edge|cannot go past|crop of the zoomed frame|past the 1\.2x cap/;
+const EDGE = /at frame edge|cannot go past|crop of the zoomed frame|past the 1\.2x cap|zoomed framings/;
 const near = (a, b, tol = 0.002) => Math.abs(a - b) <= tol;
 
 test('region: the band is the 16:9 centre of the 4:3 sensor, and a centred window is the centred band', () => {
@@ -62,8 +63,9 @@ test('region: random framings never leave the active array', () => {
 
 // The sequence: every direction, reversals included, at 1x then 2x, in both orientations.
 const SEQUENCE = ['right', 'down', 'left', 'up', 'right', 'right', 'left', 'up', 'down', 'down', 'left', 'right', 'up'];
+// The 1x case below is refused by rule (zoomed framings only); 2x pans move the picture.
 for (const [name, rotation] of [['portrait', 90], ['landscape', 0]]) {
-  for (const startZoom of [1, 2]) {
+  for (const startZoom of [2]) {
     test(`pans in ${name} from ${startZoom}x: each pan moves the applied region, or is refused with an edge reason`, () => {
       const caps = capsFor4(rotation);
       let shot = { zoom: startZoom, cx: 0.5, cy: 0.5 };
@@ -91,7 +93,7 @@ for (const [name, rotation] of [['portrait', 90], ['landscape', 0]]) {
           `${name} ${startZoom}x ${direction}: asked ${JSON.stringify(want)} applied ${JSON.stringify(got)}`);
         prev = last; shot = plan.to; moved += 1;
       }
-      assert.ok(moved >= 6, `${name} ${startZoom}x: ${moved} pans moved, ${refused} refused`);
+      assert.ok(moved >= 4, `${name} ${startZoom}x: ${moved} pans moved, ${refused} refused`);
     });
   }
 }
@@ -119,3 +121,36 @@ test('the step regions are what the native side applies: they come from the plan
   const lens = capsFor(profile, { frameSource: 'gpu' });
   assert.ok(!lens.region, 'the gpu source names no region: the crop does the pan there');
 });
+
+// ── direction: "pan left" moves the picture left on screen, through the content rotation, for every mount (15 Oct: the first press looked like a zoom) ──
+test('displayWindowOf inverts toSensorRect for all four content rotations', () => {
+  const win = { x: 0.21, y: 0.33, w: 0.5, h: 0.5 };
+  for (const rot of [0, 90, 180, 270]) {
+    const back = displayWindowOf(toSensorRect(rot, win), rot);
+    for (const k of ['x', 'y', 'w', 'h']) assert.ok(Math.abs(back[k] - win[k]) < 1e-9, `rotation ${rot} ${k}: ${back[k]} vs ${win[k]}`);
+  }
+});
+
+const MOUNTS = { 0: 'landscape-left', 90: 'portrait', 180: 'landscape-right', 270: 'portrait-down' };
+for (const [rotation, mount] of Object.entries(MOUNTS)) {
+  test(`pans on ${mount} (content rotation ${rotation}): every direction moves the picture that way on screen, and the applied region shows the planned window`, () => {
+    const caps = capsFor4(Number(rotation));
+    const shot = { zoom: 2, cx: 0.5, cy: 0.5 };
+    const before = sw(shot);
+    const cases = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };   // the picture moves (dx, dy) in the display frame, y down
+    for (const [direction, [sx, sy]] of Object.entries(cases)) {
+      const p = panPlan({ direction, shot, caps, degree: 0.08 });
+      assert.equal(p.refused, false, `${mount} ${direction}: ${p.reason}`);
+      const last = p.steps[p.steps.length - 1].region;
+      const shownSensor = windowOfRect(last, ACTIVE);
+      const shown = displayWindowOf(shownSensor, Number(rotation));           // the window the applied region shows, in the display frame
+      const want = sw(p.to);
+      for (const k of ['x', 'y', 'w', 'h']) assert.ok(Math.abs(shown[k] - want[k]) < 0.002, `${mount} ${direction} ${k}: shows ${shown[k]} planned ${want[k]}`);
+      // the picture moves the named way: the window's centre moves the opposite way
+      const dcx = (want.x + want.w / 2) - (before.x + before.w / 2);
+      const dcy = (want.y + want.h / 2) - (before.y + before.h / 2);
+      assert.ok(Math.sign(dcx) === -sx && (sx === 0 ? Math.abs(dcx) < 1e-9 : true), `${mount} ${direction}: window dx ${dcx}`);
+      assert.ok(Math.sign(dcy) === -sy && (sy === 0 ? Math.abs(dcy) < 1e-9 : true), `${mount} ${direction}: window dy ${dcy}`);
+    }
+  });
+}

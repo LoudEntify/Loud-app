@@ -184,7 +184,8 @@ export default function ZoomSpike() {
         else if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
         else if (kind === 'result') push(PRO_TYPES.includes(p.command.type) ? `did ${p.command.type} ${p.command.control ?? p.command.phase ?? p.command.stage ?? p.command.orientation ?? ''}: ${p.result.supported === false ? 'unsupported' : p.result.refused ? `REFUSED (${p.result.reason})` : `achieved ${p.result.achieved ?? p.result.targets?.iso ?? '–'}`}${p.result.framesToApply != null ? ` after ${p.result.framesToApply} frames` : ''}${p.result.reason && !p.result.refused ? ` (${p.result.reason})` : ''}` : resultLine(p));
         else if (kind === 'orientation') { if (p.ok !== false) setOrientation(p.orientation); push(p.ok === false ? `orientation ${p.requested} REFUSED: ${p.reason}` : `orientation ${p.orientation}${p.rotation != null ? ` (rotation ${p.rotation}°, ${p.width}×${p.height})` : ''}${p.camera?.mismatch ? ` · MOUNT WARNING: ${p.camera.warning}. Fix: ${p.camera.fix}` : ''}`); }
-        else if (kind === 'mount') { setMount(p); push(p.warning ? `MOUNT WARNING: ${p.warning}. Fix: ${p.fix}` : `mount check: phone held ${p.physical}, show ${p.chosen}: agree`); }
+        else if (kind === 'mount') { setMount(p.mismatch ? p : null); push(p.mismatch ? `MOUNT WARNING: ${p.warning}. Fix: ${p.fix}` : `mount check: phone held ${p.physical}, show ${p.chosen}: agree`); }
+        else if (kind === 'locked') push(`orientation locked for the show (${p.orientation}${p.inverted ? ', inverted' : ''})`);
         else if (kind === 'link') push(`link ${p.state}${p.detail ? ` (${p.detail})` : ''}`);
         else if (kind === 'stall') push(`JS thread stalled ${p.lagMs} ms`);
         else if (kind === 'clockStep') push(`CLOCK STEP ${p.stepMs} ms between syncs`);

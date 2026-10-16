@@ -47,16 +47,55 @@ export function uprightRotation(orientation, sensorOrientation = 90) {
 }
 
 /**
- * Everything the camera is told for one orientation: the content rotation,
- * and the frame size that rotation produces (portrait 1080x1920, landscape
- * 1920x1080). The swap of width and height follows the rotation, so a
- * picture is never published at the wrong shape.
+ * Which of the two mounts of the chosen orientation the phone is in, from one
+ * physical reading (physicalOrientation). Each orientation has two mounts a
+ * half turn apart: portrait upright (the base) or upside down, landscape with
+ * the top to the left (the base) or to the right. The base is the one the
+ * sensor rotation gives; the other is the base plus 180. A flat phone, an
+ * unreadable reading or a phone in the other orientation (a mismatch, which
+ * is sideways either way) has no 180 decision: `known` is false and the
+ * plan keeps the base.
+ *
+ * Read on the G35 on 15 Oct: landscape with the top to the right (physical
+ * landscape-right) came out upside down at the base, so landscape-right is the
+ * inverted landscape mount.
  */
-export function orientationPlan({ orientation, sensorOrientation = 90 } = {}) {
+export function mountOf(orientation, physical) {
   const o = normaliseOrientation(orientation);
-  const desiredRotation = uprightRotation(o, sensorOrientation);
+  const p = physical || 'unknown';
+  const format = physicalFormat(p);
+  if (!format || format !== o) return { physical: p, known: false, inverted: false };
+  const inverted = o === 'portrait' ? p === 'portrait-down' : p === 'landscape-right';
+  return { physical: p, known: true, inverted };
+}
+
+/**
+ * Everything the camera is told for one orientation: the content rotation
+ * (the sensor rotation, half a turn more for the inverted mount), the mount
+ * it was chosen for, and the frame size that rotation produces (portrait
+ * 1080x1920, landscape 1920x1080). The swap of width and height follows the
+ * rotation, so a picture is never published at the wrong shape.
+ */
+export function orientationPlan({ orientation, sensorOrientation = 90, physical } = {}) {
+  const o = normaliseOrientation(orientation);
+  const mount = mountOf(o, physical);
+  const desiredRotation = (uprightRotation(o, sensorOrientation) + (mount.inverted ? 180 : 0)) % 360;
   const { width, height } = frameSizeFor(o);
-  return { orientation: o, sensorOrientation: quarterTurn(sensorOrientation), desiredRotation, width, height };
+  return { orientation: o, sensorOrientation: quarterTurn(sensorOrientation), mount, desiredRotation, width, height };
+}
+
+/**
+ * The setup-time decision about the plan, from each new reading. Before the
+ * lock, the plan follows the mount: a change of mount (inverted or not) is
+ * applied after two equal readings in a row, so one jolt does not flip the
+ * picture; a flat or unknown reading never changes it. After the lock
+ * (`locked`) nothing changes. Returns { apply, pending, inverted }.
+ */
+export function nextMountPlan({ planInverted, reading, pending = null, locked = false }) {
+  if (locked || !reading || !reading.known) return { apply: false, pending: null, inverted: planInverted };
+  if (reading.inverted === planInverted) return { apply: false, pending: null, inverted: planInverted };
+  if (pending !== reading.inverted) return { apply: false, pending: reading.inverted, inverted: planInverted };
+  return { apply: true, pending: null, inverted: reading.inverted };
 }
 
 /**

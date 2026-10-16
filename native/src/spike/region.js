@@ -75,3 +75,14 @@ export function insideActive(rect, active) {
   const [l, t, r, b] = rect;
   return l >= active.left && t >= active.top && r <= active.left + active.width && b <= active.top + active.height && r > l && b > t;
 }
+
+/** The inverse of toSensorRect: a sensor-frame window back into the display frame (for tests and diagnostics). */
+export function displayWindowOf(sensor, rotation) {
+  const { x, y, w, h } = sensor;
+  switch (rotation) {
+    case 90: return { x: 1 - y - h, y: x, w: h, h: w };
+    case 180: return { x: 1 - x - w, y: 1 - y - h, w, h };
+    case 270: return { x: y, y: 1 - x - w, w: h, h: w };
+    default: return { x, y, w, h };
+  }
+}

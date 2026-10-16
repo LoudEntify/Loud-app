@@ -57,6 +57,16 @@ export function orientationCommand({ orientation, decidedAt, source = 'main-devi
   return { v: PROTOCOL_VERSION, type: 'orientation', id: mintId(), decisionId, source, orientation, decidedAt };
 }
 
+/**
+ * Camera → controller, on every change of the mount (never per frame): the
+ * physical mount, whether it agrees with the show, the warning and its
+ * one-line fix. A resolved mount sends `mismatch: false` and clears the warning
+ * on the controller (docs/DECISIONS.md 2026-10-15).
+ */
+export function mountStatus({ chosen, physical, mismatch, warning = null, fix = null, desiredRotation = null, atMs = null }) {
+  return { v: PROTOCOL_VERSION, type: 'mount', id: mintId('mnt'), decisionId: mintId('dec'), chosen, physical, mismatch: Boolean(mismatch), warning, fix, desiredRotation, atMs };
+}
+
 /** The reply a camera sends once a move has settled (or been refused). */
 export function ack({ command, receivedAt, startedAt, completedAt, result, diag = null }) {
   return {

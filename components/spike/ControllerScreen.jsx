@@ -111,6 +111,8 @@ export default function ControllerScreen() {
   const [cameraProfile, setCameraProfile] = useState(null);
   const [stage, setStage] = useState(null);
   const [orientation, setOrientation] = useState('portrait');
+  // The camera's mount warning, as the camera last reported it: cleared when the mount resolves (docs/DECISIONS.md 2026-10-15).
+  const [mount, setMount] = useState(null);
   const sess = useRef(null);
   const video = useRef(null);
 
@@ -144,7 +146,9 @@ export default function ControllerScreen() {
       createRoom: () => new Room({ adaptiveStream: false, dynacast: false }),
       onEvent: (kind, p) => {
         if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
-        else if (kind === 'orientation') { if (p.ok) setOrientation(p.orientation); push(p.ok ? `orientation ${p.orientation} (camera rotation ${p.camera?.rotation}°, ${p.camera?.width}×${p.camera?.height}, mounted ${p.camera?.physical})${p.camera?.mismatch ? ` · MOUNT WARNING: ${p.camera.warning}. Fix: ${p.camera.fix}` : ''}` : `orientation ${p.requested} REFUSED: ${p.reason}`); }
+        else if (kind === 'orientation') { if (p.ok) setOrientation(p.orientation); if (p.camera && p.camera.physical) setMount({ physical: p.camera.physical, mismatch: Boolean(p.camera.mismatch), warning: p.camera.warning ?? null, fix: p.camera.fix ?? null }); push(p.ok ? `orientation ${p.orientation} (camera rotation ${p.camera?.rotation}°, ${p.camera?.width}×${p.camera?.height}, mounted ${p.camera?.physical}${p.camera?.inverted ? ', inverted' : ''})${p.camera?.mismatch ? ` · MOUNT WARNING: ${p.camera.warning}. Fix: ${p.camera.fix}` : ''}` : `orientation ${p.requested} REFUSED: ${p.reason}`); }
+        else if (kind === 'mount') { setMount(p.mismatch ? { physical: p.physical, mismatch: true, warning: p.warning, fix: p.fix } : { physical: p.physical, mismatch: false, warning: null, fix: null }); push(p.mismatch ? `MOUNT WARNING: ${p.warning}. Fix: ${p.fix}` : `mount agrees with the show (${p.physical})`); }
+        else if (kind === 'locked') push(`orientation locked for the show (${p.orientation}${p.inverted ? ', inverted' : ''})`);
         else if (kind === 'link') push(`link ${p.state}${p.detail ? ` (${p.detail})` : ''}`);
         else if (kind === 'clockStep') push(`CLOCK STEP ${p.stepMs} ms between syncs`);
         else if (kind === 'cameraProfile') { setCameraProfile(p); push(`camera pro capability received (${p.hardwareLevel ?? '?'} level)`); }
@@ -220,7 +224,7 @@ export default function ControllerScreen() {
         {lastAck && <span>last move cycle {lastAck.moveCycleMs} ms (includes the move) · command latency {lastAck.commandLatencyMs ?? '–'} ms · ack leg {lastAck.ackLegMs ?? '–'} ms (server clock)</span>}
         {lastAck?.ack.result?.shot && <span>camera shot: {lastAck.ack.result.shot.zoom}x at ({lastAck.ack.result.shot.cx}, {lastAck.ack.result.shot.cy}) · {lastAck.ack.result.frameSource}</span>}
         {soak && <span>soak running: move {soak.moves} at {soak.minutes} min</span>}
-        {lastAck?.ack.result?.mismatch && <span style={{ color: '#ff9f1c' }}>MOUNT: {lastAck.ack.result.warning}. Fix: {lastAck.ack.result.fix}</span>}
+        {mount?.mismatch && <span style={{ color: '#ff9f1c' }}>MOUNT: {mount.warning}. Fix: {mount.fix}</span>}
       </div>
 
       <div className="v-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
