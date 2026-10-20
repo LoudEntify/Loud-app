@@ -222,7 +222,20 @@ class LoudCameraXCapturer(
   // the texture by `builtInRotation` (measured once on the first texture frame; the preview
   // target is pinned, so it cannot change with the device), and `correction` is what is still
   // missing: builtIn + correction ≡ rotation (mod 360). The state reports every one of these.
+  //
+  // 20 Oct: the camera's texture transform is MIRRORED (its determinant is negative: a
+  // vertical flip, usual for camera textures), and a flip reverses both halves of that sum.
+  // The angle the matrix sends the x axis to reads as the opposite turn (a true 90 measures
+  // as 270), and a correction rotated into that matrix turns the picture the opposite way.
+  // So `builtInRotation` is the turn the picture actually shows (the measured angle, negated
+  // when mirrored; `builtInMeasured` keeps the raw reading), and the correction for a mirrored
+  // texture is builtIn − rotation, not rotation − builtIn. Measured on the Moto G35 (19 Oct):
+  // raw 270, mirrored, so the picture already turns 90: portrait needs 0 (180 under the old
+  // sum was the upside-down picture), landscape 90 (the old sum gave 90 too, which is why only
+  // portrait was wrong).
   @Volatile var builtInRotation: Int? = null
+  @Volatile var builtInMeasured: Int? = null
+  @Volatile var builtInMirrored = false
   // Region reassertion (15 Oct): the camera reported a region other than the one we asked for, for several results running: the request is sent again (counted, visible in the state).
   @Volatile var regionReasserts = 0
   private var reassertFrames = 0
@@ -458,13 +471,19 @@ class LoudCameraXCapturer(
     orientation = next
     rotation = desired
     if (frameSource == "hardware") pushRegion(null)
-    Log.i(TAG, "orientation $orientation: content rotation $rotation, built-in ${builtInRotation}, correction ${correctionNow()}")
+    Log.i(TAG, "orientation $orientation: content rotation $rotation, built-in ${builtInRotation} (measured ${builtInMeasured}, mirrored $builtInMirrored), correction ${correctionNow()}")
     return mapOf(
       "orientation" to orientation, "rotation" to rotation, "sensorOrientation" to sensorOrientation,
       "width" to displayWidth(), "height" to displayHeight(), "correction" to correctionNow(), "builtInRotation" to builtInRotation,
+      "builtInMeasured" to builtInMeasured, "builtInMirrored" to builtInMirrored,
     )
   }
-  private fun correctionNow(): Int = ((rotation - (builtInRotation ?: 0)) % 360 + 360) % 360
+  /** The turn still to apply to the texture so builtIn and correction compose to `rotation`; mirrored textures turn the other way (see builtInRotation). */
+  private fun correctionNow(): Int {
+    val b = builtInRotation ?: 0
+    val c = if (builtInMirrored) b - rotation else rotation - b
+    return (c % 360 + 360) % 360
+  }
   private fun portraitOutput() = rotation == 90 || rotation == 270
   private fun displayWidth() = if (portraitOutput()) min(outputWidth, outputHeight) else max(outputWidth, outputHeight)
   private fun displayHeight() = if (portraitOutput()) max(outputWidth, outputHeight) else min(outputWidth, outputHeight)
@@ -887,8 +906,11 @@ class LoudCameraXCapturer(
       return buffer to rotation
     }
     if (builtInRotation == null) {
-      builtInRotation = builtInRotationOf(buffer.transformMatrix)
-      Log.i(TAG, "built-in texture rotation ${builtInRotation} (content rotation $rotation)")
+      val (measured, mirrored) = builtInRotationOf(buffer.transformMatrix)
+      builtInMeasured = measured
+      builtInMirrored = mirrored
+      builtInRotation = if (mirrored) (360 - measured) % 360 else measured
+      Log.i(TAG, "built-in texture rotation ${builtInRotation} (measured $measured, mirrored $mirrored; content rotation $rotation, correction ${correctionNow()})")
     }
     val corr = correctionNow()
     correction = corr
@@ -903,17 +925,20 @@ class LoudCameraXCapturer(
   }
 
   /**
-   * The rotation a texture transform already applies, in degrees clockwise
-   * on screen: the direction the texture's x axis is sent in. Logged with the
-   * full matrix and its determinant, so a mirrored transform shows on the device.
+   * The raw turn a texture transform applies (the direction the texture's x
+   * axis is sent in, as a quarter turn) and whether the transform is mirrored
+   * (negative determinant). A mirrored transform shows the opposite turn on
+   * screen; the caller negates it (see builtInRotation). Logged with the full
+   * matrix and its determinant.
    */
-  private fun builtInRotationOf(m: Matrix): Int {
+  private fun builtInRotationOf(m: Matrix): Pair<Int, Boolean> {
     val p = floatArrayOf(0f, 0f, 1f, 0f)
     m.mapPoints(p)
     val deg = Math.toDegrees(atan2((p[3] - p[1]).toDouble(), (p[2] - p[0]).toDouble()))
     val v = FloatArray(9); m.getValues(v)
-    Log.i(TAG, "texture transform: x axis to ${"%.1f".format(deg)} deg, matrix ${v.joinToString(",") { "%.3f".format(it) }}, det ${"%.3f".format(v[0] * v[4] - v[1] * v[3])}")
-    return ((deg / 90.0).roundToInt() * 90 % 360 + 360) % 360
+    val det = v[0] * v[4] - v[1] * v[3]
+    Log.i(TAG, "texture transform: x axis to ${"%.1f".format(deg)} deg, matrix ${v.joinToString(",") { "%.3f".format(it) }}, det ${"%.3f".format(det)}")
+    return ((deg / 90.0).roundToInt() * 90 % 360 + 360) % 360 to (det < 0f)
   }
 
   // ── frame path: cpu ──────────────────────────────────────────
@@ -1257,7 +1282,7 @@ class LoudCameraXCapturer(
       "afState" to afState,
       "width" to displayWidth(), "height" to displayHeight(), "rotation" to rotation,
       "sensorOrientation" to sensorOrientation, "orientation" to orientation,
-      "contentRotation" to rotation, "builtInRotation" to builtInRotation, "correction" to correction, "uprightMethod" to uprightMethod,
+      "contentRotation" to rotation, "builtInRotation" to builtInRotation, "builtInMeasured" to builtInMeasured, "builtInMirrored" to builtInMirrored, "correction" to correction, "uprightMethod" to uprightMethod,
       "requestedRegion" to hwRegion?.let { rectMap(it) }, "regionReasserts" to regionReasserts,
       "bufferClass" to bufferClass, "emittedWidth" to emittedWidth, "emittedHeight" to emittedHeight,
       "panPath" to panPath, "regionProbe" to regionProbe,

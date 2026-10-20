@@ -3,7 +3,7 @@
 // diagnosis and the diagnostic records (14 Oct retest build).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, quarterTurn, mountOf, nextMountPlan } from '../native/src/spike/orientation.js';
+import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, builtInRotationShown, quarterTurn, mountOf, nextMountPlan } from '../native/src/spike/orientation.js';
 import { orientationCommand, ack, encode, decode, slowCommandDiagnosis, SLOW_COMMAND_MS } from '../native/src/spike/commands.js';
 import { capsFor, realise, regionCarriesPan, panPlan, zoomPlan, unrealisable, SHOT_HOME } from '../native/src/spike/zoomPlan.js';
 import { CaptureBuffer } from '../native/src/spike/capture.js';
@@ -166,6 +166,23 @@ test('the texture correction: whatever rotation the camera pipeline already appl
   assert.equal(textureCorrection(90, 0), 90); assert.equal(textureCorrection(0, 0), 0);
   // a camera that already turns the picture upright for portrait needs no further turn
   assert.equal(textureCorrection(90, 90), 0);
+});
+
+test('a mirrored texture (the G35, 19 Oct): the raw reading 270 is a shown turn of 90, and the correction runs the other way', () => {
+  assert.equal(builtInRotationShown(270, true), 90);
+  assert.equal(builtInRotationShown(270, false), 270);
+  assert.equal(builtInRotationShown(90, true), 270);
+  const shown = builtInRotationShown(270, true);
+  // portrait upright: the picture already turns 90, so nothing more (180 was the upside-down picture)
+  assert.equal(textureCorrection(uprightRotation('portrait', 90), shown, true), 0);
+  // landscape (top to the left): 90, which the unmirrored sum also gave, so landscape was never wrong
+  assert.equal(textureCorrection(uprightRotation('landscape', 90), shown, true), 90);
+  assert.equal(textureCorrection(uprightRotation('landscape', 90), 270, false), 90);
+  // the inverted mounts are a half turn from those, whichever way the sum runs
+  assert.equal(textureCorrection(orientationPlan({ orientation: 'portrait', sensorOrientation: 90, physical: 'portrait-down' }).desiredRotation, shown, true), 180);
+  assert.equal(textureCorrection(orientationPlan({ orientation: 'landscape', sensorOrientation: 90, physical: 'landscape-right' }).desiredRotation, shown, true), 270);
+  // mirrored: builtIn − correction ≡ desired, for every quarter turn
+  for (const b of [0, 90, 180, 270]) for (const d of [0, 90, 180, 270]) assert.equal(((b - textureCorrection(d, b, true)) % 360 + 360) % 360, d);
 });
 
 test('the capturer is told the plan, not its own guess: the rotation the JS side computes is the number the native module receives', async () => {

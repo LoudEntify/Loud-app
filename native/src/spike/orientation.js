@@ -100,13 +100,29 @@ export function nextMountPlan({ planInverted, reading, pending = null, locked = 
 
 /**
  * The texture correction still needed after the camera pipeline has
- * already rotated the texture by `builtInRotation` (measured on the first
- * frame by the capturer; the preview target is pinned, so it does not
- * change with the device). Applying the correction on top of the built-in
- * rotation gives `desiredRotation` again: builtIn + correction ≡ desired (mod 360).
+ * already rotated the texture by `builtInRotation` (the turn the picture
+ * shows, measured on the first frame by the capturer; the preview target is
+ * pinned, so it does not change with the device). Applying the correction
+ * on top of the built-in rotation gives `desiredRotation` again:
+ * builtIn + correction ≡ desired (mod 360).
+ *
+ * A MIRRORED texture transform (negative determinant: the vertical flip
+ * camera textures usually carry) turns a correction the opposite way on
+ * screen, so there the correction is builtIn − desired. Measured on the
+ * Moto G35 (19 Oct): mirrored, built-in 90 (raw reading 270), so portrait
+ * (desired 90) needs 0 and landscape (desired 0) needs 90; the unmirrored
+ * sum gave portrait 180, the upside-down picture.
  */
-export function textureCorrection(desiredRotation, builtInRotation = 0) {
-  return (((quarterTurn(desiredRotation) - quarterTurn(builtInRotation)) % 360) + 360) % 360;
+export function textureCorrection(desiredRotation, builtInRotation = 0, mirrored = false) {
+  const d = quarterTurn(desiredRotation); const b = quarterTurn(builtInRotation);
+  const c = mirrored ? b - d : d - b;
+  return ((c % 360) + 360) % 360;
+}
+
+/** The turn a texture shows, from the raw angle its transform sends the x axis to: the opposite turn when mirrored. */
+export function builtInRotationShown(measured, mirrored = false) {
+  const m = quarterTurn(measured);
+  return mirrored ? (360 - m) % 360 : m;
 }
 
 /**
