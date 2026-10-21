@@ -156,7 +156,11 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, 13:00: pans CLOSED on both phones.** Moto G35 on `[auto]` with `hardware (pans gpu)`: the four capped pans moved on screen (report 1792583944515; the probe this time got no region reading in 1.2 s, the fourth different answer from that HAL in four sessions, which settles the region-path decision). S25 Ultra: closed earlier the same day.
 
-**Resume here: the bop, pro-mode readbacks on both phones, then lens switching on the Samsung (new APK from the android-spike run after this commit; the bop is JS, so the APK must carry it)**
+**21 Oct, 18:30, Samsung S25 Ultra (report 1792603548577): the bop "great" (Korey: artists will adjust feel and timing; presets for the rest). Pro readbacks all settled in 6 to 8 frames: ISO within 1 percent (398/400, 1592/1600, 3184/3200), shutter and focus exact, WB exact at 3200/4500/5600/7500 K. One miss: AE LOCK never reported back (23 frames, 1.5 s; AWB lock fine): a Samsung quirk to handle (it may report the lock under another key). Lens switching ran to 5x on lens 6 (telephoto); no visual complaint recorded. To check from the batch records: 1,067 dropped frames in 15 min (4 percent) against a handful in earlier sessions; find whether they cluster in the bop, the lens switches or the pro changes.**
+
+**Resume here (Moto): the bop and the pro readbacks on the Moto G35 (same APK); then the AE-lock quirk on the Samsung**
+
+**Earlier script: the bop, pro-mode readbacks on both phones, then lens switching on the Samsung**
 
 0. **The bop (2 min per phone).** Camera role, Controller on the laptop. **2x**, wait for the ack. On the bop row pick **120 bpm**, then **bop left-right**: for 4 seconds the picture should hit left, bounce, hit right, bounce, eight hits in all, with a slight punch-in on each hit, and end exactly where it started. Then **bop up-down**, then **bop left** (every hit the same way). Try **90 bpm** once. The ack reads `bop left-right · 8 beats at 120 bpm · amplitude 0.038 of 0.04 frame · pulse 0.03`. Say whether it felt like a beat (sharp hit, soft settle) or like a wobble, and whether the hit is big enough to notice at a glance; those two judgements set the defaults.
 
