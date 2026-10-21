@@ -158,7 +158,18 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, 18:30, Samsung S25 Ultra (report 1792603548577): the bop "great" (Korey: artists will adjust feel and timing; presets for the rest). Pro readbacks all settled in 6 to 8 frames: ISO within 1 percent (398/400, 1592/1600, 3184/3200), shutter and focus exact, WB exact at 3200/4500/5600/7500 K. One miss: AE LOCK never reported back (23 frames, 1.5 s; AWB lock fine): a Samsung quirk to handle (it may report the lock under another key). Lens switching ran to 5x on lens 6 (telephoto); no visual complaint recorded. To check from the batch records: 1,067 dropped frames in 15 min (4 percent) against a handful in earlier sessions; find whether they cluster in the bop, the lens switches or the pro changes.**
 
-**Resume here (Moto): the bop and the pro readbacks on the Moto G35 (same APK); then the AE-lock quirk on the Samsung**
+**21 Oct, 21:20, Moto G35: the bop and the pro readbacks both work well (Korey). Device retests are closed on both phones; the Samsung AE-lock readback quirk stays an open note, not a blocker.**
+
+**Resume here: frame rate (next CI APK) and the LUT look test**
+
+Frame rate is a row on the spike's idle screen (`frame rate: 24 25 30 60`, under the frame-path row), chosen BEFORE pressing Camera. The phone resolves it against what the lens advertises at start and writes one log line (`frame rate: 60 fps` or `frame rate: 30 fps — asked 60: this camera tops out at 30`); the B4 line shows the measured rate and the target (`59.8 fps (target 60)`). A `~` after a rate on the row means the camera offers it only inside a range (it may float with the light); `✗` means the camera cannot hold it.
+
+1. **Samsung, 60 fps (3 min).** Pick **60**, Camera role, Controller on the laptop. Wait 60 s, read the B4 line: the rate should sit near 60 and `dropped` should stay low (the Samsung is on the gpu path, which converts every frame; the log warns `60 fps on the gpu path converts twice the frames of 30`, and the dropped count is the answer to whether it copes). Press **2x**, a **pan**, and **bop 120 left-right**: the bop must still land on the beat. Report + stop.
+2. **Samsung, 24 fps (2 min).** Same again at **24**: the picture a little more filmic, pans and the bop a touch choppier (expected; the log says so). Report + stop.
+3. **Moto, 60 (1 min).** Pick **60**, Camera role. Expect the line `frame rate: 30 fps — asked 60: this camera tops out at 30` (if the G35's HAL advertises a 60 range the APK will take it; the report says which). Report + stop.
+4. Send the three camera reports. Then the **LUT look test**: a video of the built-in looks on your clip comes with the compositor PR (staging), to judge like the transitions.
+
+
 
 **Earlier script: the bop, pro-mode readbacks on both phones, then lens switching on the Samsung**
 

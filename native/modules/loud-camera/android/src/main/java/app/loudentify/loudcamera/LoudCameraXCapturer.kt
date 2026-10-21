@@ -100,7 +100,9 @@ class LoudCameraXCapturer(
   private val context: Context,
   private val facing: String,
   private val fps: Int,
-  private val frameSourceWanted: String = "auto"
+  private val frameSourceWanted: String = "auto",
+  /** The AE target range sent to the HAL: [fps, fps] for a fixed rate, or the advertised range the rate sits inside (frameRate.js resolveFrameRate). */
+  private val fpsRange: Range<Int> = Range(fps, fps)
 ) : VideoCapturer {
   companion object {
     private const val TAG = "LoudCamera"
@@ -367,7 +369,7 @@ class LoudCameraXCapturer(
       // follow the display, and the texture transform with it.
       val builder = Preview.Builder().setResolutionSelector(resolution).setTargetRotation(Surface.ROTATION_0)
       Camera2Interop.Extender(builder)
-        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
+        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
         .setSessionCaptureCallback(captureCallback)
       val preview = builder.build()
       val h = helper!!
@@ -393,7 +395,7 @@ class LoudCameraXCapturer(
         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
         .setResolutionSelector(resolution)
       Camera2Interop.Extender(builder)
-        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
+        .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
         .setSessionCaptureCallback(captureCallback)
       val analysis = builder.build()
       analysis.setAnalyzer(analyzerExecutor) { image -> onImage(image) }
@@ -1295,6 +1297,7 @@ class LoudCameraXCapturer(
       "bufferClass" to bufferClass, "emittedWidth" to emittedWidth, "emittedHeight" to emittedHeight,
       "panPath" to panPath, "regionProbe" to regionProbe,
       "fps" to round3(measuredFps),
+      "fpsTarget" to fps, "fpsRange" to listOf(fpsRange.lower, fpsRange.upper),
       "frames" to frames,
       "droppedFrames" to droppedFrames,
       "convertMsPerFrame" to (if (frames > 0) round3(convertMsTotal / frames) else null),

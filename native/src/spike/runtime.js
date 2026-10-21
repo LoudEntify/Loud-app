@@ -19,6 +19,7 @@ import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
 import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
+import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from './frameRate';
 import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
 
 /** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
@@ -81,9 +82,12 @@ export async function readProfile() {
  * screen; everything else is internal. Call connect(), then stop().
  */
 export class SpikeSession {
-  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto' }) {
+  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto', frameRate = FRAME_RATE_DEFAULT }) {
     this.role = role; this.accessToken = accessToken; this.userId = userId; this.onEvent = onEvent || (() => {});
     this.frameSource = FRAME_SOURCES.includes(frameSource) ? frameSource : 'auto';
+    // The rate asked for in Settings; resolved against the lens's advertised ranges at camera start (frameRate.js). `fps` is what runs.
+    this.frameRateWanted = Number.isFinite(Number(frameRate)) && Number(frameRate) > 0 ? Number(frameRate) : FRAME_RATE_DEFAULT;
+    this.fps = FRAME_RATE_DEFAULT; this.frameRate = null;
     this.room = null; this.profile = null; this.offset = null; this.track = null; this.stream = null;
     // The camera's framing as the director sees it: one shot at a time
     // (zoomPlan.js). A zoom or a pan makes a new shot; a refused or failed
@@ -173,12 +177,16 @@ export class SpikeSession {
   }
 
   async startCamera() {
-    const { stream, info } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: 30, frameSource: this.frameSource });
+    // Frame rate: what Settings asked for, held to what this lens advertises (a fractional or unlisted rate lands on the nearest it can hold).
+    const fr = resolveFrameRate(this.frameRateWanted, this.profile?.pro?.fpsRanges);
+    this.fps = fr.fps; this.frameRate = fr;
+    this.onEvent('frameRate', { ...fr, warnings: frameRateWarnings(fr.fps, { frameSource: this.frameSource, exact: fr.exact }) });
+    const { stream, info } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource });
     this.stream = stream;
     const mediaTrack = stream.getVideoTracks()[0];
     const track = new LocalVideoTrack(mediaTrack, undefined, true);
     const pub = await this.room.localParticipant.publishTrack(track, {
-      source: Track.Source.Camera, simulcast: false, videoEncoding: { maxBitrate: 3_000_000, maxFramerate: 30 },
+      source: Track.Source.Camera, simulcast: false, videoEncoding: { maxBitrate: fr.fps > 30 ? 4_500_000 : 3_000_000, maxFramerate: fr.fps },
     });
     // Only now is there a publication for the screen to render: setting
     // `track` earlier let a re-render (the frameSource event fired in this
@@ -479,7 +487,7 @@ export class SpikeSession {
     let result;
     try {
       if (m.type === 'stage') result = { kind: 'stage', stage: this.stage, achieved: this.stage, requested: m.stage, supported: true, reason: null };
-      else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.profile?.pro ?? null, proSupport: this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, hardwareLevel: this.profile?.pro?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model }, supported: true, reason: null };
+      else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.profile?.pro ?? null, proSupport: this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, fps: this.fps, frameRate: this.frameRate, hardwareLevel: this.profile?.pro?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model }, supported: true, reason: null };
       else if (m.type === 'pro') result = await this.runPro(m.control, m.value);
       else if (m.type === 'orientation') result = await this.runOrientation(m);
       else result = await this.runMatch(m);
@@ -501,7 +509,7 @@ export class SpikeSession {
   async runPro(control, value) {
     const pro = this.profile?.pro ?? null;
     const c = clampPro(control, value, pro);
-    const warnings = proWarnings(control, c.value ?? value, { fps: 30, pro });
+    const warnings = proWarnings(control, c.value ?? value, { fps: this.fps, pro });
     if (!c.supported) return { kind: 'pro', control, requested: value, achieved: null, clamped: false, supported: false, reason: c.reason, warnings, applied: false };
     if (c.value == null && !['enable', 'disable', 'lock', 'unlock'].includes(control)) return { kind: 'pro', control, requested: value, achieved: null, clamped: false, supported: true, reason: c.reason, warnings, applied: false };
     const r = await LoudCamera.setPro(control, control === 'lock' || control === 'unlock' ? value : (c.value ?? null));
@@ -570,16 +578,16 @@ export class SpikeSession {
     const common = { frameSource: st.frameSource ?? caps.frameSource, panPath: caps.panPath, orientation: st.orientation ?? this.orientation };
     let plan; let requested;
     if (m.type === 'zoom') {
-      plan = zoomPlan({ profile: this.profile, caps, shot: this.shot, target: m.target, durationMs: m.durationMs, easing: m.easing });
+      plan = zoomPlan({ profile: this.profile, caps, shot: this.shot, target: m.target, durationMs: m.durationMs, easing: m.easing, stepMs: 1000 / this.fps });
       requested = m.target;
     } else if (m.type === 'bop') {
-      plan = bopPlan({ direction: m.direction, bpm: m.bpm, durationMs: m.durationMs, strength: m.strength, shot: this.shot, caps });
+      plan = bopPlan({ direction: m.direction, bpm: m.bpm, durationMs: m.durationMs, strength: m.strength, shot: this.shot, caps, stepMs: 1000 / this.fps });
       requested = plan.amplitudeRequested;
       if (plan.refused) {
         return { ...common, kind: 'bop', mode: null, path: 'bop', requested, achieved: 0, clamped: false, reason: plan.reason, refused: true, direction: m.direction, bpm: plan.bpm, beats: 0, amplitude: 0, durationMs: plan.durationMs, droppedFrames: 0, framesDuring: 0, actualDurationMs: 0, stepsPlanned: 0, stepsApplied: 0 };
       }
     } else {
-      plan = panPlan({ direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing, shot: this.shot, caps });
+      plan = panPlan({ direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing, shot: this.shot, caps, stepMs: 1000 / this.fps });
       requested = plan.travelRequested;
       if (plan.refused) {
         return { ...common, kind: 'pan', mode: null, path: plan.path, requested, achieved: 0, clamped: false, reason: plan.reason, refused: true, direction: m.direction, room: plan.room, window: plan.window, travel: 0, droppedFrames: 0, framesDuring: 0, actualDurationMs: 0, stepsPlanned: 0, stepsApplied: 0 };

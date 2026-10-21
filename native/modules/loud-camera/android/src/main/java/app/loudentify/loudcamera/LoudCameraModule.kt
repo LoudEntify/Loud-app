@@ -22,7 +22,7 @@ import java.util.zip.GZIPOutputStream
  * JS surface of the spike's camera (native/modules/loud-camera/index.js).
  *
  *   survey()                      B2 capability profile, no camera opened
- *   start({facing,width,height,fps,frameSource}) → {streamId, trackId, tracks}
+ *   start({facing,width,height,fps,fpsRange,frameSource}) → {streamId, trackId, tracks}
  *   stop()
  *   move(kind, mode, steps, requested) → move result (resolves when the last step has been applied)
  *   setPro(control, value) → pro-mode result; proRead() → current exposure/colour
@@ -64,9 +64,14 @@ class LoudCameraModule : Module() {
       val facing = (opts["facing"] as? String) ?: "back"
       val width = (opts["width"] as? Number)?.toInt() ?: 1080
       val height = (opts["height"] as? Number)?.toInt() ?: 1920
-      val fps = (opts["fps"] as? Number)?.toInt() ?: 30
+      val fps = ((opts["fps"] as? Number)?.toInt() ?: 30).coerceIn(1, 240)
+      // [lo, hi] from frameRate.js (an advertised range the rate sits inside); a fixed rate when absent.
+      val fpsRange = (opts["fpsRange"] as? List<*>)?.let { r ->
+        val lo = (r.getOrNull(0) as? Number)?.toInt(); val hi = (r.getOrNull(1) as? Number)?.toInt()
+        if (lo != null && hi != null && lo in 1..hi && fps in lo..hi) android.util.Range(lo, hi) else null
+      } ?: android.util.Range(fps, fps)
       val frameSource = ((opts["frameSource"] as? String) ?: "auto").let { if (it in LoudCameraXCapturer.FRAME_SOURCES) it else "auto" }
-      val cap = LoudCameraXCapturer(react, facing, fps, frameSource)
+      val cap = LoudCameraXCapturer(react, facing, fps, frameSource, fpsRange)
       val ctl = LoudCaptureController(width, height, fps, cap)
       // WebRTCModule keeps its track table and PeerConnectionFactory on one
       // private single-thread executor (its ThreadUtils is package-private,
