@@ -333,6 +333,7 @@ def main():
     ap.add_argument("--ratio-old", type=float, default=None)
     ap.add_argument("--ratio-new", type=float, default=0.4)
     ap.add_argument("--plate-stride", type=int, default=4)
+    ap.add_argument("--reverse", action="store_true", help="the inverse direction: hold the end framing before the trigger, run the effect back to the start framing")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True); os.makedirs(args.cache_dir, exist_ok=True)
     frames_dir = os.path.join(args.out_dir, "frames"); os.makedirs(frames_dir, exist_ok=True)
@@ -422,11 +423,12 @@ def main():
     metrics = {"old": {"bg_sharp_ratio": [], "halo": []}, "new": {"bg_sharp_ratio": [], "halo": []}}
     for i, frame in enumerate(read_frames(args.input)):
         t = i / fps
-        if t < args.trigger:
+        if t < args.trigger and not args.reverse:
             pre = scale_about_center(frame.astype(np.float32), Z, cv2.INTER_CUBIC).clip(0, 255).astype(np.uint8) if Z != 1.0 else frame
             orig = pre; outs = {"old": pre, "new": pre}
         else:
-            ue = smoothstep((t - args.trigger) / EFFECT_SECONDS); m = ue * m_end
+            ue = smoothstep((t - args.trigger) / EFFECT_SECONDS) if t >= args.trigger else 0.0
+            m = (1.0 - ue) * m_end if args.reverse else ue * m_end
             frame_f = frame.astype(np.float32)
             orig = scale_about_center(frame_f, Z, cv2.INTER_CUBIC).clip(0, 255).astype(np.uint8) if Z != 1.0 else frame
             outs = {}

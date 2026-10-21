@@ -62,3 +62,16 @@ edge flicker 0.087 -> 0.143 (the old matte's heavy smoothing also ghosted),
 render 81 -> 107 ms per frame on a 2-core CPU; the matte itself 354 ms per
 frame at ratio 0.4 (188 ms at 512 px). The 15 Oct decision (not live, GPU
 cost) stands; the dolly cue should start from a 1.5x framing and pull back.
+
+### Both directions (21 Oct, Korey: "very smooth, I love it"; both to be built)
+
+`--reverse` runs the shrink effect backwards: hold the end framing (background at
+1x, subject held at 1.5x) before the trigger, then the background rushes in
+to the tight 1.5x framing. Same pixel sources as the pull-back, so the same
+crispness (stats in `results/v3/t7r_*`). Rule for the cue: both directions
+travel between the 1x framing and the 1.5x framing on the subject, never
+above 1.5x (that is what keeps every background pixel real; the old "grow"
+beyond the frame is dropped). The subject is held digitally at up to 1.5x
+during a dolly, which is the dolly cue's own exception to the 1.2x crop cap
+(the cap is for the background; the subject is large and close and holds
+up in the renders). Still offline per the 15 Oct decision (GPU cost).
