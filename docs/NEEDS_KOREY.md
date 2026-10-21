@@ -154,7 +154,14 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, later:** the Samsung pans worked and were seen to move (capped to 0.05, device zoom pulled back to 1.92x). The Moto on `[auto]` again reported a moving region with nothing on screen (831 region updates), so the region path is out for pans: on the hardware source the region now carries the centred zoom only and the pan is a GPU crop, as on the Samsung (DECISIONS.md 2026-10-21). The Moto's B4 line should now read `hardware (pans gpu)` and its pan acks `region+crop`.
 
-**Resume here: pans on the Moto, new APK from the android-spike run after this commit (the Samsung needs no retest)**
+**21 Oct, 13:00: pans CLOSED on both phones.** Moto G35 on `[auto]` with `hardware (pans gpu)`: the four capped pans moved on screen (report 1792583944515; the probe this time got no region reading in 1.2 s, the fourth different answer from that HAL in four sessions, which settles the region-path decision). S25 Ultra: closed earlier the same day.
+
+**Resume here: pro-mode readbacks on both phones, then lens switching on the Samsung (same APK)**
+
+1. **Pro readbacks (3 min per phone).** Camera role, Controller on the laptop, `camera pro capability received`. Press **Enable**, then in order **ISO** 100, 400, 1600, 3200; **Shutter** 1/240, 1/120, 1/60; **Focus** ∞, 1 m, 0.3 m; on the Samsung also **WB** 3200K, 5600K (the Moto has no manual WB and the row says so). Each ack must read the value just set (`pro iso 400 → achieved 400 · applied after N frames`), not the previous one; `NOT SETTLED` on a line means the HAL never reported it, note which. **Disable (all auto)**. Report + stop, send the camera report.
+2. **Lens switching, Samsung only (2 min).** Camera role, upright. **1x**, **2x**, **3x** (crosses the 2.86x switch to lens 5), **5x** (crosses 3.59x to lens 6), **1x fast**. Watch the picture at each switch: a jump, a brightness or colour step, or a hitch is what to report; the acks say `LENS SWITCH` and name the lens. Report + stop, send the camera report.
+
+**Earlier script (superseded): pans on the Moto**
 
 1. Install the APK on the Moto, open the spike screen fresh, frame path `[auto]`, Camera role. The B4 line must say `hardware (pans gpu)`.
 2. Laptop: `git pull`, `npm run dev`, Join as Controller. **2x**, wait for the ack, then **pan right**, **pan down**, **pan left**, **pan up**, waiting for each ack (buttons grey out while a move runs). Each ack should read `region+crop … moved 0.05 of 0.06 frame · CAPPED: …` and the picture should slide that way, about a tenth of what you see.
