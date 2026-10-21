@@ -1,0 +1,74 @@
+{
+  "input": "upright.mp4",
+  "resolution": [
+    1080,
+    1920
+  ],
+  "fps": 30.0,
+  "frames": 368,
+  "variant": "grow",
+  "params": {
+    "ds": 3.0,
+    "d": 8.0,
+    "m_end": 0.9,
+    "zoom_start": 1.0,
+    "trigger_s": 7.0,
+    "effect_s": 1.5,
+    "bg_output_scale_at_end": 1.2679
+  },
+  "matte": {
+    "old": {
+      "ratio": 0.26666666666666666,
+      "internal_px": [
+        288,
+        512
+      ],
+      "ms_mean": 187.8,
+      "ms_p95": 226.7
+    },
+    "new": {
+      "ratio": 0.4,
+      "internal_px": [
+        432,
+        768
+      ],
+      "ms_mean": 353.5,
+      "ms_p95": 419.0
+    }
+  },
+  "matte_refine": {
+    "old_gauss_ema_ms_per_frame": 14.34,
+    "new_guided_ms_per_frame": 35.16
+  },
+  "edge_flicker": {
+    "old": 0.0872,
+    "new": 0.1433,
+    "raw_new": 0.1748
+  },
+  "clean_plate": {
+    "frames_used": 92,
+    "old_quarter_res_s": 2.7,
+    "new_full_res_s": 34.2,
+    "new_hole_fraction": 0.507
+  },
+  "effect_window": {
+    "old": {
+      "render_ms_mean": 74.7,
+      "bg_sharpness_ratio_mean": 0.571,
+      "bg_sharpness_ratio_min": 0.371,
+      "halo_mean": 1.34,
+      "halo_max": 2.45
+    },
+    "new": {
+      "render_ms_mean": 110.6,
+      "bg_sharpness_ratio_mean": 0.926,
+      "bg_sharpness_ratio_min": 0.797,
+      "halo_mean": 2.06,
+      "halo_max": 4.18
+    }
+  },
+  "hardware": {
+    "cpu_count": 2,
+    "gpu": "none in sandbox"
+  }
+}
