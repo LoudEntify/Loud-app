@@ -10,6 +10,9 @@
 // pan moves the shot's centre and measures from the shot's framing; a
 // move that would push the window past a frame edge is REFUSED with a
 // reason (panPlan returns `refused`), never clamped into a smaller move.
+// The crop cap is the one exception (2026-10-21): a pan that the cap would
+// otherwise refuse goes as far as the cap allows, and the ack says so
+// (`capped`), because on centred-zoom cameras the cap left no pan at all.
 // The crop therefore belongs to the shot: a zoom after a pan releases
 // the pan's crop as part of the zoom, nothing stacks or lingers.
 //
@@ -251,9 +254,49 @@ export function panPlan({
     return { ...base, refused: true, reason: `at frame edge: the picture cannot move ${direction} any further (${Math.max(0, room)} of the frame left, this pan needs ${travel})`, to: null, travel: 0, mode: null, steps: [], shots: [] };
   }
   const why = unrealisable(to, caps);
-  if (why) return { ...base, refused: true, reason: why, to: null, travel: 0, mode: null, steps: [], shots: [] };
+  if (why) {
+    // The crop cap (docs/DECISIONS.md 2026-10-21): on a frame source where a
+    // pan is a crop of the centred, device-zoomed frame, the cap leaves only
+    // so much off-centre room. The pan goes as far as the cap allows and the
+    // ack says how far and why, instead of refusing the whole move: a pan
+    // that moves a little beats one that never moves. Measured on the S25
+    // Ultra (20 Oct): at 2x the default 0.12 pan needs a 1.24x crop, so no
+    // pan ever ran. Only the cap is relaxed this way; a frame edge still
+    // refuses above, because there is nothing to pan into.
+    const allowed = cappedTravel({ start, framing, travel, caps });
+    if (allowed <= 1e-4) return { ...base, refused: true, reason: why, to: null, travel: 0, mode: null, steps: [], shots: [], capped: true };
+    const toCapped = {
+      zoom,
+      cx: r4(start.cx + (framing === 'right' ? allowed : framing === 'left' ? -allowed : 0)),
+      cy: r4(start.cy + (framing === 'down' ? allowed : framing === 'up' ? -allowed : 0)),
+    };
+    const { steps, shots } = movePlan({ from: shot, to: toCapped, durationMs, easing, stepMs, caps });
+    const r = realise(toCapped, caps);
+    return { ...base, refused: false, capped: true, reason: `moved ${allowed} of the ${travel} asked: the crop cap (${caps.digitalMax}x of the device-zoomed frame) leaves no more room off centre at ${zoom}x`, to: toCapped, travel: allowed, mode: r.mode, realised: r, steps, shots };
+  }
   const { steps, shots } = movePlan({ from: shot, to, durationMs, easing, stepMs, caps });
-  return { ...base, refused: false, reason: null, to, travel, mode: realise(to, caps).mode, realised: realise(to, caps), steps, shots };
+  return { ...base, refused: false, capped: false, reason: null, to, travel, mode: realise(to, caps).mode, realised: realise(to, caps), steps, shots };
+}
+
+/**
+ * The largest travel from `start` in the framing direction that the crop
+ * cap still realises on this frame source (0 when the start is already at
+ * the cap). Found by halving, so it holds for any realisation rule.
+ */
+export function cappedTravel({ start, framing, travel, caps, iterations = 12 }) {
+  const at = (t) => ({
+    zoom: start.zoom,
+    cx: r4(start.cx + (framing === 'right' ? t : framing === 'left' ? -t : 0)),
+    cy: r4(start.cy + (framing === 'down' ? t : framing === 'up' ? -t : 0)),
+  });
+  if (!unrealisable(at(travel), caps)) return travel;
+  let lo = 0; let hi = travel;
+  if (unrealisable(at(0), caps)) return 0;
+  for (let i = 0; i < iterations; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (unrealisable(at(mid), caps)) hi = mid; else lo = mid;
+  }
+  return r4(lo);
 }
 
 /** Target framing as a fraction of the Wide reference's field of view (B5 intent). */

@@ -112,9 +112,16 @@ test('a pan into a frame edge is refused with a reason, and the shot is untouche
   assert.equal(r.travel, 0); assert.equal(r.travelRequested, 0.06); assert.deepEqual(r.steps, []); assert.equal(r.to, null); assert.deepEqual(r.from, atEdge);
   // the way back is open
   assert.equal(panPlan({ direction: 'right', shot: atEdge, caps: hwCaps, durationMs: 300, stepMs: 100 }).refused, false);
-  // on a gpu/cpu source a pan can also be refused by the digital cap: device zoom is centred, so a far off-centre window needs more crop than 1.2x
+  // on a gpu/cpu source the digital cap limits a pan rather than refusing it (21 Oct): device zoom is centred, so a far off-centre window needs more crop than 1.2x, and the pan goes as far as 1.2x allows
   const far = panPlan({ direction: 'left', degree: 0.5, shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: gpuCaps, durationMs: 300, stepMs: 100 });
-  assert.equal(far.refused, true); assert.match(far.reason, /past the 1.2x cap/);
+  assert.equal(far.refused, false); assert.equal(far.capped, true); assert.match(far.reason, /^moved 0\.05 of the 0\.25 asked: the crop cap \(1\.2x/);
+  assert.equal(far.travel, 0.05, 'at 2x the 1.2x cap allows 0.1 of the visible frame, which is 0.05 of the wide frame');
+  // the measured S25 Ultra case (20 Oct): the default 0.12 pan at 2x needed 1.24x and was refused outright; now it moves 0.05 of the 0.06 asked
+  const s25 = panPlan({ direction: 'right', shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: gpuCaps, durationMs: 300, stepMs: 100 });
+  assert.equal(s25.refused, false); assert.equal(s25.capped, true); assert.equal(s25.travelRequested, 0.06); assert.equal(s25.travel, 0.05); assert.equal(s25.to.cx, 0.45);
+  assert.ok(s25.steps.length > 0 && s25.steps.every((s) => s.crop[2] >= 1 / 1.2 - 1e-3), "every step stays inside the cap");
+  // a pan that is not capped carries no cap note
+  assert.equal(panPlan({ direction: 'right', degree: 0.04, shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: gpuCaps, durationMs: 300, stepMs: 100 }).capped, false);
   // and without device zoom a 2x shot cannot even be held
   assert.match(panPlan({ direction: 'left', shot: { zoom: 2, cx: 0.5, cy: 0.5 }, caps: cpuNoZoom, durationMs: 300, stepMs: 100 }).reason, /no device zoom/);
 });

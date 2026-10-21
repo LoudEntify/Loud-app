@@ -147,7 +147,21 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 - **The GPU pan path:** for a phone whose HAL re-centres crop regions. The 1.2x digital cap limits it to about 5 percent of the wide frame off-centre at 2x, so pans there are short. Untested on such a phone.
 - **The mount lock:** the mount is read again until the first stage or move. A phone turned after that keeps its plan for the show.
 
-**Resume here: 5-minute retest for items 1 to 3**
+### Resumed 19 to 21 October 2026: orientation closed, pans next
+
+- **Orientation is closed** on the Moto G35 and the Samsung S25 Ultra (SM-S938B, Android 16, level 3 camera, four rear lenses). The upside-down portrait was the texture correction: the camera's texture transform is mirrored, so the measured 270 is a shown turn of 90 and the correction runs the other way (commit `a0009bb`). Both phones now report `builtInMirrored: true`, `builtInRotation: 90`, `correction: 0` and are upright.
+- **Pans, 20 October, the records say:** on the Samsung (GPU path) the one pan at 2x was refused, `off-centre framing needs a 1.2399x crop … past the 1.2x cap`; the other three were pressed at 1x. On the Moto (region path) four pans ran and the camera reported its crop region walking 0.3 of the frame, but nothing moved on screen. Decision (Korey, 21 Oct): **a pan goes as far as the crop cap allows** instead of being refused (zoomPlan.js `cappedTravel`; the ack says `CAPPED: moved 0.05 of the 0.06 asked …`). The buttons now wait for the ack (`MOVING…`), so a press cannot land on a running move. The "orientation is locked while live (a move is running)" refusals after the pans were the first-move lock working as designed; the wording now says so and tells you to restart the Camera role to change it in the spike.
+
+**Resume here: pans on both phones (new APK from the android-spike run after this commit)**
+
+Install the APK on BOTH phones (the Moto needs an uninstall first if it last had an EAS build: the two are signed differently). Laptop: `cd ~/loudentify/loud-app && git pull && npm run dev`, then http://localhost:3000/spike/controller, Join as Controller.
+
+1. **Samsung, portrait (2 min).** Camera role, phone upright. **2x**, wait for the ack, then **pan right**, **pan down**, **pan left**, **pan up**, waiting for each `ack pan` line before the next (the buttons grey out while a move runs). Each ack should read `moved 0.05 of 0.06 frame · CAPPED: …` and the picture should slide that way, about a tenth of what you see. Then **1x**.
+2. **Moto, frame path forced to gpu (2 min).** Restart the Camera role on the Moto and, on the phone, set the frame path row to **gpu** before joining (not `[auto]`, which picks the region path). Repeat step 1. This is the test of whether the Moto's picture moves when the pan is a GPU crop rather than a camera region.
+3. **Moto, frame path `[auto]` (2 min).** Restart the Camera role with `[auto]`, repeat step 1. The acks will say `region` and `moved 0.06 of 0.06`. Say plainly whether the picture moved at all after the four pans; if it did not, the G35's HAL reports a crop region it does not apply, and the region path comes out.
+4. **Report + stop** on both sides after each phone; send the camera reports and say, per step, which pans you SAW move and which way.
+
+**Earlier retest (superseded): 5-minute retest for items 1 to 3**
 
 Install the APK from the latest green android-spike run after this commit (artifact `loudentify-release-apk`). Open the spike screen fresh, choose Camera on the phone, and Join as Controller on the laptop.
 

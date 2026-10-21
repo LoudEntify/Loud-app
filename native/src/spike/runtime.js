@@ -313,7 +313,7 @@ export class SpikeSession {
   /** Camera: apply the orientation unless live. The mount is read once for the new choice, and the plan is made for that mount. */
   async runOrientation(m) {
     const want = normaliseOrientation(m.orientation);
-    if (this.live()) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: `orientation is locked while live (${this.stage ? `stage ${this.stage} is running` : 'a move is running'}): set it before the show` };
+    if (this.live()) return { kind: 'orientation', requested: want, achieved: this.orientation, supported: true, refused: true, reason: `orientation is locked while live (${this.stage ? `stage ${this.stage} is running` : this.moving ? 'a move is running' : 'it was locked at the first move of this session'}): set it before the show${this.moving || this.stage ? '' : ' (in the spike, restart the Camera role to change it)'}` };
     const previous = this.orientation;
     this.orientation = want;                       // the mismatch and the mount are judged against the new choice
     const mount = await this.checkMount();
@@ -590,7 +590,8 @@ export class SpikeSession {
     // (the HAL's own region on the hardware path, the plan elsewhere).
     const achieved = panTravelAchieved(plan, r, landed);
     return {
-      ...r, ...common, mode: plan.mode, path: plan.path, requested, achieved, clamped: Math.abs(achieved - requested) > 0.01, reason: r.reason || null, refused: false,
+      ...r, ...common, mode: plan.mode, path: plan.path, requested, achieved, clamped: Math.abs(achieved - requested) > 0.01, reason: r.reason || plan.reason || null, refused: false,
+      capped: Boolean(plan.capped), travelPlanned: plan.travel,
       direction: m.direction, room: plan.room, window: plan.window, tightened: plan.tightened, travel: achieved, zoomAtPan: plan.zoom, effectiveZoomAchieved: r.achieved ?? null,
     };
   }

@@ -48,7 +48,7 @@ const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 /** The controller's log line for an ack: the move cycle (includes the move) and the command latency (network leg out), then what the camera did. */
 function ackLine(p) {
   const r = p.ack.result || {};
-  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
 }
 /** The pro-mode presets the controller offers; each row is gated by the camera's proSupport (docs/SPIKE_PRO_MODE_PLAN.md section 4). */
@@ -81,10 +81,10 @@ function resultLine(p) {
   const timing = r.maxStepLateMs != null ? `, steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late), frame gap ≤${r.maxFrameGapMs} ms` : '';
   return `did ${p.command.type}: ${r.mode}${r.path ? ` [${r.path}]` : ''} ${what} in ${r.actualDurationMs} ms, ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''}, dropped ${r.droppedFrames}${timing}${r.reason ? ` (${r.reason})` : ''}`;
 }
-function Btn({ label, onPress, tone = 'ghost', small }) {
+function Btn({ label, onPress, tone = 'ghost', small, disabled }) {
   const bg = tone === 'teal' ? styles.btnTeal : tone === 'orange' ? styles.btnOrange : styles.btnGhostDark;
   const tx = tone === 'ghost' ? styles.btnTextDark : styles.btnText;
-  return <Pressable style={[styles.btn, bg, small ? { minHeight: 40, paddingHorizontal: 12 } : null]} onPress={onPress}><Text style={[tx, small ? { fontSize: 14 } : null]}>{label}</Text></Pressable>;
+  return <Pressable disabled={disabled} style={[styles.btn, bg, small ? { minHeight: 40, paddingHorizontal: 12 } : null, disabled ? { opacity: 0.4 } : null]} onPress={onPress}><Text style={[tx, small ? { fontSize: 14 } : null]}>{label}</Text></Pressable>;
 }
 
 /**
@@ -154,6 +154,9 @@ export default function ZoomSpike() {
   const sess = useRef(null);
 
   const push = (line) => setLog((l) => [`${new Date().toISOString().slice(11, 19)} ${line}`, ...l].slice(0, 60));
+  // A move (zoom or pan) runs for 2 to 3 s; the buttons wait for its ack so a press cannot land on top of it ("a move is already in progress", 20 Oct).
+  const [moving, setMoving] = useState(false);
+  const runMove = (p) => { if (!p) return; setMoving(true); p.catch((e) => push(String(e))).finally(() => setMoving(false)); };
 
   useEffect(() => { try { setVideoTrack(() => require('@livekit/react-native').VideoTrack); } catch { /* Expo Go */ } }, []);
 
@@ -314,11 +317,12 @@ export default function ZoomSpike() {
         {mode === 'controller' && (
           <>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
-              {[1, 1.5, 2, 3, 5].map((z) => <Btn key={z} small label={`${z}x`} tone="teal" onPress={() => s?.zoom(z, 2000).catch((e) => push(String(e)))} />)}
-              <Btn small label="1x fast" onPress={() => s?.zoom(1, 400, 'ease-out').catch((e) => push(String(e)))} />
+              {[1, 1.5, 2, 3, 5].map((z) => <Btn key={z} small label={`${z}x`} tone="teal" disabled={moving} onPress={() => runMove(s?.zoom(z, 2000))} />)}
+              <Btn small label="1x fast" disabled={moving} onPress={() => runMove(s?.zoom(1, 400, 'ease-out'))} />
+              {moving && <Text style={[mono, { color: '#ff9f1c' }]}>MOVING… (buttons return when the camera acks)</Text>}
             </View>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
-              {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} small label={`pan ${d}`} tone="orange" onPress={() => s?.pan(d).catch((e) => push(String(e)))} />)}
+              {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} small label={`pan ${d}`} tone="orange" disabled={moving} onPress={() => runMove(s?.pan(d))} />)}
             </View>
             <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
               <Text style={mono}>show orientation{soakOn || stage ? ' (locked while the soak or a stage runs)' : ''}:</Text>

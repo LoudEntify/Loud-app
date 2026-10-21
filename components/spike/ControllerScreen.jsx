@@ -28,7 +28,7 @@ const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 /** Same line as the phone Controller's: the move cycle (includes the move), the command latency (network leg out), then what the camera did. */
 function ackLine(p) {
   const r = p.ack.result || {};
-  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   const timing = r.maxStepLateMs != null ? ` · steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late) · frame gap ≤${r.maxFrameGapMs} ms` : '';
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''} · dropped ${r.droppedFrames}${timing}`;
 }
@@ -102,6 +102,7 @@ function downloadJson(name, object) {
 export default function ControllerScreen() {
   const { accessToken, session, profile, loading } = useSession();
   const [status, setStatus] = useState('idle');
+  const [moving, setMoving] = useState(false);
   const [log, setLog] = useState([]);
   const [remote, setRemote] = useState(null);
   const [lastAck, setLastAck] = useState(null);
@@ -183,8 +184,11 @@ export default function ControllerScreen() {
   }
 
   const s = sess.current;
-  const run = (p) => p.catch((e) => push(String(e?.message || e)));
+  // A move (zoom or pan) runs for 2 to 3 s; the buttons wait for its ack so a
+  // press cannot land on top of it ("a move is already in progress", 20 Oct).
+  const run = (p) => { setMoving(true); return p.catch((e) => push(String(e?.message || e))).finally(() => setMoving(false)); };
   const live = status === 'connected';
+  const canMove = live && !moving;
   const isArtist = profile?.role === 'artist';
 
   return (
@@ -233,11 +237,12 @@ export default function ControllerScreen() {
       </div>
 
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
-        {[1, 2, 5].map((z) => <Btn key={z} label={`${z}x`} tone="teal" disabled={!live} onPress={() => run(s.zoom(z, 2000))} />)}
-        <Btn label="1x fast" disabled={!live} onPress={() => run(s.zoom(1, 400, 'ease-out'))} />
+        {[1, 2, 5].map((z) => <Btn key={z} label={`${z}x`} tone="teal" disabled={!canMove} onPress={() => run(s.zoom(z, 2000))} />)}
+        <Btn label="1x fast" disabled={!canMove} onPress={() => run(s.zoom(1, 400, 'ease-out'))} />
+        {moving && <span style={{ ...mono, color: '#ff9f1c' }}>MOVING… (buttons return when the camera acks)</span>}
       </div>
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
-        {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} label={`pan ${d}`} tone="orange" disabled={!live} onPress={() => run(s.pan(d))} />)}
+        {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} label={`pan ${d}`} tone="orange" disabled={!canMove} onPress={() => run(s.pan(d))} />)}
       </div>
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
         <Btn label="Start 20-min soak" disabled={!live || !!soak} onPress={() => s.startSoak(20)} />

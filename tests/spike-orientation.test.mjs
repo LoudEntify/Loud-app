@@ -69,9 +69,14 @@ test('capsFor: a hardware source whose HAL re-centres regions plans like the gpu
   assert.equal(pan.refused, false); assert.equal(pan.mode, 'region+crop'); assert.equal(pan.to.cx, 0.46, "'right' moves the picture right: the framing moves left");
   assert.ok(pan.steps.every((s) => s.deviceZoom >= 1 && s.crop[2] <= 1));
   { const c = pan.steps[pan.steps.length - 1].crop; assert.ok(Math.abs(c[0] + c[2] / 2 - 0.5) > 0.01, 'the last step is cropped off-centre'); }
-  // a second pan the same way would need more than the 1.2x crop cap: refused with the hybrid reason
+  // a second pan the same way would need more than the 1.2x crop cap: it goes as far as the cap allows (21 Oct) and says so
   const twice = panPlan({ direction: 'right', degree: 0.08, shot: pan.to, caps: hybrid });
-  assert.equal(twice.refused, true); assert.match(twice.reason, /this HAL re-centres crop regions, so a pan is a crop of the zoomed frame/);
+  assert.equal(twice.refused, false); assert.equal(twice.capped, true); assert.ok(twice.travel > 0 && twice.travel < twice.travelRequested, `${twice.travel} of ${twice.travelRequested}`);
+  assert.match(twice.reason, /^moved 0\.0\d+ of the 0\.04 asked: the crop cap/);
+  assert.ok(realise(twice.to, hybrid).digitalFactor <= 1.2 + 1e-6, 'the capped pan sits inside the cap');
+  // a third pan the same way has no room left under the cap at all: refused with the hybrid reason
+  const thrice = panPlan({ direction: 'right', degree: 0.08, shot: twice.to, caps: hybrid });
+  assert.equal(thrice.refused, true); assert.equal(thrice.capped, true); assert.match(thrice.reason, /this HAL re-centres crop regions, so a pan is a crop of the zoomed frame/);
   assert.equal(unrealisable({ zoom: 2, cx: 0.5, cy: 0.5 }, hybrid), null);
   // zooms are unchanged by the pan path: 5x still lands on the 2.1x ceiling
   assert.equal(zoomPlan({ profile: g35, caps: hybrid, shot: SHOT_HOME, target: 5 }).to.zoom, 2.1);
