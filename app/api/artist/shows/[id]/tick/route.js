@@ -11,6 +11,7 @@ import { loadOwnedShow } from '../../../../../../lib/artistShow';
 import { deliveryTick } from '../../../../../../lib/pipeline/lifecycle';
 import { supabaseLifecycleStore, egressFor } from '../../../../../../lib/pipeline/store';
 import { composeLayout } from '../../../../../../lib/pipeline/compositor';
+import { lookPlan } from '../../../../../../lib/pipeline/lut';
 import { viewerCount, openPrompt } from '../../../../../../lib/showPayload';
 
 export async function POST(request, { params }) {
@@ -26,7 +27,10 @@ export async function POST(request, { params }) {
   let delivery = { state: show.delivery_state };
   if (show.actual_started_at && !show.actual_ended_at) {
     const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, healthy: body.healthy || { a: true, b: true } });
-    try { if (egress.state === 'running') egress.pushFrame({ tMs: Date.now() - Date.parse(show.actual_started_at), layout }); } catch { /* the show must never stop because the fake egress could not write */ }
+    // The look the console is applying this tick ({ lut: 'film', strength: 0.8, colourMatch: { a: [r,g,b] } }); an unknown look logs as none rather than failing the tick.
+    let look = null;
+    try { look = body.look ? lookPlan(body.look) : null; } catch { look = null; }
+    try { if (egress.state === 'running') egress.pushFrame({ tMs: Date.now() - Date.parse(show.actual_started_at), layout, look }); } catch { /* the show must never stop because the fake egress could not write */ }
     delivery = await deliveryTick(supabaseLifecycleStore(admin), egress, { showId: show.id, correlationId: cid });
   }
   const [viewers, prompt, { data: pending }, { data: fresh }, { data: delays }] = await Promise.all([
