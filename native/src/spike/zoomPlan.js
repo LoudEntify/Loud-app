@@ -301,3 +301,137 @@ export function cappedTravel({ start, framing, travel, caps, iterations = 12 }) 
 
 /** Target framing as a fraction of the Wide reference's field of view (B5 intent). */
 export function tightnessFor(zoom, wideReferenceZoom = 1) { return +(wideReferenceZoom / zoom).toFixed(4); }
+
+// ── the bop (docs/DECISIONS.md 2026-10-21) ──────────────────────
+/**
+ * A BOP is a rhythmic micro-pan with a bounce: on every beat the picture
+ * jumps a short way in a direction, overshoots, and settles back home, the
+ * way a handheld camera "hits" a beat drop in short-form music video. It
+ * is the pan's mechanism (the GPU crop of the device-zoomed frame, every
+ * frame) driven by a spring-like curve instead of a smooth ease, plus a
+ * small zoom pulse on the hit so it reads as handheld rather than
+ * mechanical. Written as a cue first (the artist sets direction, tempo,
+ * length and strength); the director learns it from those cues later.
+ *
+ * Constraints it respects: the same crop cap as a pan (the amplitude is
+ * the smaller of the asked amplitude, the room to the frame edge and what
+ * the cap allows, cappedTravel), MIN_PAN_ZOOM (a bop at a wide shot is
+ * refused like a pan), and the move always ends on the shot it started
+ * from, so nothing stacks or lingers.
+ */
+export const BOP_DEFAULTS = Object.freeze({ bpm: 120, durationMs: 4000, strength: 1, amplitude: 0.08, pulse: 0.03 });
+export const BOP_DIRECTIONS = ['left', 'right', 'up', 'down', 'left-right', 'up-down'];
+/** Fastest and slowest tempo a bop is planned for (beats outside this are not a bop, they are a pan or a shake). */
+export const BOP_BPM_RANGE = Object.freeze({ min: 50, max: 200 });
+
+/**
+ * One beat of the bounce, t in [0, 1]: a fast hit to 1 in the first 12
+ * percent of the beat (ease-out), then a decaying oscillation through the
+ * other side (the overshoot and settle), back to about 0 at the end of the
+ * beat so consecutive beats chain cleanly.
+ */
+export function bopCurve(t) {
+  const x = clamp(t, 0, 1);
+  const attack = 0.12;
+  if (x < attack) { const u = x / attack; return 1 - (1 - u) * (1 - u); }
+  const u = (x - attack) / (1 - attack);
+  return Math.exp(-4 * u) * Math.cos(Math.PI * 2.5 * u);
+}
+
+/** The zoom pulse of one beat: the same hit, decaying without the oscillation (a punch-in on the beat, never a punch-out). */
+export function bopPulse(t) {
+  const x = clamp(t, 0, 1);
+  const attack = 0.12;
+  if (x < attack) { const u = x / attack; return 1 - (1 - u) * (1 - u); }
+  return Math.exp(-5 * (x - attack) / (1 - attack));
+}
+
+/** The picture directions a bop pattern alternates between, beat by beat. */
+function bopBeatDirections(direction) {
+  if (direction === 'left-right') return ['left', 'right'];
+  if (direction === 'up-down') return ['up', 'down'];
+  return [direction];
+}
+
+/**
+ * The plan of a bop from the current shot: steps at `stepMs` for
+ * `durationMs`, beats at `bpm`, the picture moving `amplitude` of the
+ * visible frame (scaled by `strength`) in `direction` on each beat and
+ * bouncing back, with a zoom pulse of `pulse` (also scaled). Refused
+ * below MIN_PAN_ZOOM. `capped` says the amplitude was cut by the crop cap
+ * or the frame edge, and `amplitudeRequested` / `amplitude` say by how much.
+ * The move ends on the start shot (`to` is `shot`).
+ */
+export function bopPlan({
+  direction, bpm = BOP_DEFAULTS.bpm, durationMs = BOP_DEFAULTS.durationMs, strength = BOP_DEFAULTS.strength,
+  amplitude = BOP_DEFAULTS.amplitude, pulse = BOP_DEFAULTS.pulse, stepMs = 1000 / 30, shot = SHOT_HOME, caps,
+}) {
+  if (!BOP_DIRECTIONS.includes(direction)) throw new Error(`unknown bop direction ${direction}`);
+  if (!caps) throw new Error('bopPlan needs caps (zoomPlan.capsFor)');
+  const tempo = clamp(Number(bpm) || BOP_DEFAULTS.bpm, BOP_BPM_RANGE.min, BOP_BPM_RANGE.max);
+  const beatMs = 60000 / tempo;
+  const length = clamp(Number(durationMs) || BOP_DEFAULTS.durationMs, beatMs, 60000);
+  const s = clamp(Number(strength) || 1, 0.2, 2);
+  const base = { path: 'bop', from: shot, direction, bpm: tempo, beatMs: r4(beatMs), durationMs: Math.round(length), strength: s, zoom: shot.zoom };
+  if (shot.zoom < MIN_PAN_ZOOM - 1e-6) {
+    return { ...base, refused: true, reason: `the bop is for zoomed framings: zoom to ${MIN_PAN_ZOOM}x or more first (at ${shot.zoom}x there is no room to move in)`, amplitudeRequested: 0, amplitude: 0, capped: false, beats: 0, to: null, mode: null, steps: [], shots: [] };
+  }
+  const w = r4(1 / shot.zoom);
+  const asked = r4(clamp(amplitude, 0, 0.3) * s * w);            // in wide-frame fractions, like a pan's travel
+  // The amplitude every used direction can reach: the frame edge, then the crop cap (pans and bops share both limits).
+  const dirs = bopBeatDirections(direction);
+  let amp = asked;
+  for (const d of dirs) {
+    const framing = FRAMING_MOVE[d];
+    amp = Math.min(amp, Math.max(0, shotRoom(shot, framing)));
+    amp = Math.min(amp, cappedTravel({ start: shot, framing, travel: amp, caps }));
+  }
+  // The zoom pulse must stay realisable too (it tightens the window on the hit); scale the pulse down with the amplitude.
+  const pulseAmt = clamp(pulse, 0, 0.1) * s;
+  const peakZoom = shot.zoom * (1 + pulseAmt);
+  const zoomCap = caps.deviceZoom?.available ? caps.deviceZoom.max : shot.zoom;
+  const pulseUsed = peakZoom > zoomCap + 1e-6 ? Math.max(0, zoomCap / shot.zoom - 1) : pulseAmt;
+  amp = r4(amp * 0.95);                                            // a little inside the limits, because the pulse tightens the window on the hit
+  if (amp <= 1e-4) {
+    return { ...base, refused: true, reason: `no room for a bop at this framing: the crop cap (${caps.digitalMax}x) and the frame edge leave nothing to move in at ${shot.zoom}x here`, amplitudeRequested: asked, amplitude: 0, capped: true, beats: 0, to: null, mode: null, steps: [], shots: [] };
+  }
+  const n = Math.max(1, Math.round(length / stepMs));
+  const steps = []; const shots = [];
+  const beats = Math.max(1, Math.round(length / beatMs));
+  for (let i = 1; i <= n; i += 1) {
+    const t = i * stepMs;
+    const k = Math.min(beats - 1, Math.floor(t / beatMs));
+    const tau = (t - k * beatMs) / beatMs;
+    const d = dirs[k % dirs.length];
+    const framing = FRAMING_MOVE[d];
+    const off = amp * bopCurve(tau);
+    const z = r4(shot.zoom * (1 + pulseUsed * bopPulse(tau)));
+    const sh = {
+      zoom: z,
+      cx: r4(shot.cx + (framing === 'right' ? off : framing === 'left' ? -off : 0)),
+      cy: r4(shot.cy + (framing === 'down' ? off : framing === 'up' ? -off : 0)),
+    };
+    // If a step is still past a limit (rounding, or the pulse at the hit), pull its offset in rather than drop the frame.
+    let fixed = sh;
+    for (let tries = 0; tries < 4 && unrealisable(fixed, caps); tries += 1) {
+      fixed = { zoom: fixed.zoom, cx: r4(shot.cx + (fixed.cx - shot.cx) * 0.8), cy: r4(shot.cy + (fixed.cy - shot.cy) * 0.8) };
+    }
+    if (unrealisable(fixed, caps)) fixed = { ...shot };
+    const r = realise(fixed, caps);
+    shots.push(fixed);
+    const step = { atMs: Math.round(t), deviceZoom: r.deviceZoom, crop: [r.crop.x, r.crop.y, r.crop.w, r.crop.h] };
+    if (regionCarriesPan(caps) && caps.region) step.region = regionFor({ crop: r.crop, rotation: caps.region.rotation, active: caps.region.active, maxDigitalZoom: caps.region.maxDigitalZoom }).rect;
+    steps.push(step);
+  }
+  // Home at the end, always: the bop leaves the framing where it found it.
+  const home = realise(shot, caps);
+  const last = { atMs: Math.round(n * stepMs) + Math.round(stepMs), deviceZoom: home.deviceZoom, crop: [home.crop.x, home.crop.y, home.crop.w, home.crop.h] };
+  if (regionCarriesPan(caps) && caps.region) last.region = regionFor({ crop: home.crop, rotation: caps.region.rotation, active: caps.region.active, maxDigitalZoom: caps.region.maxDigitalZoom }).rect;
+  steps.push(last); shots.push({ ...shot });
+  const capped = amp < r4(asked * 0.95) - 1e-4;                      // cut by the cap or the edge, not by the 5 percent margin
+  return {
+    ...base, refused: false, amplitudeRequested: asked, amplitude: amp, pulse: r4(pulseUsed), capped, beats,
+    reason: capped ? `amplitude ${amp} of the ${asked} asked: the crop cap (${caps.digitalMax}x) or the frame edge leaves no more room at ${shot.zoom}x` : null,
+    to: { ...shot }, mode: realise(shots[Math.min(shots.length - 1, 1)], caps).mode, steps, shots,
+  };
+}

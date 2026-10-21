@@ -48,7 +48,7 @@ const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 /** The controller's log line for an ack: the move cycle (includes the move) and the command latency (network leg out), then what the camera did. */
 function ackLine(p) {
   const r = p.ack.result || {};
-  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : p.command.type === 'bop' ? `${r.mode} bop ${r.direction} · ${r.beats} beats at ${r.bpm} bpm · amplitude ${fx(r.amplitude, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}${r.cancelled ? ' · CUT SHORT' : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource} · dropped ${r.droppedFrames}`;
 }
 /** The pro-mode presets the controller offers; each row is gated by the camera's proSupport (docs/SPIKE_PRO_MODE_PLAN.md section 4). */
@@ -77,7 +77,7 @@ const PRO_TYPES = ['pro', 'match', 'stage', 'survey', 'orientation'];
 function resultLine(p) {
   const r = p.result;
   if (r.refused) return `refused ${p.command.type} ${p.command.direction}: ${r.reason}`;
-  const what = p.command.type === 'pan' ? `moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame at ${r.zoomAtPan}x` : `${r.achieved}x${r.releasedCrop ? ' (crop released)' : ''}`;
+  const what = p.command.type === 'pan' ? `moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame at ${r.zoomAtPan}x` : p.command.type === 'bop' ? `bop ${r.direction}, ${r.beats} beats at ${r.bpm} bpm, amplitude ${fx(r.amplitude, 3)} frame at ${r.zoomAtBop}x` : `${r.achieved}x${r.releasedCrop ? ' (crop released)' : ''}`;
   const timing = r.maxStepLateMs != null ? `, steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late), frame gap ≤${r.maxFrameGapMs} ms` : '';
   return `did ${p.command.type}: ${r.mode}${r.path ? ` [${r.path}]` : ''} ${what} in ${r.actualDurationMs} ms, ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''}, dropped ${r.droppedFrames}${timing}${r.reason ? ` (${r.reason})` : ''}`;
 }
@@ -156,6 +156,7 @@ export default function ZoomSpike() {
   const push = (line) => setLog((l) => [`${new Date().toISOString().slice(11, 19)} ${line}`, ...l].slice(0, 60));
   // A move (zoom or pan) runs for 2 to 3 s; the buttons wait for its ack so a press cannot land on top of it ("a move is already in progress", 20 Oct).
   const [moving, setMoving] = useState(false);
+  const [bpm, setBpm] = useState(120);
   const runMove = (p) => { if (!p) return; setMoving(true); p.catch((e) => push(String(e))).finally(() => setMoving(false)); };
 
   useEffect(() => { try { setVideoTrack(() => require('@livekit/react-native').VideoTrack); } catch { /* Expo Go */ } }, []);
@@ -323,6 +324,11 @@ export default function ZoomSpike() {
             </View>
             <View style={[styles.row, { flexWrap: 'wrap' }]}>
               {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} small label={`pan ${d}`} tone="orange" disabled={moving} onPress={() => runMove(s?.pan(d))} />)}
+            </View>
+            <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+              <Text style={mono}>bop (4 s, on the beat; zoom to 2x first):</Text>
+              {[90, 120, 140].map((b) => <Btn key={b} small tone={b === bpm ? 'teal' : 'ghost'} label={b === bpm ? `[${b}]` : `${b}`} onPress={() => setBpm(b)} />)}
+              {['left-right', 'up-down', 'left', 'right', 'up', 'down'].map((d) => <Btn key={d} small label={`bop ${d}`} tone="orange" disabled={moving} onPress={() => runMove(s?.bop(d, { bpm }))} />)}
             </View>
             <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
               <Text style={mono}>show orientation{soakOn || stage ? ' (locked while the soak or a stage runs)' : ''}:</Text>

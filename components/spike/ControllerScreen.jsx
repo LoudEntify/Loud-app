@@ -28,7 +28,7 @@ const fx = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '–');
 /** Same line as the phone Controller's: the move cycle (includes the move), the command latency (network leg out), then what the camera did. */
 function ackLine(p) {
   const r = p.ack.result || {};
-  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
+  const did = r.refused ? `REFUSED: ${r.reason}` : p.command.type === 'pan' ? `${r.mode} [${r.path}] moved ${fx(r.achieved, 3)} of ${fx(r.requested, 3)} frame${r.capped ? ` · CAPPED: ${r.reason}` : ''}` : p.command.type === 'bop' ? `${r.mode} bop ${r.direction} · ${r.beats} beats at ${r.bpm} bpm · amplitude ${fx(r.amplitude, 3)} of ${fx(r.requested, 3)} frame · pulse ${r.pulse}${r.capped ? ` · CAPPED: ${r.reason}` : ''}${r.cancelled ? ' · CUT SHORT' : ''}` : `${r.mode} ${r.achieved}x${r.clamped ? ' (clamped)' : ''}`;
   const timing = r.maxStepLateMs != null ? ` · steps late ≤${r.maxStepLateMs} ms (${r.lateSteps} late) · frame gap ≤${r.maxFrameGapMs} ms` : '';
   return `ack ${p.command.type} cycle ${p.moveCycleMs} ms · command ${p.commandLatencyMs ?? '–'} ms → ${did}${r.lensSwitch ? ' LENS SWITCH' : ''} · ${r.frameSource}${r.panPath ? `/${r.panPath}` : ''} · dropped ${r.droppedFrames}${timing}`;
 }
@@ -103,6 +103,7 @@ export default function ControllerScreen() {
   const { accessToken, session, profile, loading } = useSession();
   const [status, setStatus] = useState('idle');
   const [moving, setMoving] = useState(false);
+  const [bpm, setBpm] = useState(120);
   const [log, setLog] = useState([]);
   const [remote, setRemote] = useState(null);
   const [lastAck, setLastAck] = useState(null);
@@ -243,6 +244,11 @@ export default function ControllerScreen() {
       </div>
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
         {['left', 'right', 'up', 'down'].map((d) => <Btn key={d} label={`pan ${d}`} tone="orange" disabled={!canMove} onPress={() => run(s.pan(d))} />)}
+      </div>
+      <div className="v-row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={mono}>bop (4 s, on the beat; zoom to 2x first):</span>
+        {[90, 120, 140].map((b) => <Btn key={b} tone={b === bpm ? 'teal' : 'ghost'} label={b === bpm ? `[${b} bpm]` : `${b} bpm`} disabled={!live} onPress={() => setBpm(b)} />)}
+        {['left-right', 'up-down', 'left', 'right', 'up', 'down'].map((d) => <Btn key={d} label={`bop ${d}`} tone="orange" disabled={!canMove} onPress={() => run(s.bop(d, { bpm }))} />)}
       </div>
       <div className="v-row" style={{ flexWrap: 'wrap' }}>
         <Btn label="Start 20-min soak" disabled={!live || !!soak} onPress={() => s.startSoak(20)} />

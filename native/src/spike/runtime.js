@@ -17,13 +17,13 @@ import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
-import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId } from './commands';
+import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
 import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
 
 /** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
 export const MOUNT_WATCH_MS = 2000;
-import { capsFor, zoomPlan, panPlan, tightnessFor, PAN_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
+import { capsFor, zoomPlan, panPlan, bopPlan, tightnessFor, PAN_DEFAULTS, BOP_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
 import { measureOffset, RESYNC_EVERY_MS } from './clock';
 import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
 import { normaliseProfile, surveyFileName } from './survey';
@@ -379,6 +379,8 @@ export class SpikeSession {
   }
   zoom(target, durationMs = 2000, easing = 'ease-in-out') { return this.send(zoomCommand({ target, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
   pan(direction, { degree = PAN_DEFAULTS.degree, window = PAN_DEFAULTS.window, durationMs = PAN_DEFAULTS.durationMs, easing = PAN_DEFAULTS.easing } = {}) { return this.send(panCommand({ direction, degree, window, durationMs, easing, decidedAt: this.serverNow() ?? Date.now() })); }
+  /** A bop (zoomPlan.js bopPlan): a rhythmic micro-pan with a bounce, on the beat, that ends where it started. */
+  bop(direction, { bpm = BOP_DEFAULTS.bpm, durationMs = BOP_DEFAULTS.durationMs, strength = BOP_DEFAULTS.strength } = {}) { return this.send(bopCommand({ direction, bpm, durationMs, strength, decidedAt: this.serverNow() ?? Date.now() })); }
 
   // ── pro mode (controller side) ────────────────────────────────
   /** One manual-control change on the camera (proMode.js for the controls and units). */
@@ -457,7 +459,7 @@ export class SpikeSession {
       return;
     }
     if (this.role !== 'camera') return;
-    if (m.type === 'zoom' || m.type === 'pan') this.execute(m).catch((e) => this.onEvent('error', String(e?.message || e)));
+    if (m.type === 'zoom' || m.type === 'pan' || m.type === 'bop') this.execute(m).catch((e) => this.onEvent('error', String(e?.message || e)));
     else if (m.type === 'pro' || m.type === 'match' || m.type === 'stage' || m.type === 'survey' || m.type === 'orientation') this.executePro(m).catch((e) => this.onEvent('error', String(e?.message || e)));
   }
 
@@ -535,7 +537,7 @@ export class SpikeSession {
     const receivedLocal = Date.now();
     const receivedAt = this.serverNow() ?? receivedLocal;
     this.onEvent('command', m);
-    if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, target: m.target ?? null, direction: m.direction ?? null, degree: m.degree ?? null, window: m.window ?? null, duration_ms: m.durationMs, easing: m.easing, source: m.source, received_from: 'data-channel', shot_id: this.shotId, shot: this.shot, received_local_ms: receivedLocal, offset_at_receipt_ms: this.offset?.offsetMs ?? null });
+    if (this.collect) this.buffer.intent(m.decisionId, { type: m.type, target: m.target ?? null, direction: m.direction ?? null, degree: m.degree ?? null, window: m.window ?? null, bpm: m.bpm ?? null, strength: m.strength ?? null, duration_ms: m.durationMs, easing: m.easing ?? null, source: m.source, received_from: 'data-channel', shot_id: this.shotId, shot: this.shot, received_local_ms: receivedLocal, offset_at_receipt_ms: this.offset?.offsetMs ?? null });
     this.moving = true;
     const startedAt = this.serverNow() ?? Date.now();
     const shotBefore = this.shot; const shotIdBefore = this.shotId;
@@ -570,6 +572,12 @@ export class SpikeSession {
     if (m.type === 'zoom') {
       plan = zoomPlan({ profile: this.profile, caps, shot: this.shot, target: m.target, durationMs: m.durationMs, easing: m.easing });
       requested = m.target;
+    } else if (m.type === 'bop') {
+      plan = bopPlan({ direction: m.direction, bpm: m.bpm, durationMs: m.durationMs, strength: m.strength, shot: this.shot, caps });
+      requested = plan.amplitudeRequested;
+      if (plan.refused) {
+        return { ...common, kind: 'bop', mode: null, path: 'bop', requested, achieved: 0, clamped: false, reason: plan.reason, refused: true, direction: m.direction, bpm: plan.bpm, beats: 0, amplitude: 0, durationMs: plan.durationMs, droppedFrames: 0, framesDuring: 0, actualDurationMs: 0, stepsPlanned: 0, stepsApplied: 0 };
+      }
     } else {
       plan = panPlan({ direction: m.direction, degree: m.degree, window: m.window, durationMs: m.durationMs, easing: m.easing, shot: this.shot, caps });
       requested = plan.travelRequested;
@@ -584,6 +592,13 @@ export class SpikeSession {
     this.shot = landed; this.shotId = mintId('shot'); this.shots += 1;
     if (m.type === 'zoom') {
       return { ...r, ...common, mode: plan.mode, clamped: Boolean(r.clamped || plan.clamped), reason: r.reason || plan.reason, releasedCrop: plan.releasesCrop, refused: false };
+    }
+    if (m.type === 'bop') {
+      // A bop is judged by its amplitude (what each hit moved, wide-frame fraction) and whether it ran to the end; it lands home.
+      return {
+        ...r, ...common, kind: 'bop', mode: plan.mode, path: 'bop', requested, achieved: r?.cancelled ? 0 : plan.amplitude, clamped: Boolean(plan.capped), reason: r.reason || plan.reason || null, refused: false,
+        capped: Boolean(plan.capped), direction: m.direction, bpm: plan.bpm, beats: plan.beats, amplitude: plan.amplitude, pulse: plan.pulse, durationMs: plan.durationMs, zoomAtBop: plan.zoom, strength: plan.strength,
+      };
     }
     // A pan is judged by its travel, not by a zoom figure: requested is
     // what was asked (frame fraction), achieved what the camera reports
