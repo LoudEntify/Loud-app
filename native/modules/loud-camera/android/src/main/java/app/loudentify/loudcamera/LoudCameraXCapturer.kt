@@ -145,7 +145,9 @@ class LoudCameraXCapturer(
   @Volatile var sensorOrientation: Int = 90
   // Pan path on the hardware source: "region" when the HAL honours an
   // off-centre crop region, "gpu" when it re-centres (probed at start).
-  @Volatile var panPath: String = "region"
+  @Volatile var panPath: String = "gpu"
+  /** Whether an honoured region probe may route pans through the HAL's own crop region (see probeRegionOffset). Off since 21 Oct: the G35's metadata said yes and its pixels said no. */
+  private val REGION_CARRIES_PAN = false
   @Volatile private var regionProbe: Map<String, Any?>? = null
   @Volatile private var hwZoom = 1.0
   // Fallback: the paths still to try, in order, when one fails to bind or
@@ -537,8 +539,14 @@ class LoudCameraXCapturer(
         regionProbe = mapOf(
           "requested" to rectMap(want), "applied" to got?.let { rectMap(it) }, "settled" to settled, "honoured" to honoured, "centred" to centred, "ms" to elapsed
         )
-        panPath = if (honoured) "region" else "gpu"
-        frameSourceReason = "${frameSourceReason ?: ""}; crop-region offset ${if (honoured) "honoured" else if (centred) "ignored (HAL re-centres): pans via GPU crop" else if (!settled) "unknown (no region reported in ${elapsed} ms): pans via GPU crop" else "not matched: pans via GPU crop"}"
+        // 21 Oct (docs/DECISIONS.md): the probe reads METADATA, and on the Moto G35 the
+        // HAL reported an honoured, moving region in three sessions (19 to 21 Oct) while the
+        // picture never moved; the GPU crop pan moved visibly on the S25 Ultra the same day.
+        // So the region carries the centred zoom only and every pan goes through the GPU
+        // crop, whatever the probe says, until a probe that checks pixels exists
+        // (REGION_CARRIES_PAN). The probe still runs and is reported, for that future check.
+        panPath = if (honoured && REGION_CARRIES_PAN) "region" else "gpu"
+        frameSourceReason = "${frameSourceReason ?: ""}; crop-region offset ${if (honoured) (if (REGION_CARRIES_PAN) "honoured" else "honoured in metadata (not trusted: pans via GPU crop)") else if (centred) "ignored (HAL re-centres): pans via GPU crop" else if (!settled) "unknown (no region reported in ${elapsed} ms): pans via GPU crop" else "not matched: pans via GPU crop"}"
         Log.i(TAG, "region probe: honoured=$honoured centred=$centred settled=$settled applied=$got wanted=$want")
         crop = floatArrayOf(0f, 0f, 1f, 1f); hwZoom = 1.0; pushRegion(null)
       }
