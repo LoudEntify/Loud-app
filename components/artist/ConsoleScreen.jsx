@@ -13,6 +13,9 @@ import { useRouter } from 'next/navigation';
 import { useSession } from '../../lib/useSession';
 import { api } from '../../lib/viewerApi';
 import { composeLayout, renderFrame } from '../../lib/pipeline/compositor';
+import { lookPlan } from '../../lib/pipeline/lut';
+import { createLutPass } from '../../lib/pipeline/lutGl';
+import { LOOK_CHOICES } from '../../lib/direction';
 import { track } from '../../lib/telemetry';
 import { SHOW_PROMPTS } from '../../lib/showPrompts';
 import { Skeleton, ErrorState, OfflineBar, useOnline } from '../viewer/States';
@@ -36,6 +39,11 @@ export default function ConsoleScreen({ showId }) {
   const [holdPct, setHoldPct] = useState(0);
   const [ending, setEnding] = useState(false);
   const [goingLive, setGoingLive] = useState(false);
+  // The look on screen for this show (shows.look). The preview grades with the same
+  // pass the compositor uses, so what the artist judges is what is broadcast.
+  const [look, setLook] = useState(null);
+  const [lookBusy, setLookBusy] = useState(false);
+  const lutPassRef = useRef(null); const lutCanvasRef = useRef(null);
   const [now, setNow] = useState(Date.now());
   const videoRef = useRef(null); const canvasRef = useRef(null); const lastComment = useRef(0); const holdRef = useRef(null);
   const show = data?.show; const slot = data?.slot; const isVersus = show?.performance_mode === 'versus';
@@ -46,6 +54,7 @@ export default function ConsoleScreen({ showId }) {
     const r = await api(`/api/artist/shows/${showId}/console`, { accessToken });
     if (!r.ok) { setErr(r.data?.error || 'Could not open the console.'); return; }
     setData(r.data);
+    setLook((l) => l ?? (r.data.show?.look || { lut: 'none', strength: 1 }));
   }, [accessToken, showId]);
   useEffect(() => { if (!loading && !session) router.replace('/signup?trigger=perform'); }, [loading, session, router]);
   useEffect(() => { load(); }, [load]);
@@ -88,13 +97,20 @@ export default function ConsoleScreen({ showId }) {
       if (c && show) {
         const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, w: c.width, h: c.height, healthy: { a: slot === 'a' ? camHealthy : true, b: slot === 'b' ? camHealthy : true } });
         const sources = { [slot]: v && v.readyState >= 2 ? v : null };
-        renderFrame(c.getContext('2d'), layout, { sources, names: { a: show.artist?.display_name || 'You', b: show.artist_b?.display_name || 'Artist B' } });
+        // The look through the same WebGL pass the compositor uses: the CPU path would
+        // read back every pixel of the preview each frame, which a phone cannot hold.
+        // No WebGL (or a pass that failed to build) means an ungraded preview, never a stall.
+        let pass = lutPassRef.current;
+        if (!pass && lutCanvasRef.current) { try { pass = createLutPass(lutCanvasRef.current); } catch { pass = null; } lutPassRef.current = pass || 'none'; }
+        let plan = null;
+        try { plan = look && look.lut && look.lut !== 'none' ? lookPlan(look) : null; } catch { plan = null; }
+        renderFrame(c.getContext('2d'), layout, { sources, names: { a: show.artist?.display_name || 'You', b: show.artist_b?.display_name || 'Artist B' }, look: plan, lutPass: plan && pass && pass !== 'none' ? pass : null });
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [show, slot, camHealthy, stream]);
+  }, [show, slot, camHealthy, stream, look]);
 
   // foreground rule: warn before leaving mid-show
   useEffect(() => {
@@ -110,6 +126,15 @@ export default function ConsoleScreen({ showId }) {
     setGoingLive(false);
     if (r.ok) { track('show.go_live', { from: 'console' }, { showId }); await load(); } else setErr(r.data?.error || 'Could not go live.');
   }
+  // The look is a show-level fact: saved on the show, so both consoles and the egress agree.
+  async function saveLook(next) {
+    setLook(next); setLookBusy(true);
+    const r = await api(`/api/artist/shows/${showId}/look`, { method: 'PUT', accessToken, body: next });
+    setLookBusy(false);
+    if (r.ok) setData((d) => ({ ...d, show: { ...d.show, look: r.data.look } }));
+    else setErr(r.data?.error || 'Could not change the look. The show is not affected.');
+  }
+
   async function versus(action) {
     const r = await api(`/api/artist/shows/${showId}/versus`, { method: 'POST', accessToken, body: { action } });
     if (r.ok) { if (r.data.view) setData((d) => ({ ...d, show: { ...d.show, versus_view: r.data.view } })); if (r.data.request) setTickData((t) => ({ ...t, pendingRequest: r.data.request })); }
@@ -204,7 +229,7 @@ export default function ConsoleScreen({ showId }) {
           </div>
         )}
         <div className="v-row" style={{ gap: 8, justifyContent: 'center' }}>
-          {[['prompt', 'Prompt'], ['vote', 'Vote'], ['fix', 'Fix']].map(([k, l]) => <button key={k} aria-label={l} className="v-col" style={{ alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 700, width: 60 }} onClick={() => setSheet(k)}><span className="v-icon-btn" style={{ background: k === 'fix' ? 'var(--orange)' : 'rgba(253,255,252,0.14)', color: k === 'fix' ? 'var(--ink)' : 'var(--porcelain)' }}>{k === 'fix' ? <Warn /> : k === 'vote' ? <Check /> : <Send />}</span><span>{l}</span></button>)}
+          {[['prompt', 'Prompt'], ['vote', 'Vote'], ['look', 'Look'], ['fix', 'Fix']].map(([k, l]) => <button key={k} aria-label={l} className="v-col" style={{ alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 700, width: 60 }} onClick={() => setSheet(k)}><span className="v-icon-btn" style={{ background: k === 'fix' ? 'var(--orange)' : 'rgba(253,255,252,0.14)', color: k === 'fix' ? 'var(--ink)' : 'var(--porcelain)' }}>{k === 'fix' ? <Warn /> : k === 'vote' ? <Check /> : k === 'look' ? <Eye /> : <Send />}</span><span>{l}</span></button>)}
         </div>
         {tickData?.prompt && <div className="v-card-dark v-row" style={{ padding: '8px 12px', gap: 8 }}><span className="v-col" style={{ flex: 1, gap: 1 }}><span className="v-kicker" style={{ color: 'var(--teal)' }}>Prompt open</span><span className="v-ellipsis" style={{ fontWeight: 700 }}>{tickData.prompt.body}</span></span><button className="v-btn v-btn-ghost-dark" style={{ height: 36 }} onClick={closePrompt}>Close voting</button></div>}
         <div role="log" aria-label="Comments" className="v-panel-dark" style={{ flex: 1, minHeight: 60, overflow: 'hidden', padding: 10, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 4, fontSize: 15 }}>
@@ -231,6 +256,8 @@ export default function ConsoleScreen({ showId }) {
       )}
       {sheet === 'fix' && <FixSheet mics={mics} micId={micId} onMic={(id) => { setMicId(id); setSheet(null); }} elapsed={elapsed} live camHealthy={camHealthy} onRecheck={() => { setCamHealthy(true); setMicId((m) => m); setSheet(null); }} onClose={() => setSheet(null)} />}
       {(sheet === 'prompt' || sheet === 'vote') && <PromptSheet kind={sheet} isVersus={isVersus} names={{ a: show.artist?.display_name || 'A', b: show.artist_b?.display_name || 'B' }} onPush={pushPrompt} onClose={() => setSheet(null)} />}
+      {sheet === 'look' && <LookSheet look={look} busy={lookBusy} onChange={saveLook} onClose={() => setSheet(null)} />}
+      <canvas ref={lutCanvasRef} width={2} height={2} aria-hidden="true" style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
     </Shell>
   );
 }
@@ -271,6 +298,33 @@ function PromptSheet({ kind, isVersus, names, onPush, onClose }) {
         {options.map((o, i) => <label key={i} className="v-field">Option {i + 1}<input value={o} maxLength={60} onChange={(e) => setOptions((l) => l.map((x, j) => (j === i ? e.target.value : x)))} /></label>)}
         {options.length < 4 && <button className="v-link" style={{ alignSelf: 'flex-start' }} onClick={() => setOptions((l) => [...l, ''])}>Add an option</button>}
         <button className="v-btn v-btn-lg v-btn-teal" disabled={!body.trim() || options.filter((o) => o.trim()).length < 2} onClick={() => onPush({ kind: 'choice', body: body.trim(), options: options.map((o) => o.trim()).filter(Boolean) })} data-testid="push-prompt">Push to viewers</button>
+      </section>
+    </div>
+  );
+}
+
+// The look, changed mid-show (design/DirectionSettings.dc.html's Look section as a
+// sheet). The preview behind it is already graded, so a tap is judged on the picture
+// itself. Saving writes the show's look; the next tick carries it to the broadcast.
+function LookSheet({ look, busy, onChange, onClose }) {
+  const current = look?.lut || 'none';
+  const strength = Math.round((look?.strength ?? 1) * 100);
+  return (
+    <div role="dialog" aria-label="Look" style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(1,22,39,0.5)' }} onClick={onClose}>
+      <section className="v-sheet" onClick={(e) => e.stopPropagation()} data-testid="look-sheet">
+        <div className="v-sheet-handle" />
+        <h1 style={{ fontSize: 26 }}>Look</h1>
+        <p className="v-muted" style={{ fontSize: 15 }}>The grade on your broadcast. Viewers see the change within a few seconds. Your recording keeps the camera&apos;s own picture.</p>
+        <div role="radiogroup" aria-label="Look" className="v-row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          {LOOK_CHOICES.map((l) => <button key={l.key} role="radio" aria-checked={current === l.key} className="v-chip v-chip-light" title={l.note} disabled={busy} onClick={() => onChange({ lut: l.key, strength: (look?.strength ?? 1) })}>{l.label}</button>)}
+        </div>
+        {current !== 'none' && (
+          <label className="v-col" style={{ gap: 4 }}>
+            <span className="v-muted" style={{ fontSize: 14 }}>Strength {strength}%</span>
+            <input type="range" min={10} max={100} step={5} value={strength} aria-label="Look strength" onChange={(e) => onChange({ lut: current, strength: Number(e.target.value) / 100 })} />
+          </label>
+        )}
+        <button className="v-btn v-btn-lg v-btn-ink" onClick={onClose}>Back to the show</button>
       </section>
     </div>
   );
