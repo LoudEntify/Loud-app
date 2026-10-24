@@ -17,6 +17,7 @@ import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
 import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
 import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT, frameRateOptions } from '../../src/spike/frameRate';
+import { FACINGS, facingCapability, describeFacing } from '../../src/spike/facing';
 import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
 import { ORIENTATIONS } from '../../src/spike/orientation';
 
@@ -147,6 +148,9 @@ export default function ZoomSpike() {
   const [frameSource, setFrameSource] = useState('auto');
   // The frame rate the Camera role asks for (Settings later); held to what the lens advertises at start, which the frameRate event reports.
   const [frameRate, setFrameRate] = useState(FRAME_RATE_DEFAULT);
+  // Which camera this phone runs. What that camera can do is read from the survey at start
+  // and reported in the log; the controls follow the camera, not the facing.
+  const [facing, setFacing] = useState('back');
   // Pro mode (controller role): the camera's capability as it reported it, the current test stage.
   const [cameraProfile, setCameraProfile] = useState(null);
   const [stage, setStage] = useState(null);
@@ -184,9 +188,10 @@ export default function ZoomSpike() {
     if (!accessToken) { push('sign in as an artist first (Profile tab)'); return; }
     setMode(role); setStatus('connecting');
     const s = new SpikeSession({
-      role, accessToken, userId: session?.user?.id, frameSource, frameRate,
+      role, accessToken, userId: session?.user?.id, frameSource, frameRate, facing,
       onEvent: (kind, p) => {
         if (kind === 'profile') setProfile(p);
+        else if (kind === 'capability') { push(p.line); push(`mirror: preview ${p.mirror.preview ? 'mirrored' : 'as captured'}, broadcast ${p.mirror.broadcast ? 'mirrored' : 'as captured'} — ${p.mirror.reason}`); }
         else if (kind === 'frameRate') { push(`frame rate: ${p.fps} fps${p.exact ? '' : ` (inside ${p.range[0]}–${p.range[1]})`}${p.changed ? ` — asked ${p.requested}: ${p.reason}` : ''}`); for (const w of p.warnings || []) push(`WARN ${w}`); }
         else if (kind === 'state') setState(p);
         else if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
@@ -282,8 +287,12 @@ export default function ZoomSpike() {
           {FRAME_SOURCES.map((f) => <Btn key={f} small label={f === frameSource ? `[${f}]` : f} onPress={() => setFrameSource(f)} />)}
         </View>
         <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+          <Text style={mono}>camera:</Text>
+          {FACINGS.map((f) => <Btn key={f} small label={f === facing ? `[${f}]` : f} onPress={() => { setFacing(f); if (survey?.profile) push(describeFacing(facingCapability(survey.profile, f))); }} />)}
+        </View>
+        <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
           <Text style={mono}>frame rate:</Text>
-          {(survey?.profile?.pro?.fpsRanges ? frameRateOptions(survey.profile.pro.fpsRanges) : FRAME_RATE_CHOICES.map((f) => ({ fps: f, supported: true, exact: true }))).map((o) => (
+          {(survey?.profile ? facingCapability(survey.profile, facing).frameRates : FRAME_RATE_CHOICES.map((f) => ({ fps: f, supported: true, exact: true }))).map((o) => (
             <Btn key={o.fps} small label={`${o.fps === frameRate ? `[${o.fps}]` : o.fps}${o.supported ? (o.exact ? '' : '~') : '✗'}`} onPress={() => { setFrameRate(o.fps); if (!o.supported) push(`${o.fps} fps: ${o.reason}`); else if (!o.exact) push(`${o.fps} fps: ${o.reason}`); }} />
           ))}
         </View>
@@ -319,7 +328,7 @@ export default function ZoomSpike() {
       <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
         <Text style={[styles.bodyDark, { fontWeight: '700' }]}>{mode.toUpperCase()} · {status}</Text>
         {profile && <Text style={mono}>B2 {profile.make} {profile.model} · {profile.os} {profile.osVersion} · zoom {profile.deviceZoom.available ? `${profile.deviceZoom.min}–${profile.deviceZoom.max}x device` : 'DIGITAL FALLBACK ≤1.2x'}{profile.qualityCeiling?.zoom != null ? ` · 1080p ceiling ${profile.qualityCeiling.zoom}x` : ''}{profile.deviceZoom.switchOverFactors?.length ? ` · lens switch at ${profile.deviceZoom.switchOverFactors.join(', ')}x` : ' · no lens switch'} · frame path {profile.frameSource?.eligible ?? '?'}</Text>}
-        {st && <Text style={mono}>B4 {st.frameSource}{st.frameSource === 'hardware' ? ` (pans ${st.panPath})` : ''} · {st.orientation} {st.width}×{st.height} rot {st.rotation}° · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.fps} fps (target {st.fpsTarget ?? '–'}) · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
+        {st && <Text style={mono}>B4 {st.frameSource}{st.frameSource === 'hardware' ? ` (pans ${st.panPath})` : ''} · {st.orientation} {st.width}×{st.height} rot {st.rotation}° · zoom {st.deviceZoom}x device × {st.digitalFactor} crop = {st.effectiveZoom}x · lens {st.activePhysicalId || st.cameraId} · {st.facing ?? facing}{st.mirrorOutput ? ' mirrored' : ''} · {st.fps} fps (target {st.fpsTarget ?? '–'}) · dropped {st.droppedFrames} · conv {st.convertMsPerFrame ?? '–'} ms{st.moving ? ` · MOVING ${st.moveKind}` : ''}</Text>}
         {mount?.warning && <Text style={[mono, { color: '#ff9f1c' }]}>MOUNT: {mount.warning}. Fix: {mount.fix}</Text>}
         {st && <Text style={mono}>light EV {fx(st.sceneEv, 1)} · ISO {st.iso ?? '–'} · {fx(st.exposureMs, 1)} ms · f/{st.aperture ?? '–'}{st.frameSource === 'hardware' ? ` · region ${st.appliedCrop ? `${fx(st.appliedCrop.w, 3)}@${fx(st.appliedCrop.x, 3)},${fx(st.appliedCrop.y, 3)}` : '–'} pushes ${st.regionPushes}` : ''}</Text>}
         {st?.pro?.enabled && <Text style={mono}>PRO on · AE {st.pro.aeMode ?? '?'}{st.pro.aeLock ? ' locked' : ''} · AWB {st.pro.awbMode ?? '?'}{st.pro.awbLock ? ' locked' : ''} · AF {st.pro.afMode ?? '?'} · ISO {st.pro.iso ?? '–'} · {st.pro.shutterMs ?? '–'} ms · WB {st.pro.wbKelvin ?? '–'} K · focus {st.pro.focusDiopters ?? '–'} dpt · EV {st.pro.evStops ?? 0} · frame {st.pro.frameDurationMs ?? '–'} ms</Text>}

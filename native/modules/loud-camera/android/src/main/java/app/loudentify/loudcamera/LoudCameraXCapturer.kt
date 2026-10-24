@@ -102,7 +102,15 @@ class LoudCameraXCapturer(
   private val fps: Int,
   private val frameSourceWanted: String = "auto",
   /** The AE target range sent to the HAL: [fps, fps] for a fixed rate, or the advertised range the rate sits inside (frameRate.js resolveFrameRate). */
-  private val fpsRange: Range<Int> = Range(fps, fps)
+  private val fpsRange: Range<Int> = Range(fps, fps),
+  /**
+   * Flip the published picture left-to-right. The front camera's frames are
+   * what a mirror shows; viewers should get the un-mirrored picture or any
+   * writing reads backwards (facing.js mirrorRule), so the default for a
+   * front camera is false here and the preview does its own mirroring.
+   * Applied in the texture transform: no pixels are copied.
+   */
+  private val mirrorOutput: Boolean = false
 ) : VideoCapturer {
   companion object {
     private const val TAG = "LoudCamera"
@@ -926,10 +934,13 @@ class LoudCameraXCapturer(
     correction = corr
     uprightMethod = "texture"
     val w = displayWidth(); val h = displayHeight()
-    if (corr == 0 && buffer.width == w && buffer.height == h) return buffer to 0
+    if (corr == 0 && !mirrorOutput && buffer.width == w && buffer.height == h) return buffer to 0
     val m = Matrix()
     m.preTranslate(0.5f, 0.5f)
     m.preRotate(corr.toFloat())
+    // The flip is applied about the picture's own centre, after the rotation, so
+    // it is always left-to-right as the viewer sees it whatever the orientation.
+    if (mirrorOutput) m.preScale(-1f, 1f)
     m.preTranslate(-0.5f, -0.5f)
     return buffer.applyTransformMatrix(m, w, h) to 0
   }
@@ -1298,6 +1309,7 @@ class LoudCameraXCapturer(
       "panPath" to panPath, "regionProbe" to regionProbe,
       "fps" to round3(measuredFps),
       "fpsTarget" to fps, "fpsRange" to listOf(fpsRange.lower, fpsRange.upper),
+      "facing" to facing, "mirrorOutput" to mirrorOutput,
       "frames" to frames,
       "droppedFrames" to droppedFrames,
       "convertMsPerFrame" to (if (frames > 0) round3(convertMsTotal / frames) else null),

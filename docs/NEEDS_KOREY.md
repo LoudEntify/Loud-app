@@ -160,7 +160,15 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, 21:20, Moto G35: the bop and the pro readbacks both work well (Korey). Device retests are closed on both phones; the Samsung AE-lock readback quirk stays an open note, not a blocker.**
 
-**Resume here: frame rate (next CI APK) and the LUT look test**
+**24 Oct: frame rate works as expected on device (Korey). Resume here: the front camera.**
+
+The spike's idle screen now has a **camera: back front** row above the frame-rate row. Pick the camera before pressing Camera; the log prints what that camera can do in plain English, and any control it cannot do is refused with the reason instead of failing silently.
+
+1. **Front camera, basics (3 min).** Pick **front**, Camera role, Controller on the laptop. The log should print a line like `Front camera (lens 1): digital zoom, pan, bop. Not here: device zoom (…), pro mode (…)`. Press **2x**: expect a refusal naming the camera's own zoom, not an error. Press a **pan** and **bop 120 left-right**: both should move the picture. Report + stop.
+2. **The mirror check (1 min, important).** Still on the front camera, hold up something with writing on it (a book spine, a bank card, your shirt logo). On the phone's own preview the writing will read backwards, which is right. On the laptop (what viewers get) it must read **the correct way round**. Say plainly which way each one read: this is the one part of the front camera I could not settle without a device.
+3. **Back camera unchanged (1 min).** Pick **back**, repeat a 2x, a pan and a bop. Nothing should have changed from the last run.
+
+**Earlier: the frame rate**
 
 Frame rate is a row on the spike's idle screen (`frame rate: 24 25 30 60`, under the frame-path row), chosen BEFORE pressing Camera. The phone resolves it against what the lens advertises at start and writes one log line (`frame rate: 60 fps` or `frame rate: 30 fps — asked 60: this camera tops out at 30`); the B4 line shows the measured rate and the target (`59.8 fps (target 60)`). A `~` after a rate on the row means the camera offers it only inside a range (it may float with the light); `✗` means the camera cannot hold it.
 

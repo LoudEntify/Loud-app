@@ -20,6 +20,7 @@ import * as LoudCamera from '../../modules/loud-camera';
 import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
 import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from './frameRate';
+import { FACINGS, facingCapability, describeFacing, commandAllowed, mirrorRule } from './facing';
 import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
 
 /** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
@@ -82,12 +83,17 @@ export async function readProfile() {
  * screen; everything else is internal. Call connect(), then stop().
  */
 export class SpikeSession {
-  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto', frameRate = FRAME_RATE_DEFAULT }) {
+  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto', frameRate = FRAME_RATE_DEFAULT, facing = 'back' }) {
     this.role = role; this.accessToken = accessToken; this.userId = userId; this.onEvent = onEvent || (() => {});
     this.frameSource = FRAME_SOURCES.includes(frameSource) ? frameSource : 'auto';
     // The rate asked for in Settings; resolved against the lens's advertised ranges at camera start (frameRate.js). `fps` is what runs.
     this.frameRateWanted = Number.isFinite(Number(frameRate)) && Number(frameRate) > 0 ? Number(frameRate) : FRAME_RATE_DEFAULT;
     this.fps = FRAME_RATE_DEFAULT; this.frameRate = null;
+    // Which camera this phone is running (facing.js). The capability of THAT camera decides
+    // which controls work, not the facing itself: a front camera that really does advertise
+    // the advanced features gets them (Korey, 24 Oct).
+    this.facing = FACINGS.includes(facing) ? facing : 'back';
+    this.capability = null; this.mirror = mirrorRule(this.facing);
     this.room = null; this.profile = null; this.offset = null; this.track = null; this.stream = null;
     // The camera's framing as the director sees it: one shot at a time
     // (zoomPlan.js). A zoom or a pan makes a new shot; a refused or failed
@@ -178,10 +184,13 @@ export class SpikeSession {
 
   async startCamera() {
     // Frame rate: what Settings asked for, held to what this lens advertises (a fractional or unlisted rate lands on the nearest it can hold).
-    const fr = resolveFrameRate(this.frameRateWanted, this.profile?.pro?.fpsRanges);
+    // The chosen camera's own capability, and its frame-rate ranges rather than the back camera's.
+    this.capability = facingCapability(this.profile, this.facing);
+    this.onEvent('capability', { facing: this.facing, capability: this.capability, line: describeFacing(this.capability), mirror: this.mirror });
+    const fr = resolveFrameRate(this.frameRateWanted, this.capability.pro?.fpsRanges ?? this.profile?.pro?.fpsRanges);
     this.fps = fr.fps; this.frameRate = fr;
     this.onEvent('frameRate', { ...fr, warnings: frameRateWarnings(fr.fps, { frameSource: this.frameSource, exact: fr.exact }) });
-    const { stream, info } = await LoudCamera.start({ facing: 'back', width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource });
+    const { stream, info } = await LoudCamera.start({ facing: this.facing, width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource, mirrorOutput: this.mirror.broadcast });
     this.stream = stream;
     const mediaTrack = stream.getVideoTracks()[0];
     const track = new LocalVideoTrack(mediaTrack, undefined, true);
@@ -487,8 +496,12 @@ export class SpikeSession {
     let result;
     try {
       if (m.type === 'stage') result = { kind: 'stage', stage: this.stage, achieved: this.stage, requested: m.stage, supported: true, reason: null };
-      else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.profile?.pro ?? null, proSupport: this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, fps: this.fps, frameRate: this.frameRate, hardwareLevel: this.profile?.pro?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model }, supported: true, reason: null };
-      else if (m.type === 'pro') result = await this.runPro(m.control, m.value);
+      else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.capability?.pro ?? this.profile?.pro ?? null, proSupport: this.capability?.proSupport ?? this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, fps: this.fps, frameRate: this.frameRate, hardwareLevel: (this.capability?.proSupport ?? this.profile?.proSupport)?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model, facing: this.facing, capability: this.capability, facingLine: this.capability ? describeFacing(this.capability) : null, mirror: this.mirror }, supported: true, reason: null };
+      else if (m.type === 'pro') {
+        const allowed = commandAllowed(this.capability, m);
+        result = allowed.ok ? await this.runPro(m.control, m.value)
+          : { kind: 'pro', control: m.control, requested: m.value, achieved: null, clamped: false, supported: false, reason: allowed.reason, warnings: [], applied: false, facing: this.facing };
+      }
       else if (m.type === 'orientation') result = await this.runOrientation(m);
       else result = await this.runMatch(m);
     } catch (e) {
@@ -551,7 +564,11 @@ export class SpikeSession {
     const shotBefore = this.shot; const shotIdBefore = this.shotId;
     let result;
     try {
-      result = await this.runMove(m);
+      // What this camera can do decides, not which way it faces: a refusal carries the
+      // capability's own reason rather than a native error from a command that cannot work.
+      const allowed = commandAllowed(this.capability, m);
+      if (!allowed.ok) result = { mode: 'none', frameSource: this.lastState?.frameSource ?? null, requested: m.target ?? null, achieved: null, clamped: false, reason: allowed.reason, droppedFrames: 0, actualDurationMs: 0, refused: true, failed: false, facing: this.facing };
+      else result = await this.runMove(m);
     } catch (e) {
       result = { mode: 'none', frameSource: this.lastState?.frameSource ?? null, requested: m.target ?? null, achieved: null, clamped: false, reason: String(e?.message || e), droppedFrames: 0, actualDurationMs: 0, refused: false, failed: true };
     }
@@ -572,9 +589,17 @@ export class SpikeSession {
    * back refused (no native call, `refused: true`, the reason in
    * `reason`), and the shot stays where it was.
    */
+  /** The profile as the running camera sees it: its own zoom range and lens, the rest unchanged. */
+  facingProfile() {
+    if (!this.capability?.available) return this.profile;
+    return { ...this.profile, deviceZoom: this.capability.deviceZoom, qualityCeiling: this.capability.qualityCeiling, primaryCameraId: this.capability.lensId ?? this.profile?.primaryCameraId };
+  }
+
   async runMove(m) {
     const st = this.lastState || LoudCamera.getState() || {};
-    const caps = capsFor(this.profile, st);
+    // The caps come from the camera that is actually running: the back camera's zoom range
+    // would be wrong on the front one (and the other way round on a phone with a zooming front camera).
+    const caps = capsFor(this.facingProfile(), st);
     const common = { frameSource: st.frameSource ?? caps.frameSource, panPath: caps.panPath, orientation: st.orientation ?? this.orientation };
     let plan; let requested;
     if (m.type === 'zoom') {

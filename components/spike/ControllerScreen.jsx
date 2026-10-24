@@ -46,7 +46,7 @@ function proAckLine(p) {
   const r = p.ack.result || {};
   if (p.command.type === 'stage') return `stage ${r.achieved} on the camera`;
   if (p.command.type === 'orientation') return r.refused ? `orientation ${r.requested} REFUSED by the camera: ${r.reason}` : `orientation ${r.achieved} on the camera (rotation ${r.rotation}°, ${r.width}×${r.height}) · mounted ${r.physical}${r.mismatch ? ` · MOUNT WARNING: ${r.warning}. Fix: ${r.fix}` : ''}`;
-  if (p.command.type === 'survey') return `camera capability: ${r.profile?.hardwareLevel ?? '?'} level, ${r.profile?.fps ?? '?'} fps, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}`;
+  if (p.command.type === 'survey') return `camera capability: ${r.profile?.facing ?? 'back'} camera, ${r.profile?.hardwareLevel ?? '?'} level, ${r.profile?.fps ?? '?'} fps, pro controls ${Object.entries(r.profile?.proSupport || {}).filter(([k, v]) => k !== 'hardwareLevel' && v?.supported).map(([k]) => k).join(', ') || 'none'}${r.profile?.facingLine ? ` · ${r.profile.facingLine}` : ''}`;
   if (p.command.type === 'match') return r.phase === 'read' ? `match read: ISO ${r.targets?.iso ?? '–'}, ${r.targets?.shutterMs ?? '–'} ms, ${r.targets?.wbKelvin ?? '–'} K` : `match apply: residual ${residualLine(r.residual)}${r.reasons?.length ? ` (${r.reasons.join('; ')})` : ''}`;
   const base = `pro ${r.control} ${p.command.value ?? ''} → ${r.supported === false ? 'UNSUPPORTED' : `achieved ${r.achieved ?? '–'}`}${r.clamped ? ' (clamped)' : ''}${r.reason ? ` · ${r.reason}` : ''}`;
   const settle = r.framesToApply != null ? ` · applied after ${r.framesToApply} frames (${r.settleMs} ms${r.settled === false ? ', NOT SETTLED' : ''})` : '';
