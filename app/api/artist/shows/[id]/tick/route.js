@@ -11,6 +11,7 @@ import { loadOwnedShow } from '../../../../../../lib/artistShow';
 import { deliveryTick } from '../../../../../../lib/pipeline/lifecycle';
 import { supabaseLifecycleStore, egressFor } from '../../../../../../lib/pipeline/store';
 import { composeLayout } from '../../../../../../lib/pipeline/compositor';
+import { lookPlan } from '../../../../../../lib/pipeline/lut';
 import { viewerCount, openPrompt } from '../../../../../../lib/showPayload';
 
 export async function POST(request, { params }) {
@@ -26,7 +27,13 @@ export async function POST(request, { params }) {
   let delivery = { state: show.delivery_state };
   if (show.actual_started_at && !show.actual_ended_at) {
     const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, healthy: body.healthy || { a: true, b: true } });
-    try { if (egress.state === 'running') egress.pushFrame({ tMs: Date.now() - Date.parse(show.actual_started_at), layout }); } catch { /* the show must never stop because the fake egress could not write */ }
+    // The look on screen: the show's own (shows.look, set at booking from the artist's default or changed from the console), with the
+    // console's per-tick colour match; an unknown look logs as none rather than failing the tick. The transition in flight, if the
+    // console reports one ({ type, direction, startedAtMs, durationMs }), is logged the same way.
+    let look = null;
+    try { look = lookPlan({ ...(show.look || body.look || {}), colourMatch: body.look?.colourMatch || body.colourMatch || {} }); } catch { look = null; }
+    const transition = body.transition && typeof body.transition === 'object' && typeof body.transition.type === 'string' ? body.transition : null;
+    try { if (egress.state === 'running') egress.pushFrame({ tMs: Date.now() - Date.parse(show.actual_started_at), layout, look, transition }); } catch { /* the show must never stop because the fake egress could not write */ }
     delivery = await deliveryTick(supabaseLifecycleStore(admin), egress, { showId: show.id, correlationId: cid });
   }
   const [viewers, prompt, { data: pending }, { data: fresh }, { data: delays }] = await Promise.all([

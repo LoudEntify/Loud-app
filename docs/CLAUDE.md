@@ -43,7 +43,7 @@ Also: no payments in the native apps (balances only); 18+ gate by date of birth,
 
 ## 5. Product decisions that are settled
 
-- Zoom is device zoom first (the phone's own camera zoom, including lens switching on multi-camera phones). Digital zoom is a fallback capped at 1.2x and used only when device zoom is unavailable on that phone or that lens. Default 1.2x, editable per camera. Decided 2026-10-12 (docs/DECISIONS.md), superseding "lens zoom only, never digital" and PRD row 127. LUTs and background blur are not at launch.
+- Zoom is device zoom first (the phone's own camera zoom, including lens switching on multi-camera phones). Digital zoom is a fallback capped at 1.2x and used only when device zoom is unavailable on that phone or that lens. Default 1.2x, editable per camera. Decided 2026-10-12 (docs/DECISIONS.md), superseding "lens zoom only, never digital" and PRD row 127. Background blur is not at launch. LUTs are: applied in the compositor only, never on a phone (docs/DECISIONS.md 2026-10-14 and 2026-10-21).
 - Do not change the AI director shot grammar. Cuts, close-ups, wide, moving zoom, pan and B-roll inserts are individually switchable by the artist.
 - One feed per physical device. Camera healthy means frames keep arriving, not that it connected. Watch mic on the raw input.
 - Reactions are stamped with the viewer's playback position, not wall clock. Reaction design is on hold: leave a tab beside emoji.
