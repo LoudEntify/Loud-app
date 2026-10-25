@@ -46,7 +46,7 @@ export default function SignUp() {
       <Field k="dateOfBirth" label="Date of birth" placeholder="DD / MM / YYYY" keyboardType="numeric" />
       <Field k="city" label="City" placeholder="City" />
       <Field k="email" label="Email" placeholder="you@example.com" autoCapitalize="none" keyboardType="email-address" />
-      <Field k="password" label="Password" placeholder="8+ characters" secureTextEntry />
+      <PasswordInput value={f.password} onChangeText={set('password')} label="Password" placeholder="8+ characters" autoComplete="new-password" error={errors.password} testID="signup-password" />
       <View style={[styles.row, { alignItems: 'flex-start' }]}><Switch value={f.acceptTerms} onValueChange={set('acceptTerms')} /><Text style={{ flex: 1, fontSize: 14 }}>By continuing you confirm you are 18 or over and agree to the Terms and Conditions and Community Guidelines.</Text></View>
       {errors.acceptTerms && <Text style={{ color: color.red }}>{errors.acceptTerms}</Text>}
       {f.role === 'artist' && <View style={[styles.row, { alignItems: 'flex-start', backgroundColor: 'rgba(46,196,182,0.14)', padding: 12, borderRadius: 12 }]}><Switch value={!f.trainingDataOptOut} onValueChange={(v) => set('trainingDataOptOut')(!v)} /><Text style={{ flex: 1, fontSize: 14 }}>Help the AI director learn from my shows. On by default, only your own performance, only inside Loudentify. Switch it off any time in Settings.</Text></View>}

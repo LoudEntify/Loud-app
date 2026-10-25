@@ -16,6 +16,7 @@ import { COUNTRY_CODES } from '../../lib/countries';
 const COUNTRIES = COUNTRY_CODES.map((code) => ({ code }));
 import { refreshProfile } from '../../lib/useSession';
 import { Warn } from './Icons';
+import PasswordField from './PasswordField';
 
 export function UnderAge({ onWrongDate }) {
   return (
@@ -101,7 +102,7 @@ export default function SignUpSheet({ trigger = 'tap', onDone, onLogin, initialR
         {emailMode && (
           <div className="v-row" style={{ gap: 10, alignItems: 'flex-start' }}>
             <label className="v-field" style={{ flex: 1 }}>Email<input type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={set('email')} />{errors.email && <span className="v-err">{errors.email}</span>}</label>
-            <label className="v-field" style={{ flex: 1 }}>Password<input type="password" autoComplete="new-password" placeholder="8+ characters" value={form.password} onChange={set('password')} />{errors.password && <span className="v-err">{errors.password}</span>}</label>
+            <div style={{ flex: 1, minWidth: 0 }}><PasswordField autoComplete="new-password" placeholder="8+ characters" value={form.password} onChange={set('password')} error={errors.password} testId="signup-password" /></div>
           </div>
         )}
         <label className="v-row" style={{ fontSize: 14, lineHeight: 1.35, color: 'rgba(1,22,39,0.8)', alignItems: 'flex-start', gap: 10 }}>
@@ -145,7 +146,7 @@ export function LoginSheet({ onDone, onSignUp, embedded = false }) {
       <div className="v-row" style={{ justifyContent: 'space-between' }}><h1 id="login-title" style={{ fontSize: 30 }}>Log in</h1><button className="v-link" onClick={onSignUp}>Sign up</button></div>
       <form onSubmit={submit} className="v-col" style={{ gap: 12 }}>
         <label className="v-field">Email<input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-        <label className="v-field">Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        <PasswordField autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} testId="login-password" />
         {err && <div className="v-error" role="alert"><span style={{ color: 'var(--red)' }}><Warn /></span><span>{err}</span></div>}
         <button type="submit" className="v-btn v-btn-lg v-btn-ink" disabled={busy}>{busy ? 'Logging in' : 'Log in'}</button>
         <a className="v-link" style={{ alignSelf: 'center' }} href="/forgot-password">Forgot password?</a>
