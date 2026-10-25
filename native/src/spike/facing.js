@@ -137,14 +137,34 @@ export function commandAllowed(cap, command) {
 }
 
 /**
- * The mirror rule for a facing. A front camera is what the artist sees in
- * a mirror; what viewers should see is the un-mirrored picture, or their
- * shirt's writing reads backwards. The preview stays mirrored because
- * that is how a person expects to see themselves move. Both are reported
- * in the state sample, never implied (docs/DECISIONS.md 2026-10-24).
+ * The mirror rule for a facing, settled on a device (Samsung S25 Ultra,
+ * 25 Oct) rather than assumed.
+ *
+ * What the 25 Oct run showed: on the front camera the published picture
+ * read BACKWARDS (an envelope held up to it was mirrored both on the
+ * phone and on the laptop). The frames CameraX hands us through the
+ * preview surface carry the front camera's display mirroring in their
+ * transform, so publishing them untouched publishes a mirror. The back
+ * camera reads correctly and needs nothing.
+ *
+ * So the broadcast is flipped for a front camera and left alone for a
+ * back one. The transform's determinant cannot decide this: it is
+ * negative on BOTH cameras of the S25 (the y-axis convention), which is
+ * the same trap as the Moto's rotation on 20 Oct.
+ *
+ * `mirrorPreview` is what the artist's own self-view should do in the
+ * main app: a person expects to see themselves move as in a mirror. The
+ * spike shows the published track itself, so there the preview follows
+ * the broadcast and that flag is only advice to the app that renders it.
  */
-export function mirrorRule(facing) {
-  return facing === 'front'
-    ? { preview: true, broadcast: false, reason: 'front camera: the preview is mirrored so moving feels right, the broadcast is not so writing reads correctly' }
-    : { preview: false, broadcast: false, reason: 'back camera: what the lens sees is what everyone sees' };
+export function mirrorRule(facing, override = 'auto') {
+  const base = facing === 'front'
+    ? { flipBroadcast: true, mirrorPreview: true, reason: 'front camera: its frames arrive mirrored, so the broadcast is flipped back for writing to read correctly (device-checked 25 Oct); a self-view should still be mirrored' }
+    : { flipBroadcast: false, mirrorPreview: false, reason: 'back camera: what the lens sees is what everyone sees' };
+  if (override === 'on') return { ...base, flipBroadcast: true, reason: `flip forced on: ${base.reason}` };
+  if (override === 'off') return { ...base, flipBroadcast: false, reason: `flip forced off: ${base.reason}` };
+  return base;
 }
+
+/** The flip settings a tester can force, for a phone whose camera behaves unlike the two we have. */
+export const FLIP_OVERRIDES = ['auto', 'on', 'off'];

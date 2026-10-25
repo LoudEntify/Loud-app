@@ -17,7 +17,7 @@ import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
 import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
 import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT, frameRateOptions } from '../../src/spike/frameRate';
-import { FACINGS, facingCapability, describeFacing } from '../../src/spike/facing';
+import { FACINGS, facingCapability, describeFacing, FLIP_OVERRIDES, mirrorRule } from '../../src/spike/facing';
 import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
 import { ORIENTATIONS } from '../../src/spike/orientation';
 
@@ -151,6 +151,10 @@ export default function ZoomSpike() {
   // Which camera this phone runs. What that camera can do is read from the survey at start
   // and reported in the log; the controls follow the camera, not the facing.
   const [facing, setFacing] = useState('back');
+  // The left-right flip of the published picture. 'auto' is the rule settled on device
+  // (flip the front camera, leave the back one); the other two are there for a phone we
+  // have never tested, so a wrong mirror can be proved without a new build.
+  const [flip, setFlip] = useState('auto');
   // Pro mode (controller role): the camera's capability as it reported it, the current test stage.
   const [cameraProfile, setCameraProfile] = useState(null);
   const [stage, setStage] = useState(null);
@@ -188,10 +192,10 @@ export default function ZoomSpike() {
     if (!accessToken) { push('sign in as an artist first (Profile tab)'); return; }
     setMode(role); setStatus('connecting');
     const s = new SpikeSession({
-      role, accessToken, userId: session?.user?.id, frameSource, frameRate, facing,
+      role, accessToken, userId: session?.user?.id, frameSource, frameRate, facing, flip,
       onEvent: (kind, p) => {
         if (kind === 'profile') setProfile(p);
-        else if (kind === 'capability') { push(p.line); push(`mirror: preview ${p.mirror.preview ? 'mirrored' : 'as captured'}, broadcast ${p.mirror.broadcast ? 'mirrored' : 'as captured'} — ${p.mirror.reason}`); }
+        else if (kind === 'capability') { push(p.line); push(`picture: broadcast ${p.mirror.flipBroadcast ? 'FLIPPED back' : 'as captured'}, self-view should be ${p.mirror.mirrorPreview ? 'mirrored' : 'as captured'} — ${p.mirror.reason}`); }
         else if (kind === 'frameRate') { push(`frame rate: ${p.fps} fps${p.exact ? '' : ` (inside ${p.range[0]}–${p.range[1]})`}${p.changed ? ` — asked ${p.requested}: ${p.reason}` : ''}`); for (const w of p.warnings || []) push(`WARN ${w}`); }
         else if (kind === 'state') setState(p);
         else if (kind === 'ack') { setLastAck(p); push(PRO_TYPES.includes(p.command.type) ? proAckLine(p) : ackLine(p)); if (p.slow) push(`SLOW COMMAND ${p.command.type}: leg out ${p.slow.commandLatencyMs} ms — ${p.slow.verdict}`); }
@@ -289,6 +293,10 @@ export default function ZoomSpike() {
         <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
           <Text style={mono}>camera:</Text>
           {FACINGS.map((f) => <Btn key={f} small label={f === facing ? `[${f}]` : f} onPress={() => { setFacing(f); if (survey?.profile) push(describeFacing(facingCapability(survey.profile, f))); }} />)}
+        </View>
+        <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
+          <Text style={mono}>flip:</Text>
+          {FLIP_OVERRIDES.map((f) => <Btn key={f} small label={f === flip ? `[${f}]` : f} onPress={() => { setFlip(f); push(mirrorRule(facing, f).reason); }} />)}
         </View>
         <View style={[styles.row, { flexWrap: 'wrap', alignItems: 'center' }]}>
           <Text style={mono}>frame rate:</Text>

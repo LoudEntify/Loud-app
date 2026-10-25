@@ -20,7 +20,7 @@ import * as LoudCamera from '../../modules/loud-camera';
 import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from './commands';
 import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
 import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from './frameRate';
-import { FACINGS, facingCapability, describeFacing, commandAllowed, mirrorRule } from './facing';
+import { FACINGS, facingCapability, describeFacing, commandAllowed, mirrorRule, FLIP_OVERRIDES } from './facing';
 import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
 
 /** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
@@ -83,7 +83,7 @@ export async function readProfile() {
  * screen; everything else is internal. Call connect(), then stop().
  */
 export class SpikeSession {
-  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto', frameRate = FRAME_RATE_DEFAULT, facing = 'back' }) {
+  constructor({ role, accessToken, userId, onEvent, frameSource = 'auto', frameRate = FRAME_RATE_DEFAULT, facing = 'back', flip = 'auto' }) {
     this.role = role; this.accessToken = accessToken; this.userId = userId; this.onEvent = onEvent || (() => {});
     this.frameSource = FRAME_SOURCES.includes(frameSource) ? frameSource : 'auto';
     // The rate asked for in Settings; resolved against the lens's advertised ranges at camera start (frameRate.js). `fps` is what runs.
@@ -190,7 +190,7 @@ export class SpikeSession {
     const fr = resolveFrameRate(this.frameRateWanted, this.capability.pro?.fpsRanges ?? this.profile?.pro?.fpsRanges);
     this.fps = fr.fps; this.frameRate = fr;
     this.onEvent('frameRate', { ...fr, warnings: frameRateWarnings(fr.fps, { frameSource: this.frameSource, exact: fr.exact }) });
-    const { stream, info } = await LoudCamera.start({ facing: this.facing, width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource, mirrorOutput: this.mirror.broadcast });
+    const { stream, info } = await LoudCamera.start({ facing: this.facing, width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource, mirrorOutput: this.mirror.flipBroadcast });
     this.stream = stream;
     const mediaTrack = stream.getVideoTracks()[0];
     const track = new LocalVideoTrack(mediaTrack, undefined, true);

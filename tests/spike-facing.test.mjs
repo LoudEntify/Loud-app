@@ -4,7 +4,7 @@
 // front unless the front camera really advertises more.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FACINGS, lensesFacing, primaryLensFacing, facingCapability, facingCapabilities, describeFacing, commandAllowed, mirrorRule } from '../native/src/spike/facing.js';
+import { FACINGS, FLIP_OVERRIDES, lensesFacing, primaryLensFacing, facingCapability, facingCapabilities, describeFacing, commandAllowed, mirrorRule } from '../native/src/spike/facing.js';
 
 const sensor = (w, h, cropping = 'freeform', maxDigital = 4) => ({ activeArray: { width: w, height: h }, pixelArray: { width: w, height: h }, croppingType: cropping, maxDigitalZoom: maxDigital, apertures: [1.8] });
 const proFull = { hardwareLevel: 'full', manualSensor: true, manualPostProcessing: true, readSensorSettings: true, isoRange: [50, 6400], shutterNsRange: [20000, 500000000], evRange: [-12, 12], evStep: 0.1667, focus: { minDiopters: 10, calibration: 'approximate', afModes: ['off', 'auto'] }, awbModes: ['off', 'auto'], awbLockAvailable: true, aeModes: ['off', 'on'], aeLockAvailable: true, fpsRanges: [[24, 24], [30, 30], [60, 60]] };
@@ -107,9 +107,32 @@ test('commandAllowed: a zoom past the digital cap needs the camera\'s own zoom; 
   assert.equal(commandAllowed(facingCapability(capableFront, 'front'), { type: 'pro', control: 'iso', value: 400 }).ok, true);
 });
 
-test('mirrorRule: the front preview is mirrored, the broadcast is not', () => {
-  assert.deepEqual(mirrorRule('front').preview, true);
-  assert.deepEqual(mirrorRule('front').broadcast, false);
-  assert.match(mirrorRule('front').reason, /reads correctly/);
-  assert.deepEqual(mirrorRule('back'), { preview: false, broadcast: false, reason: 'back camera: what the lens sees is what everyone sees' });
+test('mirrorRule: the front camera picture is flipped back for the broadcast, the back camera is left alone', () => {
+  const front = mirrorRule('front');
+  assert.equal(front.flipBroadcast, true);
+  assert.equal(front.mirrorPreview, true);
+  assert.match(front.reason, /arrive mirrored/);
+  const back = mirrorRule('back');
+  assert.equal(back.flipBroadcast, false);
+  assert.equal(back.mirrorPreview, false);
+});
+
+test('mirrorRule: a tester can force the flip either way for a phone we have never seen', () => {
+  assert.equal(mirrorRule('front', 'off').flipBroadcast, false);
+  assert.equal(mirrorRule('back', 'on').flipBroadcast, true);
+  assert.match(mirrorRule('back', 'on').reason, /forced on/);
+  assert.equal(mirrorRule('front', 'auto').flipBroadcast, true);
+  assert.deepEqual(FLIP_OVERRIDES, ['auto', 'on', 'off']);
+});
+
+test('the Samsung S25 front camera, as surveyed on 25 Oct, really is a capable camera', () => {
+  // from the device report: front lens 1, full level, manual sensor, zoom 1-8x, no second lens
+  const s25 = { primaryCameraId: '0', lenses: [{ id: '1', facing: 'front', focalLengthMm: 3.3, sensor: { activeArray: { width: 4000, height: 3000 }, croppingType: 'center-only', maxDigitalZoom: 8 }, frameSource: { eligible: 'gpu', reason: 'SCALER_CROPPING_TYPE is CENTER_ONLY: the HAL would re-centre a pan' }, pro: { hardwareLevel: 'full', manualSensor: true, manualPostProcessing: true, isoRange: [25, 3200], shutterNsRange: [72848, 417188152], evRange: [-20, 20], evStep: 0.1, focus: { minDiopters: 5, afModes: ['off', 'auto'] }, awbModes: ['auto', 'off'], awbLockAvailable: true, aeModes: ['off', 'on'], aeLockAvailable: true, fpsRanges: [[15, 15], [24, 24], [15, 30], [30, 30], [15, 60], [60, 60]] }, deviceZoom: { available: true, min: 1, max: 8, switchOverFactors: [], opticalMaxZoom: 1 } }] };
+  const front = facingCapability(s25, 'front');
+  assert.equal(front.features.deviceZoom.on, true);
+  assert.equal(front.features.pro.on, true);
+  assert.equal(front.features.lensSwitch.on, false);
+  assert.equal(front.features.hardwarePath.on, false);
+  assert.equal(commandAllowed(front, { type: 'zoom', target: 2 }).ok, true);
+  assert.deepEqual(front.frameRates.filter((f) => f.supported).map((f) => f.fps), [24, 25, 30, 60]);
 });

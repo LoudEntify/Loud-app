@@ -161,7 +161,12 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, 21:20, Moto G35: the bop and the pro readbacks both work well (Korey). Device retests are closed on both phones; the Samsung AE-lock readback quirk stays an open note, not a blocker.**
 
-**24 Oct: frame rate works as expected on device (Korey). Resume here: the front camera.**
+**25 Oct: the front camera works on the S25 and its zoom works; the mirror was wrong and is now fixed (the front camera's picture is flipped back). Resume here: confirm the mirror on the next APK.**
+
+1. **The mirror, again (2 min).** New APK, **front** camera, **flip: [auto]**. Hold up the envelope again. Both the phone and the laptop should now read **the right way round**. If either still reads backwards, set **flip: off** (or **on**) on the idle screen, restart the Camera role and say which setting made it right: that tells me the rule without another build.
+2. **Nothing else changed (1 min).** Back camera, one 2x and one pan, to be sure the flip did not touch it.
+
+**Earlier (done 24 and 25 Oct): frame rate, and the front camera's controls**
 
 The spike's idle screen now has a **camera: back front** row above the frame-rate row. Pick the camera before pressing Camera; the log prints what that camera can do in plain English, and any control it cannot do is refused with the reason instead of failing silently.
 
