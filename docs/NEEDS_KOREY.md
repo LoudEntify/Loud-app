@@ -161,7 +161,27 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **21 Oct, 21:20, Moto G35: the bop and the pro readbacks both work well (Korey). Device retests are closed on both phones; the Samsung AE-lock readback quirk stays an open note, not a blocker.**
 
-**25 Oct: the front camera works on the S25 and its zoom works; the mirror was wrong and is now fixed (the front camera's picture is flipped back). Resume here: confirm the mirror on the next APK.**
+## Full two-device rehearsal (25 Oct onward)
+
+The camera work is closed on the S25: orientation, device zoom, lens switching, pans, the bop, pro mode, frame rate and the mirror on both cameras. Next is the thing none of those prove: the app as an artist and a viewer actually meet it.
+
+**Before you start**
+- APK: the latest `android` run's `loudentify-release-apk` (build from the branch under test; a phone holding an EAS build must uninstall first, the signing keys differ).
+- Both phones and the laptop signed in as the **same artist account** only where the script says so; the viewer must be a **separate account** (that is half the test).
+- The viewer watches on staging in a browser: `https://loud-app-git-staging-korey-alashe.vercel.app`.
+- YouTube is still in **mock mode** on staging (no `YOUTUBE_CLIENT_ID` yet, see the Google OAuth item above), so the broadcast is created and tracked as if real and the viewer's picture comes from the fixture player. What this rehearsal proves is the whole app around delivery: booking, kit check, going live, the console, comments, prompts and votes, the look, ending and the recording. Real YouTube picture is its own test, after the OAuth client exists.
+
+**The run (about 30 minutes)**
+1. **Accounts (5 min).** Phone 1: sign up as an artist (or log in). Phone 2 or a second browser: sign up as a **viewer** with a different email. On the way through, check the new password box: the eye shows and hides what you typed, on both sign-up and log in.
+2. **Password reset (3 min).** Log out on phone 2. Tap **Forgot password?**, send yourself the link, open it on any device, set a new password, then log back in with it. Say whether every screen made sense without explanation.
+3. **Book a show (3 min).** Artist: Schedule, at least 30 minutes ahead, solo, 15 minutes. Then Kit Check: mic, camera, the lot.
+4. **Direction settings (2 min).** Settings → Direction. Switch off one move (Pan, say), pick a **Look**, and leave the rest. This is the first time these ride into a real show.
+5. **Go live (10 min).** Artist console on phone 1. Viewer on the other device opens Discover, finds the show, watches. Check in order: the viewer sees the show as live; comments from the viewer reach the console; push a **Prompt** and a **Vote** and answer them as the viewer; change the **Look** mid-show from the console and say how long it took to show up; the move you switched off never happens.
+6. **End and after (5 min).** End the show from the console. Check the post-show screen, and that the recording is there for the artist and the viewer.
+
+**What to tell me**: anything that needed explaining, anything that looked wrong, and the three timings (how long from "go live" to the viewer seeing it, how long a comment took to arrive, how long the look took to change).
+
+**Earlier, closed: the mirror on the front camera (25 Oct, works as expected)**
 
 **Before any spike run: both the phone and the laptop must be signed in as the SAME artist account.** The room is derived from the account (`rehearsal-<your user id>`), so two accounts means two rooms and a controller that sees nothing, with no error shown. Installing a new APK signs the phone out, so check this after every install: the phone's header and the laptop must show the same `rehearsal-…` id.
 
