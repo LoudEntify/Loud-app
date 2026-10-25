@@ -184,10 +184,19 @@ export class SpikeSession {
 
   async startCamera() {
     // Frame rate: what Settings asked for, held to what this lens advertises (a fractional or unlisted rate lands on the nearest it can hold).
-    // The chosen camera's own capability, and its frame-rate ranges rather than the back camera's.
-    this.capability = facingCapability(this.profile, this.facing);
-    this.onEvent('capability', { facing: this.facing, capability: this.capability, line: describeFacing(this.capability), mirror: this.mirror });
-    const fr = resolveFrameRate(this.frameRateWanted, this.capability.pro?.fpsRanges ?? this.profile?.pro?.fpsRanges);
+    // The chosen camera's own capability, and its frame-rate ranges rather than the back
+    // camera's. Nothing here may stop the camera: reading a capability is a convenience, and
+    // a phone whose survey this code cannot read must still publish (docs/ARCHITECTURE.md
+    // "the show must never stop"). On a failure the camera runs with no capability gate and
+    // says so, rather than never starting (25 Oct).
+    try {
+      this.capability = facingCapability(this.profile, this.facing);
+      this.onEvent('capability', { facing: this.facing, capability: this.capability, line: describeFacing(this.capability), mirror: this.mirror });
+    } catch (e) {
+      this.capability = null;
+      this.onEvent('error', `capability read failed for the ${this.facing} camera, carrying on without the gate: ${String(e?.message || e)}`);
+    }
+    const fr = resolveFrameRate(this.frameRateWanted, this.capability?.pro?.fpsRanges ?? this.profile?.pro?.fpsRanges);
     this.fps = fr.fps; this.frameRate = fr;
     this.onEvent('frameRate', { ...fr, warnings: frameRateWarnings(fr.fps, { frameSource: this.frameSource, exact: fr.exact }) });
     const { stream, info } = await LoudCamera.start({ facing: this.facing, width: 1080, height: 1920, fps: fr.fps, fpsRange: fr.range, frameSource: this.frameSource, mirrorOutput: this.mirror.flipBroadcast });
@@ -203,7 +212,7 @@ export class SpikeSession {
     // LiveKit's VideoTrack reads publication.track unguarded, which
     // crashed the app the moment Camera was chosen (14 Oct).
     this.track = track;
-    this.onEvent('published', { trackSid: pub.trackSid });
+    this.onEvent('published', { trackSid: pub.trackSid, facing: this.facing, flip: this.mirror.flipBroadcast, room: this.room?.name ?? null, identity: this.room?.localParticipant?.identity ?? null });
     this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
     // Setup: one gravity reading picks the mount, the plan for it goes to the capturer, and until the lock (the first stage or move) the plan follows the mount.
     this.setupMount().catch((e) => this.onEvent('error', `orientation setup: ${String(e?.message || e)}`));
@@ -498,7 +507,7 @@ export class SpikeSession {
       if (m.type === 'stage') result = { kind: 'stage', stage: this.stage, achieved: this.stage, requested: m.stage, supported: true, reason: null };
       else if (m.type === 'survey') result = { kind: 'survey', profile: { pro: this.capability?.pro ?? this.profile?.pro ?? null, proSupport: this.capability?.proSupport ?? this.profile?.proSupport ?? null, frameSource: this.lastState?.frameSource ?? null, fps: this.fps, frameRate: this.frameRate, hardwareLevel: (this.capability?.proSupport ?? this.profile?.proSupport)?.hardwareLevel ?? null, make: this.profile?.make, model: this.profile?.model, facing: this.facing, capability: this.capability, facingLine: this.capability ? describeFacing(this.capability) : null, mirror: this.mirror }, supported: true, reason: null };
       else if (m.type === 'pro') {
-        const allowed = commandAllowed(this.capability, m);
+        const allowed = this.capability ? commandAllowed(this.capability, m) : { ok: true, reason: null };
         result = allowed.ok ? await this.runPro(m.control, m.value)
           : { kind: 'pro', control: m.control, requested: m.value, achieved: null, clamped: false, supported: false, reason: allowed.reason, warnings: [], applied: false, facing: this.facing };
       }
@@ -566,7 +575,7 @@ export class SpikeSession {
     try {
       // What this camera can do decides, not which way it faces: a refusal carries the
       // capability's own reason rather than a native error from a command that cannot work.
-      const allowed = commandAllowed(this.capability, m);
+      const allowed = this.capability ? commandAllowed(this.capability, m) : { ok: true, reason: null };
       if (!allowed.ok) result = { mode: 'none', frameSource: this.lastState?.frameSource ?? null, requested: m.target ?? null, achieved: null, clamped: false, reason: allowed.reason, droppedFrames: 0, actualDurationMs: 0, refused: true, failed: false, facing: this.facing };
       else result = await this.runMove(m);
     } catch (e) {
