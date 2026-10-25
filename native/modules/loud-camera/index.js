@@ -21,9 +21,19 @@ export function survey() { return native ? native.survey() : missing(); }
  * LoudCameraXCapturer.kt); the one actually chosen is in every state
  * sample and move result as `frameSource`.
  */
-export async function start({ facing = 'back', width = 1080, height = 1920, fps = 30, frameSource = 'auto' } = {}) {
+/**
+ * Start the camera. EVERY option must be listed here: this function
+ * rebuilds the object it passes to native, so an option it does not name
+ * is dropped in silence. That cost an evening on 25 Oct, when the front
+ * camera's flip and the frame-rate range were both sent from the runtime
+ * and neither arrived. The returned `info.sent` is what native was really
+ * given, so the phone's log can show it and the next one is caught at once.
+ */
+export async function start({ facing = 'back', width = 1080, height = 1920, fps = 30, fpsRange = null, frameSource = 'auto', mirrorOutput = false } = {}) {
   if (!native) return missing();
-  const info = await native.start({ facing, width, height, fps, frameSource });
+  const opts = { facing, width, height, fps, frameSource, mirrorOutput: Boolean(mirrorOutput) };
+  if (Array.isArray(fpsRange) && fpsRange.length === 2 && fpsRange.every((v) => Number.isFinite(v))) opts.fpsRange = fpsRange;
+  const info = { ...(await native.start(opts)), sent: opts };
   const { MediaStream } = require('@livekit/react-native-webrtc');
   const stream = new MediaStream({ streamId: info.streamId, streamReactTag: info.streamId, tracks: info.tracks });
   return { stream, info };

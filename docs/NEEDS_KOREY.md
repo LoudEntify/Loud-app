@@ -163,6 +163,8 @@ The build is paused. The last code commit on `spike/native-device-zoom` is `fff4
 
 **25 Oct: the front camera works on the S25 and its zoom works; the mirror was wrong and is now fixed (the front camera's picture is flipped back). Resume here: confirm the mirror on the next APK.**
 
+**Before any spike run: both the phone and the laptop must be signed in as the SAME artist account.** The room is derived from the account (`rehearsal-<your user id>`), so two accounts means two rooms and a controller that sees nothing, with no error shown. Installing a new APK signs the phone out, so check this after every install: the phone's header and the laptop must show the same `rehearsal-…` id.
+
 1. **The mirror, again (2 min).** New APK, **front** camera, **flip: [auto]**. Hold up the envelope again. Both the phone and the laptop should now read **the right way round**. If either still reads backwards, set **flip: off** (or **on**) on the idle screen, restart the Camera role and say which setting made it right: that tells me the rule without another build.
 2. **Nothing else changed (1 min).** Back camera, one 2x and one pan, to be sure the flip did not touch it.
 

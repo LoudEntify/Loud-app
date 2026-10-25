@@ -212,7 +212,7 @@ export default function ZoomSpike() {
         else if (kind === 'frameSource') push(p.used ? `frame path: ${p.used}${p.fellBack ? ' (FELL BACK' : ''}${p.reason ? ` — ${p.reason}` : ''}${p.fellBack ? ')' : ''}` : `frame path wanted: ${p.wanted}`);
         else if (kind === 'command') push(`command ${p.type} ${p.target ?? p.direction}`);
         else if (kind === 'connected') { setStatus(`in ${p.room} as ${p.identity}`); push(`connected as ${p.identity}`); if (role === 'controller') setTimeout(() => s.requestSurvey().catch(() => {}), 1500); }
-        else if (kind === 'published') push(`PUBLISHING ${p.facing} camera${p.flip ? ' (flipped)' : ''} · track ${p.trackSid} · room ${p.room ?? '?'} · as ${p.identity ?? '?'}`);
+        else if (kind === 'published') push(`PUBLISHING ${p.facing} camera${p.flip ? ' (flipped)' : ''} · camera got ${p.sent ? JSON.stringify(p.sent) : 'nothing recorded'} · track ${p.trackSid} · room ${p.room ?? '?'} · as ${p.identity ?? '?'}`);
         else if (kind === 'remote') setRemote(p);
         else if (kind === 'clock') push(`clock offset ${p.offsetMs} ms ±${p.errorBoundMs}`);
         else if (kind === 'upload') push(`batch ${p.ok ? 'ok' : 'FAILED'} ${p.records ?? ''} rec ${p.gzBytes ?? ''} B gz ${p.error || p.status || ''}`);

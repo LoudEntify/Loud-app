@@ -93,7 +93,10 @@ export class SpikeSession {
     // which controls work, not the facing itself: a front camera that really does advertise
     // the advanced features gets them (Korey, 24 Oct).
     this.facing = FACINGS.includes(facing) ? facing : 'back';
-    this.capability = null; this.mirror = mirrorRule(this.facing);
+    this.capability = null;
+    // 'auto' is the rule settled on device; 'on'/'off' let a tester force the flip on a phone we have never seen.
+    this.flip = FLIP_OVERRIDES.includes(flip) ? flip : 'auto';
+    this.mirror = mirrorRule(this.facing, this.flip);
     this.room = null; this.profile = null; this.offset = null; this.track = null; this.stream = null;
     // The camera's framing as the director sees it: one shot at a time
     // (zoomPlan.js). A zoom or a pan makes a new shot; a refused or failed
@@ -212,7 +215,7 @@ export class SpikeSession {
     // LiveKit's VideoTrack reads publication.track unguarded, which
     // crashed the app the moment Camera was chosen (14 Oct).
     this.track = track;
-    this.onEvent('published', { trackSid: pub.trackSid, facing: this.facing, flip: this.mirror.flipBroadcast, room: this.room?.name ?? null, identity: this.room?.localParticipant?.identity ?? null });
+    this.onEvent('published', { trackSid: pub.trackSid, facing: this.facing, flip: this.mirror.flipBroadcast, sent: info?.sent ?? null, room: this.room?.name ?? null, identity: this.room?.localParticipant?.identity ?? null });
     this.onEvent('frameSource', { wanted: info?.frameSourceWanted ?? this.frameSource });
     // Setup: one gravity reading picks the mount, the plan for it goes to the capturer, and until the lock (the first stage or move) the plan follows the mount.
     this.setupMount().catch((e) => this.onEvent('error', `orientation setup: ${String(e?.message || e)}`));
