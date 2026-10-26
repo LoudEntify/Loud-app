@@ -75,3 +75,7 @@ interruption-probe-*.csv
 native/google-play-service-account.json
 native/.expo/
 native/dist/
+
+# Director data pulled from the director-spike bucket by scripts/spike-pull.mjs
+# (batches and reports from the device-zoom spike); never committed.
+spike-data/

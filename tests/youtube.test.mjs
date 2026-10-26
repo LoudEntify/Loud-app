@@ -11,7 +11,7 @@ test('tokens encrypt per tenant: another tenant cannot decrypt, tampering is det
   assert.ok(blob.startsWith('v1.')); assert.equal(blob.includes('secret'), false);
   assert.equal(decryptForTenant('user-a', blob, { master }), 'ya29.secret-token');
   assert.throws(() => decryptForTenant('user-b', blob, { master }));
-  const tampered = blob.slice(0, -2) + (blob.endsWith('A') ? 'B' : 'A') + blob.slice(-1);
+  const tampered = blob.slice(0, -2) + (blob.at(-2) === 'A' ? 'B' : 'A') + blob.slice(-1); // a replacement that always differs from the character it replaces
   assert.throws(() => decryptForTenant('user-a', tampered, { master }));
   assert.equal(redact('abc'), '<3 chars>');
   assert.throws(() => encryptForTenant('u', 'x'), /YOUTUBE_TOKEN_KEY/, 'no master key: refuse, never fall back');
