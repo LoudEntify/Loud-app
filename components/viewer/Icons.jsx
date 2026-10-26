@@ -5,6 +5,8 @@ const I = ({ size = 22, children, ...rest }) => (
 export const Back = (p) => <I {...p}><path d="M19 12H5M11 6l-6 6 6 6" /></I>;
 export const Close = (p) => <I {...p}><path d="M6 6l12 12M18 6L6 18" /></I>;
 export const Eye = (p) => <I {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></I>;
+// The same eye with a stroke through it: "your password is hidden" (PasswordField).
+export const EyeOff = (p) => <I {...p}><path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.2 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.2-1.6" /><path d="M9.9 9.9a3 3 0 004.2 4.2" /><path d="M3 3l18 18" /></I>;
 export const Person = (p) => <I {...p}><circle cx="12" cy="8" r="4" /><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6" /></I>;
 export const Play = (p) => <I {...p}><path d="M8 5l11 7-11 7z" /></I>;
 export const Token = (p) => <I {...p}><circle cx="12" cy="12" r="9" /><path d="M14.5 9.5c-.4-.9-1.4-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.6 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1.1 0-2.1-.6-2.5-1.5M12 6.5V8M12 16v1.5" /></I>;
