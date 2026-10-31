@@ -32,6 +32,7 @@ A safety guard fails the build on purpose if any Preview build, or any `staging`
 
 ## Reviews needed before promotion
 
+- **20261031120000_show_orientation.sql** (PR: show orientation). One new column on `shows` with a check constraint (portrait or landscape) and a default of portrait. Risk, in plain English: very low. No personal data, no policy change, no foreign key. Every existing show becomes portrait, which is what it was composed as, so no recording changes meaning. Verification queries are at the foot of the migration; run them on staging and paste the results on the PR before promoting.
 - **20261023120000_direction_settings_show_look.sql** (PR: Direction settings). New table `direction_settings` with row-level security (an artist reads only their own row; writes go through the audited route) and a new `shows.look` column. Risk, in plain English: low. The policy is a single owner check; a mistake would show an artist their own settings only or nothing. Verification queries are in the migration file; run them on staging after the pipeline applies it and paste the results on the PR before promoting.
 Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/RLS, the audit log) that `.github/workflows/promote.yml` refuses to promote to production until each is ticked here, with Ugo or Korey's name next to it.
 
