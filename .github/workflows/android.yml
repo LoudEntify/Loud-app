@@ -86,8 +86,18 @@ jobs:
         run: npx expo prebuild --platform android --no-install
         working-directory: native
 
+      # The local camera module is compiled first when it is present: its Kotlin
+      # only builds against the real Android SDK, and a precise error here beats
+      # hunting one inside a whole-app build. It is not on every branch (it
+      # arrives with the camera work), so a branch without it builds the app and
+      # says so rather than failing on a project that does not exist.
       - name: Compile the loud-camera module
-        run: ./gradlew :loud-camera:compileReleaseKotlin --no-daemon --stacktrace
+        run: |
+          if [ -d ../modules/loud-camera/android ]; then
+            ./gradlew :loud-camera:compileReleaseKotlin --no-daemon --stacktrace
+          else
+            echo "::notice title=No camera module::native/modules/loud-camera is not on this branch; building the app without it."
+          fi
         working-directory: native/android
 
       - name: Build the release APK
