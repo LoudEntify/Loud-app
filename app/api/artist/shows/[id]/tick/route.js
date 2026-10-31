@@ -26,7 +26,7 @@ export async function POST(request, { params }) {
   const egress = egressFor(show.id);
   let delivery = { state: show.delivery_state };
   if (show.actual_started_at && !show.actual_ended_at) {
-    const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, healthy: body.healthy || { a: true, b: true } });
+    const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, orientation: show.orientation, healthy: body.healthy || { a: true, b: true } });
     // The look on screen: the show's own (shows.look, set at booking from the artist's default or changed from the console), with the
     // console's per-tick colour match; an unknown look logs as none rather than failing the tick. The transition in flight, if the
     // console reports one ({ type, direction, startedAtMs, durationMs }), is logged the same way.

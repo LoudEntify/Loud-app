@@ -44,6 +44,7 @@ export async function POST(request) {
     artist_id: auth.user.id, artist_name: auth.profile.display_name, room_name: `show-${randomUUID().slice(0, 8)}`, slated_at: values.startAt, state: 'scheduled',
     title: values.title, performance_mode: values.mode, duration_minutes: values.minutes, genre: values.genre, description: values.description, cover_url: values.coverUrl,
     delivery: youtubeMode() === 'google' ? 'youtube' : (process.env.NEXT_PUBLIC_PLAYER_SOURCE_OVERRIDE || 'fixture'), place_id: values.placeId, visibility: 'public',
+    orientation: values.orientation,
     // the look on screen starts as the artist's default (Direction settings); changeable per show from the console
     look: directionFromRow((await admin.from('direction_settings').select('settings').eq('artist_id', auth.user.id).maybeSingle()).data).look,
   };
