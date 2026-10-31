@@ -192,7 +192,8 @@ export default function ShowScreen({ showId, initialShow = null }) {
 
   // ── layout ──
   const mode = !show ? 'default' : (sheet === 'signup' || sheet === 'login' || guestGate) ? 'guest' : (voteOpen && prompt) ? 'vote' : bigger ? 'bigger' : state === 'waiting' || state === 'scheduled' ? 'waiting' : 'default';
-  const layout = useMemo(() => computeShowLayout({ width: vp.width, height: vp.height, mode }), [vp.width, vp.height, mode]);
+  // The player box takes the show's own shape: a landscape show must not sit in a 9:16 hole.
+  const layout = useMemo(() => computeShowLayout({ width: vp.width, height: vp.height, mode, orientation: show?.orientation }), [vp.width, vp.height, mode, show?.orientation]);
   const wide = layout.tier !== 'phone';
 
   // ── states ──

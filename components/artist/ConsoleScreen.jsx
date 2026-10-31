@@ -95,7 +95,7 @@ export default function ConsoleScreen({ showId }) {
     const loop = () => {
       const c = canvasRef.current, v = videoRef.current;
       if (c && show) {
-        const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, w: c.width, h: c.height, healthy: { a: slot === 'a' ? camHealthy : true, b: slot === 'b' ? camHealthy : true } });
+        const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, orientation: show.orientation, w: c.width, h: c.height, healthy: { a: slot === 'a' ? camHealthy : true, b: slot === 'b' ? camHealthy : true } });
         const sources = { [slot]: v && v.readyState >= 2 ? v : null };
         // The look through the same WebGL pass the compositor uses: the CPU path would
         // read back every pixel of the preview each frame, which a phone cannot hold.
