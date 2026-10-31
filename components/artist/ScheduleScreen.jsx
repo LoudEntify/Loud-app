@@ -9,6 +9,7 @@ import { useSession } from '../../lib/useSession';
 import { getSupabase } from '../../lib/supabaseClient';
 import { api } from '../../lib/viewerApi';
 import { validateBooking, earliestStart, LENGTH_OPTIONS } from '../../lib/schedule';
+import { ORIENTATION_CHOICES, DEFAULT_ORIENTATION } from '../../lib/orientation';
 import { GENRES } from '../../lib/genres';
 import { track } from '../../lib/telemetry';
 import { ErrorState, Skeleton } from '../viewer/States';
@@ -22,7 +23,7 @@ export default function ScheduleScreen() {
   const router = useRouter();
   const { session, profile, loading, accessToken } = useSession();
   const first = earliestStart();
-  const [form, setForm] = useState({ mode: 'solo', date: localDate(first), time: localTime(first), minutes: 45, title: '', genre: '', inviteeUsername: '', description: '', placeId: '' });
+  const [form, setForm] = useState({ mode: 'solo', orientation: DEFAULT_ORIENTATION, date: localDate(first), time: localTime(first), minutes: 45, title: '', genre: '', inviteeUsername: '', description: '', placeId: '' });
   const [places, setPlaces] = useState(null);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -64,6 +65,18 @@ export default function ScheduleScreen() {
   return (
     <form className="v-screen" onSubmit={book} data-testid="schedule-screen" noValidate>
       <div className="v-row" style={{ gap: 12 }}><a href="/artist/create" aria-label="Back" className="v-icon-btn v-btn-ghost-light"><Back /></a><h1 className="v-h1" style={{ fontSize: 30 }}>Schedule a show</h1></div>
+      <section className="v-col" style={{ gap: 8 }}>
+        <h2 className="v-h2" style={{ fontSize: 18 }}>Shape</h2>
+        <div className="v-row" style={{ gap: 8 }}>
+          {ORIENTATION_CHOICES.map((o) => (
+            <button type="button" key={o.key} className="v-chip v-chip-light" aria-pressed={form.orientation === o.key} onClick={() => setForm((f) => ({ ...f, orientation: o.key }))}>
+              {o.label} {o.shape}
+            </button>
+          ))}
+        </div>
+        <span className="v-muted" style={{ fontSize: 14 }}>{ORIENTATION_CHOICES.find((o) => o.key === form.orientation)?.note}</span>
+        <span className="v-muted" style={{ fontSize: 14 }}>{ORIENTATION_CHOICES.find((o) => o.key === form.orientation)?.youtube}</span>
+      </section>
       <section className="v-col" style={{ gap: 8 }}><h2 className="v-h2" style={{ fontSize: 18 }}>Show type</h2><div className="v-row" style={{ gap: 8 }}>{[['solo', 'Solo'], ['versus', 'Versus']].map(([k, l]) => <button type="button" key={k} className="v-chip v-chip-light" aria-pressed={form.mode === k} onClick={() => setForm((f) => ({ ...f, mode: k }))}>{l}</button>)}</div>
         {form.mode === 'versus' && <label className="v-field">Invite an artist<input placeholder="@their_username" value={form.inviteeUsername} onChange={set('inviteeUsername')} />{errors.invitee && <span className="v-err">{errors.invitee}</span>}</label>}
       </section>
