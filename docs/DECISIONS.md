@@ -165,6 +165,26 @@ One line per decision: date, decision, reason, option rejected.
 - 2026-11-01: The site's own address is read through `lib/siteUrl.js`, from the private `SITE_URL` first and the public `NEXT_PUBLIC_SITE_URL` second. Reason: Vercel flags a `NEXT_PUBLIC_` variable because the prefix ships the value to the browser, and all four readers of this one are server-side (a route handler and two server components, plus the YouTube redirect). The address is not a secret — it is what is in the address bar — so nothing was exposed, but a prefix that promises the browser a value no browser code uses is a misleading label, and the next person reading it has to work that out again. Both names are read so a deployment that already has the public one keeps working during the change; the private one wins where both exist. The two functions differ in one way that matters: `siteUrl()` falls back to production for the share pages, while `siteUrlIfSet()` returns nothing so the YouTube redirect can fall back to the request's own origin — falling back to production there would send a developer's consent screen to the live site. Rejected: leaving it public (the warning is fair and the label is wrong), and a hard rename with no fallback (it would have broken staging in the middle of Korey's device test).
 - 2026-11-01: The staging pipeline runs `supabase/tests/*.sql` against the staging database on every merge. Reason: the five permission tests have existed since Phase 2 and nothing ever ran them anywhere but a developer's own machine, so "row-level security is on and these roles cannot read that table" was a claim in a file rather than a fact about staging. CLAUDE.md §7 asks for permission tests per role including the negative cases, and §3 asks for each migration's verification queries to be run against staging and recorded; this is both, automatically, in the run log. It is safe against a real database because scripts/db/run-sql-tests.sh wraps each file in a transaction and rolls it back, so neither a pass nor a failure leaves rows behind. A failure stops the job, because a permission regression is the one thing that should stop a pipeline rather than wait to be noticed. This also discharges the pre-promotion verification for the director data store without anyone pasting query output by hand. Rejected: running them from a developer's machine and pasting the results on the PR (that is what was meant to happen for a month and never did), and running them in ci.yml against the ephemeral local Postgres (it proves the SQL is valid, not that staging is actually configured the way the tests assume).
 
+## 2026-11-01 — YouTube connect and disconnect live in the app, with consent in the system browser
+
+Removing the WebView wrapper (2026-11-01) took away the only route to the
+web Settings page, and the Connect and Disconnect buttons for YouTube lived
+only there. None of the twelve settings boards draws them, so the phone was
+left with no way to connect, reconnect or disconnect a channel — while the
+privacy policy promises an artist can disconnect in Settings at any time,
+and a connection expires weekly until Google finishes reviewing the consent
+screen. Built `native/app/settings/youtube.js` against the same three routes
+the web twin uses, and added a row to the "Your stage" section of the
+settings hub. Consent opens in the system browser rather than an in-app web
+view: Google refuses its consent screen inside an embedded web view for a
+native client, and the callback has to land on the site holding the signed
+state. The screen re-reads the status when the app regains focus, so
+returning from the browser shows the result with nothing to press. Rejected:
+putting the single WebView screen back for Settings alone (it was the blend
+of old and new UI Korey asked to be rid of), and a native OAuth client with
+a custom scheme (a second client to register and verify, two sets of
+redirect URIs, for the same consent screen).
+
 ## 2026-11-01 — Go live survives a recorder that cannot write, and says so
 
 Pressing Go live on staging failed with "We could not start the broadcast"
