@@ -13,7 +13,7 @@
 // by tests/native-ui.test.mjs rather than left to memory.
 import { Pressable, Text, View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { color, button, gradient, surface, space } from './tokens';
+import { color, button, gradient, surface, space, face } from './tokens';
 
 const KINDS = {
   main: { gradient: gradient.tealButton, text: color.ink },
@@ -43,7 +43,7 @@ export function Button({
         ? <ActivityIndicator color={k.text} />
         : (<>
             {icon}
-            <Text numberOfLines={1} style={[{ fontSize: s.fontSize, fontWeight: '700', color: k.text }, textStyle]}>{children}</Text>
+            <Text numberOfLines={1} style={[{ fontFamily: face.bold, fontSize: s.fontSize, fontWeight: '700', color: k.text }, textStyle]}>{children}</Text>
           </>)}
     </View>
   );
@@ -107,7 +107,7 @@ export function Chip({ children, selected = false, onPress, role = 'radio', dark
         opacity: pressed ? 0.85 : 1,
       }, style]}
     >
-      <Text style={{ fontSize: button.chip.fontSize, fontWeight: selected ? '700' : '400', color: selected ? color.ink : (dark ? color.porcelain : color.ink) }}>
+      <Text style={{ fontFamily: selected ? face.bold : face.regular, fontSize: button.chip.fontSize, fontWeight: selected ? '700' : '400', color: selected ? color.ink : (dark ? color.porcelain : color.ink) }}>
         {children}
       </Text>
     </Pressable>
@@ -123,7 +123,7 @@ export function Badge({ kind = 'live', children, style }) {
   }[kind] || { bg: 'rgba(1,22,39,0.75)', fg: color.porcelain, text: '' };
   return (
     <View style={[{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: look.bg }, style]}>
-      <Text style={{ fontSize: 13, fontWeight: '700', letterSpacing: 1.3, color: look.fg }}>{children ?? look.text}</Text>
+      <Text style={{ fontFamily: face.bold, fontSize: 13, fontWeight: '700', letterSpacing: 1.3, color: look.fg }}>{children ?? look.text}</Text>
     </View>
   );
 }

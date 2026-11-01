@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, Animated, Easing } from 'react-native';
 import { Button } from './Button';
-import { text, textOnDark, color, surface, space, radius, LOADING_GIVE_UP_MS } from './tokens';
+import { text, textOnDark, color, surface, space, radius, face, LOADING_GIVE_UP_MS } from './tokens';
 import { Warning, Cloud } from './Icon';
 
 /**
@@ -88,7 +88,7 @@ export function OfflineBar({ message = 'No connection. Trying to reconnect.', te
   return (
     <View testID={testID} style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.l, paddingVertical: space.sm, borderRadius: 999, backgroundColor: color.ink }}>
       <Cloud size={20} color={color.porcelain} />
-      <Text style={{ fontSize: 16, fontWeight: '700', color: color.porcelain }}>{message}</Text>
+      <Text style={{ fontFamily: face.bold, fontSize: 16, fontWeight: '700', color: color.porcelain }}>{message}</Text>
     </View>
   );
 }

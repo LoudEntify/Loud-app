@@ -16,16 +16,32 @@ export {
 
 import { type as t, color as c } from '@loud/lib/design/tokens.js';
 
+/**
+ * PT Sans Narrow, loaded in app/_layout.js. React Native picks a face by
+ * its exact family name rather than by weight, so bold is a different
+ * family, not a `fontWeight` — and `fontWeight` is still set alongside it
+ * so the system face degrades sensibly if the font ever fails to load.
+ */
+export const face = { regular: 'PTSansNarrow_400Regular', bold: 'PTSansNarrow_700Bold' };
+export const fontFamilyFor = (w) => (Number(w) >= 700 ? face.bold : face.regular);
+
 const weight = (w) => (w === 700 ? '700' : '400');
+const typeStyle = (step, color) => ({
+  fontFamily: fontFamilyFor(step.weight),
+  fontSize: step.size,
+  lineHeight: step.lineHeight,
+  fontWeight: weight(step.weight),
+  color,
+});
 
 /** The type scale as styles, in the two colours text is ever written in. */
 export const text = {
-  screenTitle: { fontSize: t.screenTitle.size, lineHeight: t.screenTitle.lineHeight, fontWeight: weight(t.screenTitle.weight), color: c.ink },
-  sectionHeading: { fontSize: t.sectionHeading.size, lineHeight: t.sectionHeading.lineHeight, fontWeight: weight(t.sectionHeading.weight), color: c.ink },
-  rowTitle: { fontSize: t.rowTitle.size, lineHeight: t.rowTitle.lineHeight, fontWeight: weight(t.rowTitle.weight), color: c.ink },
-  body: { fontSize: t.body.size, lineHeight: t.body.lineHeight, fontWeight: weight(t.body.weight), color: c.ink },
-  supporting: { fontSize: t.supporting.size, lineHeight: t.supporting.lineHeight, fontWeight: weight(t.supporting.weight), color: c.mutedOnLight },
-  label: { fontSize: t.label.size, lineHeight: t.label.lineHeight, fontWeight: '700', letterSpacing: t.label.letterSpacing, textTransform: 'uppercase', color: c.mutedOnLight },
+  screenTitle: typeStyle(t.screenTitle, c.ink),
+  sectionHeading: typeStyle(t.sectionHeading, c.ink),
+  rowTitle: typeStyle(t.rowTitle, c.ink),
+  body: typeStyle(t.body, c.ink),
+  supporting: typeStyle(t.supporting, c.mutedOnLight),
+  label: { ...typeStyle(t.label, c.mutedOnLight), letterSpacing: t.label.letterSpacing, textTransform: 'uppercase' },
 };
 
 /** The same scale on a dark screen. Only the colour changes. */

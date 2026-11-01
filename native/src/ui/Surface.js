@@ -12,7 +12,7 @@
 // out of the way of anything the person can touch.
 import { View, Text, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { gradient, surface, radius, space, color } from './tokens';
+import { gradient, surface, radius, space, color, face } from './tokens';
 
 /** The stack of washes that makes a silk, as absolutely-positioned layers. */
 function Washes({ layers }) {
@@ -73,7 +73,7 @@ export function MediaTile({ label, style, children, ...rest }) {
     >
       <Washes layers={gradient.mediaTile} />
       {label ? (
-        <Text style={{ fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.7)', textAlign: 'center', paddingHorizontal: space.l }}>
+        <Text style={{ fontFamily: face.regular, fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.7)', textAlign: 'center', paddingHorizontal: space.l }}>
           {label}
         </Text>
       ) : null}

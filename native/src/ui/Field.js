@@ -9,7 +9,7 @@
 // code, and this never writes one of its own.
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
-import { color, surface, radius, space, text, textOnDark, button } from './tokens';
+import { color, surface, radius, space, text, textOnDark, button, face } from './tokens';
 import { Eye } from './Icon';
 
 export function Field({
@@ -37,6 +37,7 @@ export function Field({
             backgroundColor: dark ? surface.quietDark : surface.quiet,
             paddingHorizontal: 14,
             paddingRight: secure ? 52 : 14,
+            fontFamily: face.regular,
             fontSize: 17,
             color: fg,
             borderWidth: error ? 2 : 0,
@@ -57,7 +58,7 @@ export function Field({
           </Pressable>
         ) : null}
       </View>
-      {error ? <Text style={{ fontSize: 15, color: color.red }}>{error}</Text> : null}
+      {error ? <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.red }}>{error}</Text> : null}
       {!error && hint ? <Text style={t.supporting}>{hint}</Text> : null}
     </View>
   );

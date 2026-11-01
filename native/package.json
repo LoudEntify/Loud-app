@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
+    "@expo-google-fonts/pt-sans-narrow": "^0.4.1",
     "@livekit/react-native": "^3.0.0",
     "@livekit/react-native-expo-plugin": "^1.0.3",
     "@livekit/react-native-webrtc": "^144.2.0",
