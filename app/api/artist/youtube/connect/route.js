@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 import { verifyArtistAuth } from '../../../../../lib/verifyArtistAuth';
 import { correlationFrom, withCorrelation } from '../../../../../lib/correlation';
-import { authUrl, signState, RETURN_TO } from '../../../../../lib/youtube/oauth';
+import { authUrl, signState, redirectUriFor, RETURN_TO } from '../../../../../lib/youtube/oauth';
 import { youtubeMode, YOUTUBE_SCOPE } from '../../../../../lib/youtube/api';
 import { storeConnection, checkReadiness, mockApiFor } from '../../../../../lib/youtube/connections';
 
@@ -21,7 +21,7 @@ export async function POST(request) {
   let returnTo = 'onboarding';
   try { const body = await request.json(); if (body?.returnTo && RETURN_TO[body.returnTo]) returnTo = body.returnTo; } catch { /* no body */ }
   if (youtubeMode() === 'google') {
-    const url = authUrl({ redirectUri: `${origin}/api/artist/youtube/callback`, state: signState(auth.user.id, returnTo) });
+    const url = authUrl({ redirectUri: redirectUriFor(origin), state: signState(auth.user.id, returnTo) });
     return withCorrelation(NextResponse.json({ mode: 'google', url }), cid);
   }
   const admin = getSupabaseAdmin();

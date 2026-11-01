@@ -117,3 +117,19 @@ test('disconnect everywhere: Google refusing the revoke still deletes our copy a
   assert.deepEqual(n, { ok: false, revoked: null, revokeError: null, streamKeysWiped: 0 });
   assert.deepEqual(none.log.rotated, []); assert.equal(none.log.audits.length, 0);
 });
+
+// The redirect URI is pinned, so one entry in the Google console covers
+// every Vercel deployment URL a preview branch produces.
+import { redirectUriFor } from '../lib/youtube/oauth.js';
+test('redirect uri: pinned to the site url when set, request origin otherwise', () => {
+  const had = process.env.NEXT_PUBLIC_SITE_URL;
+  delete process.env.NEXT_PUBLIC_SITE_URL;
+  assert.equal(redirectUriFor('http://localhost:3000'), 'http://localhost:3000/api/artist/youtube/callback');
+  process.env.NEXT_PUBLIC_SITE_URL = 'https://loud-app-git-staging-korey-alashe.vercel.app/';
+  // A one-off deployment URL must still produce the registered callback.
+  assert.equal(
+    redirectUriFor('https://loud-app-abc123-korey-alashe.vercel.app'),
+    'https://loud-app-git-staging-korey-alashe.vercel.app/api/artist/youtube/callback',
+  );
+  if (had === undefined) delete process.env.NEXT_PUBLIC_SITE_URL; else process.env.NEXT_PUBLIC_SITE_URL = had;
+});
