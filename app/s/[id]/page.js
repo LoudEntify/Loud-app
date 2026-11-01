@@ -2,6 +2,7 @@
 // Server-rendered with Open Graph so a pasted link unfurls; the show
 // screen itself is /show/:id. Five states: loading (streamed), the show
 // (upcoming / live / ended), not found, and a database error.
+import { siteUrl } from '../../../lib/siteUrl';
 import SiteShell from '../../../components/site/SiteShell';
 import Countdown from '../../../components/site/Countdown';
 import ShareBox from '../../../components/site/ShareBox';
@@ -10,7 +11,7 @@ import { publicShow, whoLabel } from '../../../lib/site/publicShows';
 import { Calendar, Clock, Music } from '../../../components/site/SiteIcons';
 
 export const dynamic = 'force-dynamic';
-const base = () => process.env.NEXT_PUBLIC_SITE_URL || 'https://loudentify.app';
+const base = () => siteUrl();
 
 export async function generateMetadata({ params }) {
   const { show } = await publicShow(params.id);
