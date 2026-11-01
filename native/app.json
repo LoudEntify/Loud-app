@@ -20,7 +20,8 @@
       },
       "associatedDomains": [
         "applinks:loudentify.app"
-      ]
+      ],
+      "bitcode": false
     },
     "android": {
       "package": "app.loudentify.android",
@@ -28,7 +29,17 @@
         "CAMERA",
         "RECORD_AUDIO",
         "INTERNET",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ],
       "intentFilters": [
         {
@@ -65,6 +76,14 @@
     "plugins": [
       "expo-router",
       [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Loudentify uses the camera so this phone can be a camera for your show.",
+          "microphonePermission": "Loudentify uses the microphone for your show's sound."
+        }
+      ],
+      "@livekit/react-native-expo-plugin",
+      [
         "expo-camera",
         {
           "cameraPermission": "Loudentify uses the camera so this phone can be a camera for your show."
@@ -74,10 +93,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#011627",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
           "resizeMode": "contain",
-          "image": "./assets/splash-logo.png",
-          "imageWidth": 200
+          "backgroundColor": "#011627"
         }
       ],
       [
@@ -85,18 +104,24 @@
         {
           "style": "light"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "extra": {
       "apiBase": "https://loudentify.app",
       "supabaseUrl": "",
       "supabaseAnonKey": "",
       "eas": {
-        "projectId": "SET-BY-EAS-INIT"
+        "projectId": "03471d38-9e8d-4c78-b438-470aea22ce2e"
+      },
+      "router": {},
+      "expo-status-bar": {
+        "style": "light"
       }
     },
     "experiments": {
       "typedRoutes": false
-    }
+    },
+    "owner": "loudentifymain"
   }
 }

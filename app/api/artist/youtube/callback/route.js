@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../../lib/supabaseAdmin';
 import { correlationFrom } from '../../../../../lib/correlation';
-import { exchangeCode, readState, RETURN_TO } from '../../../../../lib/youtube/oauth';
+import { exchangeCode, readState, redirectUriFor, RETURN_TO } from '../../../../../lib/youtube/oauth';
 import { GoogleYouTubeApi } from '../../../../../lib/youtube/api';
 import { storeConnection, checkReadiness } from '../../../../../lib/youtube/connections';
 
@@ -18,7 +18,8 @@ export async function GET(request) {
   if (!code || !parsed) return back('youtube=error&reason=state');
   const userId = parsed.userId;
   try {
-    const tokens = await exchangeCode({ code, redirectUri: `${url.origin}/api/artist/youtube/callback` });
+    // The same value the consent URL carried, or Google refuses the exchange.
+    const tokens = await exchangeCode({ code, redirectUri: redirectUriFor(url.origin) });
     const api = new GoogleYouTubeApi({ accessToken: tokens.accessToken });
     const info = await api.channelInfo();
     const admin = getSupabaseAdmin();
