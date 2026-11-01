@@ -125,6 +125,10 @@ export default function Console() {
     const r = await api(`/api/artist/shows/${id}/go-live`, { method: 'POST', accessToken });
     setBusy(null);
     if (!r.ok) { setErr(r.data?.error || 'We could not start the broadcast.'); return; }
+    // The show starts even when the recorder could not: say so once,
+    // rather than letting the artist find out after the show that there
+    // is nothing to post.
+    if (r.data?.recording === false) setErr('Your show is live, but it is not being recorded. Nothing to do now — finish the show, and tell us afterwards.');
     await load();
   }
 

@@ -185,6 +185,25 @@ of old and new UI Korey asked to be rid of), and a native OAuth client with
 a custom scheme (a second client to register and verify, two sets of
 redirect URIs, for the same consent screen).
 
+## 2026-11-01 — Go live survives a recorder that cannot write, and says so
+
+Pressing Go live on staging failed with "We could not start the broadcast"
+and nothing else. Cause: `FakeEgress` wrote under `process.cwd()`, which on
+a serverless host is read-only, so the first `mkdirSync` threw `EROFS`; the
+route had no `try`, so the runtime answered with a bare 500 and no body, and
+the console fell back to its generic sentence. Reproduced by pointing a
+`FakeEgress` at an unwritable root: `goLive` threw rather than degrading.
+Three changes: `recordingRoot()` picks `EGRESS_DIR`, then the working
+directory while it is writable, then the system temp directory; `goLive`
+catches a recorder failure, audits `show.recording_failed` and starts the
+show anyway, because a recording sits below the show itself in the degrade
+order; the route returns a sentence with the correlation id in it rather
+than letting the runtime answer. The console says once that the show is
+live but not being recorded. Rejected: setting `EGRESS_DIR` in Vercel and
+leaving the throw in place — it would fix this host and leave the next one
+to fail the same way, and the real defect was a recording taking a show
+down with it, not a path.
+
 ## 2026-11-01 — The pairing code gets a screen of its own, not an inline QR
 
 DevicesSettings.dc.html draws the pairing QR inline in its "Add a camera"

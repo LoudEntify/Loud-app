@@ -25,6 +25,16 @@ export async function POST(request, { params }) {
   if (!force && (now < windowOpensAt(show) || now > windowClosesAt(show))) return withCorrelation(NextResponse.json({ error: 'Your show can only start inside its booked window.' }, { status: 409 }), cid);
   const { data: consent } = await admin.from('consent_records').select('granted').eq('user_id', show.artist_id).eq('consent_type', 'training_data').order('recorded_at', { ascending: false }).limit(1);
   const trainingAllowed = consent?.[0] ? Boolean(consent[0].granted) : true;
-  const r = await goLive(supabaseLifecycleStore(admin), egressFor(show.id), { showId: show.id, correlationId: cid, trainingAllowed });
-  return withCorrelation(NextResponse.json(r), cid);
+  // Anything thrown past here used to leave the runtime to answer, which
+  // it does with a 500 and no body — and the console then has nothing to
+  // show but "We could not start the broadcast." An artist standing in
+  // front of an audience needs a sentence with something to do in it, and
+  // the correlation id to find the rest.
+  try {
+    const r = await goLive(supabaseLifecycleStore(admin), egressFor(show.id), { showId: show.id, correlationId: cid, trainingAllowed });
+    return withCorrelation(NextResponse.json(r), cid);
+  } catch (e) {
+    console.error('[go-live]', cid, e);
+    return withCorrelation(NextResponse.json({ error: `Your show could not be started. Nothing is lost: try Go live again. If it keeps failing, end the show and rebook. (ref ${cid})` }, { status: 500 }), cid);
+  }
 }
