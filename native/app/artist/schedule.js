@@ -34,6 +34,7 @@ import { supabase, useSession } from '../../src/session';
 import { validateBooking, earliestStart, LENGTH_OPTIONS } from '@loud/lib/schedule.js';
 import { ORIENTATION_CHOICES, DEFAULT_ORIENTATION } from '@loud/lib/orientation.js';
 import { GENRES } from '@loud/lib/genres.js';
+import { explainYouTubeError } from '@loud/lib/youtube/api.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const localDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -336,7 +337,7 @@ function Booked({ result }) {
             {' · '}{result.show.orientation === 'landscape' ? 'Landscape' : 'Portrait'}
           </Text>
           {failed.length
-            ? <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.red }}>The YouTube broadcast could not be created yet ({failed[0].last_error}). The show is booked; connect your channel and it will be created when you go live.</Text>
+            ? <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.red }}>{explainYouTubeError(failed[0].last_error)} The show itself is booked.</Text>
             : <Text style={text.supporting}>Your YouTube broadcast is created and waiting.</Text>}
         </Card>
         <Button kind="main" onPress={() => router.replace(`/artist/console/${result.show.id}`)}>Open the console</Button>

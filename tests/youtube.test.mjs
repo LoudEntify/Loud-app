@@ -133,3 +133,20 @@ test('redirect uri: pinned to the site url when set, request origin otherwise', 
   );
   if (had === undefined) delete process.env.NEXT_PUBLIC_SITE_URL; else process.env.NEXT_PUBLIC_SITE_URL = had;
 });
+
+// A raw Google error code is for the audit log, not for a musician's phone.
+import { explainYouTubeError } from '../lib/youtube/api.js';
+test('explainYouTubeError says what to press, not what Google called it', () => {
+  const expired = explainYouTubeError('not connected: Google token refresh failed: invalid_grant');
+  assert.match(expired, /connection has expired/i);
+  assert.match(expired, /connect your channel again/i);
+  assert.ok(!/invalid_grant/.test(expired), 'the raw code must not reach the artist');
+  assert.match(explainYouTubeError('not connected: no YouTube connection'), /No YouTube channel is connected/i);
+  assert.match(explainYouTubeError('channel not enabled for live'), /youtube\.com\/features/);
+  assert.match(explainYouTubeError('quotaExceeded'), /rate-limiting/);
+  assert.match(explainYouTubeError('invalid_client'), /ours to fix/);
+  // Anything unrecognised still reaches someone, truncated, rather than vanishing.
+  assert.match(explainYouTubeError('something new from Google'), /something new from Google/);
+  assert.equal(explainYouTubeError(''), null);
+  assert.equal(explainYouTubeError(null), null);
+});
