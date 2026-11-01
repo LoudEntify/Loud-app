@@ -141,3 +141,38 @@ test('booking: 30 minutes ahead, lengths, versus needs an invitee, reminders sti
   assert.deepEqual(reminderOffsetsDue(now + 31 * 60000, now), [30]);
   assert.deepEqual(reminderOffsetsDue(now + 2 * 86400000, now), [1440, 240, 60, 30]);
 });
+
+test('lifecycle: a recorder that cannot write does not stop the show', async () => {
+  // The fake recorder wrote under process.cwd(), which on a serverless
+  // host is read-only. The first mkdir threw, nothing caught it, and
+  // pressing Go live returned a bare 500 — the console could only say
+  // "We could not start the broadcast". A recording sits below the show
+  // itself in the degrade order (ARCHITECTURE §1), so losing it must
+  // never take the show with it.
+  const api = new MockYouTubeApi();
+  const store = memoryStore({ apis: { A: api } });
+  store.shows.set('s9', { id: 's9', title: 'Read-only night', slated_at: '2026-11-01T21:00:00Z', artist_id: 'A' });
+  await createBroadcastsForShow(store, { showId: 's9' });
+  const egress = new FakeEgress({ rootDir: '/dev/null/cannot/write', now: store.now });
+  const r = await goLive(store, egress, { showId: 's9' });
+  assert.equal(r.ok, true, 'the show starts');
+  assert.equal(r.recording, false, 'and says plainly that it is not being recorded');
+  assert.ok(r.recordingError, 'keeping the reason');
+  assert.equal(store.shows.get('s9').state, 'live', 'the show is live');
+  assert.equal(store.shows.get('s9').delivery_state, 'ok', 'and YouTube still got its broadcast');
+  assert.ok(store.audits.some((a) => a.action === 'show.recording_failed'), 'the failure is audited, not swallowed');
+});
+
+test('the recorder writes somewhere writable, falling back to the temp directory', async () => {
+  // EGRESS_DIR wins; then the working directory while it is writable;
+  // then the temp directory, which is the one writable path a serverless
+  // function has.
+  const { recordingRoot } = await import('../lib/pipeline/egress.js');
+  assert.equal(recordingRoot({ env: { EGRESS_DIR: '/somewhere/else' } }).dir, '/somewhere/else');
+  const onDisk = recordingRoot({ env: {}, cwd: process.cwd() });
+  assert.equal(onDisk.fallback, false);
+  assert.ok(onDisk.dir.startsWith(process.cwd()), 'a laptop keeps its recordings where they can be found');
+  const readOnly = recordingRoot({ env: {}, cwd: '/proc/1/no-such-directory' });
+  assert.equal(readOnly.fallback, true);
+  assert.ok(readOnly.dir.startsWith(os.tmpdir()), 'a read-only host falls back to the temp directory');
+});
