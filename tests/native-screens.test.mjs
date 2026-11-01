@@ -55,6 +55,9 @@ function declaredNames(src) {
   // function Foo(), const Foo = ..., class Foo
   for (const m of src.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:default\s+)?(?:function|class)\s+([A-Z]\w*)/g)) names.add(m[1]);
   for (const m of src.matchAll(/(?:^|\n)\s*(?:export\s+)?(?:const|let|var)\s+([A-Z]\w*)/g)) names.add(m[1]);
+  // Renamed out of an object, anywhere: `({ icon: Glyph }) => ...` in a
+  // map callback is a component as much as an import is.
+  for (const m of src.matchAll(/\w+\s*:\s*([A-Z]\w*)\s*[,}]/g)) names.add(m[1]);
   // Destructured too: `const [VideoTrack, setVideoTrack] = useState(null)`
   // is how a screen holds a component it loaded lazily.
   for (const m of src.matchAll(/(?:const|let|var)\s*[[{]([^\]}]+)[\]}]\s*=/g)) {
@@ -139,12 +142,7 @@ test('the journey has the screens the designs link together', () => {
  * name back is not allowed — that is the blend returning.
  */
 const NOT_YET_REBUILT = new Set([
-  'native/app/(tabs)/create.js',
-  'native/app/(tabs)/profile.js',
-  'native/app/artist/schedule.js',
-  'native/app/camera.js',
-  'native/app/forgot-password.js',
-  'native/app/spike/zoom.js',
+  'native/app/spike/zoom.js',   // the device-zoom spike: a developer tool, deleted with the spike
 ]);
 
 test('a rebuilt screen never falls back to the old styles', () => {
@@ -162,7 +160,7 @@ test('the not-yet-rebuilt list names real files, and is not growing', () => {
     assert.ok(existsSync(resolve(ROOT, name)), `${name} is on the rebuild list but does not exist — remove it from the list`);
   }
   // A ceiling, so the list can only come down. Lower it as screens land.
-  assert.ok(NOT_YET_REBUILT.size <= 6, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
+  assert.ok(NOT_YET_REBUILT.size <= 1, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
 });
 
 // ── 4. A name imported from the kit is a name the kit exports ────────────
@@ -212,4 +210,20 @@ test('every name a screen imports from the design system is one it exports', () 
     }
   }
   assert.deepEqual(missing, [], `\n${missing.join('\n')}\n`);
+});
+
+test('no screen is the website in a frame', () => {
+  // The WebView wrapper is gone. Settings, Earnings and Kit check were the
+  // three screens that opened loudentify.app inside the app, and a web page
+  // inside an app announces itself: the keyboard behaves differently, the
+  // back gesture does the wrong thing, and the scroll bounces twice. That
+  // is most of what read as a blend of two apps on 1 November.
+  assert.ok(!existsSync(resolve(ROOT, 'native/app/web.js')), 'native/app/web.js is back');
+  const offenders = [];
+  for (const file of FILES) {
+    const src = readFileSync(file, 'utf8');
+    if (/from 'react-native-webview'/.test(src)) offenders.push(`${rel(file)} imports WebView`);
+    if (/['"`]\/web\?/.test(src)) offenders.push(`${rel(file)} pushes a /web route`);
+  }
+  assert.deepEqual(offenders, [], `\n${offenders.join('\n')}\n`);
 });
