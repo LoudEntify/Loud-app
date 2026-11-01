@@ -75,7 +75,7 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
 - [ ] **Reconnect the YouTube channel, then publish the consent screen.** On the device test of 1 Nov, booking a show failed with `invalid_grant`: the refresh token saved on 14 October is dead. While the OAuth consent screen is in **Testing**, Google expires refresh tokens after seven days, so this will keep happening roughly weekly until the screen is published. Two steps: (1) in the app, Settings → disconnect and reconnect YouTube, which gets a fresh token and unblocks tonight; (2) Google Cloud console → APIs & Services → OAuth consent screen → **Publish app**. Publishing to production with only the `youtube.force-ssl` scope on an app used by its own owner does not require Google's verification review to start working; the screen simply shows an "unverified app" warning until verification completes, which you click through. Until then, step (1) is the weekly workaround.
 - [ ] **One Vercel variable: `SITE_URL`.** Set it on the Preview scope (and the `staging` branch scope, alongside the YouTube ones) to `https://loud-app-git-staging-korey-alashe.vercel.app`, with no trailing slash. Use the plain **Config** kind, not the `NEXT_PUBLIC_` one: nothing in the browser reads it, so the public prefix would promise something no code uses. The value itself is not a secret — it is the address in your own address bar — so if one is already set as `NEXT_PUBLIC_SITE_URL` it still works and nothing is exposed; `SITE_URL` simply wins where both exist. This is the address the app now hands Google as the one place it may send an artist back to. Google matches that address character for character, and Vercel gives every single deployment a URL of its own beside the stable branch one, so without this the connection works or fails depending on which deployment the browser happened to land on. The address above must also be the one already listed under Authorised redirect URIs on the OAuth client, with `/api/artist/youtube/callback` on the end — it almost certainly is, since the test channel connected successfully on 14 Oct, but it is worth a glance before the rehearsal.
 
-- [ ] **LiveKit egress credentials** for the real compositor/egress: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` already exist for the pilot; set `EGRESS_MODE=livekit` on Vercel when you want the real egress instead of the file-writing test double. The real room-composite-to-RTMP wiring is the next engineering step once a real broadcast exists to point it at.
+- [x] **LiveKit egress credentials** — the real compositor is now written (`lib/pipeline/livekitEgress.js`), so this is no longer "the next engineering step". Switching it on is below.
 - [ ] **Identity-check provider and payout provider** are still not chosen (PRD 138). Earnings and cash-out run against stubs: the identity step shows "not started", cash-out is gated on `kyc_status = verified` which nothing sets yet.
 - [ ] **Device checklist for this build** (artist side, on your phone against staging once migrations are applied; use a performer account):
   1. Sign up as a performer. Does onboarding show six steps, and does "Connect YouTube" connect a mock channel and say live streaming is enabled?
@@ -342,3 +342,44 @@ The website lives in the same app, on the session branch. On the Vercel preview 
 
 
 - [ ] **Know that recordings do not survive on staging.** The go-live crash is fixed and a show now starts whether or not it can be recorded, but the recorder on staging writes to the host's temporary directory, and that host is replaced between requests. So a staging show is live and watchable, and its recording file will usually be gone afterwards. Nothing for you to click: it is a consequence of the placeholder recorder (`FakeEgress`), and it goes when the real one (LiveKit egress) is funded and switched on. It matters only if you were planning to use a staging recording as visa evidence — film the screen instead.
+
+
+## Turn the real broadcast on (this is what makes a picture appear)
+
+Until this is done, a show goes live, a YouTube broadcast is created and
+transitioned, and **no video is sent**: the compositor in use writes the
+director's decisions to a log file and counts frames it never pushes.
+That is why YouTube shows "Something went wrong" to a viewer. The real
+compositor is written and tested; it is off because it costs money per
+minute and needs one variable that only you can set.
+
+In Vercel → **loud-app** → Settings → Environment Variables, for the
+**Preview** environment (that is what the staging branch deploys to):
+
+1. **`EGRESS_TEMPLATE_BASE_URL`** — set it to `https://loudentify.app`.
+   This must be a stable, publicly reachable address: LiveKit runs a
+   headless browser OUTSIDE our deployment and navigates it to this
+   address to render the picture, so a preview-only URL will not work.
+   Mark it **Config**, not public — it is read on the server only.
+2. **`EGRESS_MODE`** — set it to `livekit`. This is the switch. Without
+   it, the file-writing stand-in stays in use and nothing broadcasts.
+3. Check **`LIVEKIT_API_KEY`**, **`LIVEKIT_API_SECRET`** and
+   **`LIVEKIT_URL`** are present for Preview. They already exist for the
+   pilot; if they are only on Production, add them to Preview too.
+4. Optional, for keeping a copy of each show: `LIVEKIT_S3_ACCESS_KEY`,
+   `LIVEKIT_S3_SECRET`, `LIVEKIT_S3_ENDPOINT`, `LIVEKIT_S3_REGION`,
+   `LIVEKIT_S3_BUCKET`. Leave them out and shows still broadcast — they
+   simply are not archived. A show that cannot be kept must still go out.
+5. Redeploy staging (Vercel → Deployments → the latest staging one →
+   Redeploy), because environment variables are read at build time.
+
+**What it costs.** LiveKit bills a composite by the minute it runs, so
+this is now a meter that starts when you press Go live and stops when
+you end the show. Ending a show stops it; a show abandoned without
+pressing End keeps running until its window closes.
+
+**How to tell it worked.** Press Go live. The console no longer says
+"nothing is reaching YouTube", and the viewer page shows your picture
+rather than the broken-monkey page, within about ten to twenty seconds —
+a headless browser has to start and YouTube has to accept the first
+frames before it will show anything.

@@ -247,3 +247,29 @@ shot grammar too, and a rename for vocabulary's sake is a migration and
 three call sites for no behaviour), and inferring the rig on the device
 from /api/camfeed/pair (a second poll during a live show, for data the
 console call already had to hand).
+
+## 2026-11-01 — The real compositor is written: a show now reaches YouTube
+
+Korey's device test found the viewer page showing a YouTube player with
+"Something went wrong" while the show read LIVE. Cause: nothing has ever
+pushed video to YouTube. `goLive` always drove `FakeEgress`, which writes
+the director's decisions to NDJSON and counts frames it never sends;
+`LiveKitEgress` was a stub whose `start()` threw; and
+`app/api/egress/start`, which does a real room composite, writes an MP4 to
+S3 with no RTMP output and is called by nothing in the running app.
+Everything around the gap was real — phones publishing into a LiveKit room,
+a YouTube broadcast created, bound and transitioned live — which is why it
+looked like a configuration problem. Wrote `lib/pipeline/livekitEgress.js`:
+a room composite rendered through our own template (components/EgressPage.jsx)
+at 1080x1920, pushed to one RTMP url per YouTube target, with the S3 file
+attached only when the storage variables exist. Threaded `room` and
+`performanceMode` through `goLive`, which never passed them. Kept
+`FakeEgress` the default and `EGRESS_MODE=livekit` the switch, because a
+composite bills by the minute and turning it on is Korey's call, with the
+steps in NEEDS_KOREY. A client factory is injected so the whole thing is
+tested without a LiveKit account — the absence of that seam is why the
+previous attempt stayed a stub. Rejected: calling `/api/egress/start` from
+the lifecycle (it is S3-only, needs five storage variables to do anything
+at all, and verifies ownership from a request this path does not have), and
+making the real egress the default (a billed meter should not start because
+a test suite went green).
