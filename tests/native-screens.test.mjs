@@ -281,3 +281,20 @@ test('a performer can connect and disconnect YouTube from Settings', () => {
   const hub = readFileSync(resolve(ROOT, 'native/app/settings/index.js'), 'utf8');
   assert.match(hub, /\/settings\/youtube/, 'and the settings hub has a row that reaches it');
 });
+
+test('an artist can get a pairing code for a second camera', () => {
+  // DevicesSettings.dc.html draws a QR code inside "Add a camera". The
+  // native rebuild kept the instruction and lost the code: the row
+  // pointed at /camera, which is the SCANNER — the screen the second
+  // phone sits on. Both phones offered to scan, neither offered anything
+  // to scan, and there was no way to add a camera from the app at all.
+  const src = readFileSync(resolve(ROOT, 'native/app/settings/pair.js'), 'utf8');
+  assert.match(src, /camfeed\/pair/, 'it mints a real code');
+  assert.match(src, /action: 'invite'/, 'through the invite action, not the legacy shape');
+  assert.match(src, /<QRCode/, 'and draws it as a picture');
+  assert.match(src, /cam\/pair\?code=/, 'encoding the same URL the web panel encodes');
+  assert.match(src, /pair-code/, 'with the code in readable characters too, for a phone that will not scan');
+  const devices = readFileSync(resolve(ROOT, 'native/app/settings/devices.js'), 'utf8');
+  assert.match(devices, /\/settings\/pair/, 'and "Show the pairing code" reaches it');
+  assert.ok(!/title="Show the pairing code"[\s\S]{0,200}router\.push\('\/camera'\)/.test(devices), 'rather than opening the scanner');
+});
