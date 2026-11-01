@@ -59,10 +59,12 @@ export default function Console() {
   const live = Boolean(tick?.live ?? (show?.actual_started_at && !show?.actual_ended_at));
   const orientation = showOrientation(show);
 
-  // What the Cuts sheet can offer: this phone is always the main camera,
-  // and anything else has to have been paired. Until the camera list
-  // arrives from the console route, only Main is on.
-  const cameras = data?.cameras || { main: { live: true } };
+  // What the Cuts sheet can offer: the rig as the console route reports
+  // it, keyed by cut (lib/rigCameras.js). null — not {} — means the
+  // server could not read the pairings at all, and then the old
+  // single-camera assumption is the kinder answer: a show with Main
+  // working beats a show with every cut refused.
+  const cameras = data?.cameras ?? { main: { live: true } };
   const brollCount = data?.brollCount ?? 0;
   const rows = cutAvailability({ cameras, brollCount, settings: data?.direction || null });
 

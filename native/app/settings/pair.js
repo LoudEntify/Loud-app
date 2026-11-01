@@ -30,9 +30,12 @@ import { api } from '../../src/api';
 import { useSession } from '../../src/session';
 import { API_BASE } from '../../src/config';
 
-// lib/camfeedPairing.js CAMERA_ROLES, in the artist's words rather than ours.
+// lib/camfeedPairing.js CAMERA_ROLES, labelled as the console labels its
+// cuts (lib/liveCuts.js), so an artist pairing a phone and an artist
+// pressing a button are using one vocabulary. The stored value stays
+// 'wide'; lib/rigCameras.js is where the two names meet.
 const ROLES = [
-  { role: 'wide', label: 'Wide', note: 'The whole stage, from the back.' },
+  { role: 'wide', label: 'Main', note: 'The one you perform to: the whole stage, from the back.' },
   { role: 'close', label: 'Close', note: 'Tight on your hands or your face.' },
   { role: 'side', label: 'Side', note: 'Off to one side of you.' },
 ];
