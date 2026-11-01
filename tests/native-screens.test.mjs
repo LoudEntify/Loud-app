@@ -245,3 +245,19 @@ test('a screen begins with its header and its imports, not with stray markup', (
   }
   assert.deepEqual(strays, [], `\n${strays.join('\n')}\n`);
 });
+
+test('a performer can withdraw the training-data consent from Settings', () => {
+  // docs/ARCHITECTURE.md: the training-data choice is a separate line at
+  // sign-up for performers, "switchable any time, every change audited".
+  // The basis is legitimate interests, which only holds while leaving is
+  // easy. The table, its policies and its audit trigger have existed since
+  // the first migration, and for a fortnight no screen offered it: a
+  // performer who agreed at sign-up had no way back. None of the twelve
+  // settings boards draws it, so this test is the thing that keeps it.
+  const src = readFileSync(resolve(ROOT, 'native/app/settings/account.js'), 'utf8');
+  assert.match(src, /consent_records/, 'the consent is read and written where it lives');
+  assert.match(src, /training_data/, 'by its own consent type');
+  assert.match(src, /<Toggle/, 'and offered as a switch, not as a sentence');
+  // Append-only: a change is a new row, never an update of the old one.
+  assert.ok(!/consent_records'\)\s*\n?\s*\.update\(/.test(src), 'consent is append-only: insert a new row, never update');
+});

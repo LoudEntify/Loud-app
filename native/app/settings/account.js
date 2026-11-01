@@ -25,7 +25,7 @@ import { router } from 'expo-router';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import {
-  Screen, Card, Field, Button, Chip, Sheet, Row, Section, ScreenHeader, ErrorPanel, Icon,
+  Screen, Card, Field, Button, Chip, Sheet, Toggle, Row, Section, ScreenHeader, ErrorPanel, Icon,
   color, space, text,
 } from '../../src/ui';
 import { NotStored } from '../../src/settings';
@@ -62,6 +62,46 @@ export default function AccountSettings() {
       genres: Array.isArray(profile.genres) ? profile.genres : [],
     });
   }, [profile, form]);
+
+  // The training-data choice. docs/ARCHITECTURE.md requires it to be
+  // switchable in Settings for performers, with every change audited — the
+  // basis is legitimate interests, which only holds if leaving is easy. The
+  // table, its row-level security and its audit trigger have existed since
+  // the first migration; no screen ever offered it, so a performer who said
+  // yes at sign-up had no way back. Consent is append-only, so a change is
+  // a new row and the latest one wins, exactly as go-live reads it.
+  const [training, setTraining] = useState(null);   // null while unread
+  const [savingTraining, setSavingTraining] = useState(false);
+
+  const readTraining = useCallback(async () => {
+    if (!userId || profile?.role !== 'artist') return;
+    const { data } = await supabase()
+      .from('consent_records')
+      .select('granted, recorded_at')
+      .eq('user_id', userId)
+      .eq('consent_type', 'training_data')
+      .order('recorded_at', { ascending: false })
+      .limit(1);
+    setTraining(data?.[0]?.granted ?? false);
+  }, [userId, profile]);
+
+  useEffect(() => { readTraining(); }, [readTraining]);
+
+  async function setTrainingConsent(next) {
+    const was = training;
+    setTraining(next);                       // answer the switch at once
+    setSavingTraining(true);
+    const { error: e } = await supabase().from('consent_records').insert({
+      user_id: userId,
+      consent_type: 'training_data',
+      granted: next,
+      source: 'settings',
+      document_version: '2026-10-draft',
+    });
+    setSavingTraining(false);
+    if (e) { setTraining(was); setError('We could not save that choice. Nothing has changed.'); }
+    else setNotice(next ? 'Your shows can help the director learn.' : 'Your shows will not be used for training.');
+  }
 
   const readClosure = useCallback(async () => {
     if (!accessToken) return;
@@ -230,6 +270,21 @@ export default function AccountSettings() {
           </Section>
 
           <Section title="Your data">
+            {profile?.role === 'artist' ? (
+              <Row
+                icon={<Icon.Sparkle size={22} color={color.ink} />}
+                title="Help the director learn from my shows"
+                subtitle="Only your own performance, only inside Loudentify. Switch it off any time; it takes effect from your next show."
+                right={(
+                  <Toggle
+                    value={!!training}
+                    disabled={training === null || savingTraining}
+                    onValueChange={setTrainingConsent}
+                    label="Help the director learn from my shows"
+                  />
+                )}
+              />
+            ) : null}
             <Row
               icon={<Icon.Doc size={22} color={color.ink} />}
               title="Request my data"
