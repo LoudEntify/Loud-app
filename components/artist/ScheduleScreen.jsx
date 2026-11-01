@@ -11,6 +11,7 @@ import { api } from '../../lib/viewerApi';
 import { validateBooking, earliestStart, LENGTH_OPTIONS } from '../../lib/schedule';
 import { ORIENTATION_CHOICES, DEFAULT_ORIENTATION } from '../../lib/orientation';
 import { GENRES } from '../../lib/genres';
+import { explainYouTubeError } from '../../lib/youtube/api';
 import { track } from '../../lib/telemetry';
 import { ErrorState, Skeleton } from '../viewer/States';
 import { Back, Warn, Clock } from '../viewer/Icons';
@@ -53,7 +54,7 @@ export default function ScheduleScreen() {
         <div className="v-card-light" style={{ padding: 16 }} className2="">
           <p style={{ fontSize: 18, fontWeight: 700 }}>{result.show.title}</p>
           <p className="v-muted">{new Date(result.show.slated_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {result.show.duration_minutes} min · {result.show.performance_mode === 'versus' ? 'Versus' : 'Solo'}</p>
-          {failed.length ? <div className="v-error" role="alert" style={{ marginTop: 10 }}><span style={{ color: 'var(--red)' }}><Warn /></span><span style={{ fontSize: 15 }}>The YouTube broadcast could not be created yet ({failed[0].last_error}). The show is booked; connect your channel in onboarding and it will be created when you go live.</span></div> : <p className="v-muted" style={{ marginTop: 6 }}>Your YouTube broadcast is created and waiting. Reminders set: {result.remindersDue.map((m) => m >= 60 ? `${m / 60}h` : `${m}m`).join(', ') || 'none still ahead'}.</p>}
+          {failed.length ? <div className="v-error" role="alert" style={{ marginTop: 10 }}><span style={{ color: 'var(--red)' }}><Warn /></span><span style={{ fontSize: 15 }}>{explainYouTubeError(failed[0].last_error)} The show itself is booked.</span></div> : <p className="v-muted" style={{ marginTop: 6 }}>Your YouTube broadcast is created and waiting. Reminders set: {result.remindersDue.map((m) => m >= 60 ? `${m / 60}h` : `${m}m`).join(', ') || 'none still ahead'}.</p>}
           {result.inviteToken && <p style={{ marginTop: 6 }}>Invite sent. The show confirms when they accept.</p>}
         </div>
         <div className="v-card-light v-col" style={{ padding: 16, gap: 6 }}><span className="v-kicker" style={{ color: 'var(--ink)' }}>Share your show</span><span className="v-muted" style={{ fontSize: 15 }}>{typeof window !== 'undefined' ? `${window.location.origin}/show/${result.show.id}` : ''}</span><button className="v-btn v-btn-ghost-light" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/show/${result.show.id}`)}>Copy link</button></div>
