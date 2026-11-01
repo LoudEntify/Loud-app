@@ -22,7 +22,21 @@ export async function POST(request, { params }) {
   if (show.actual_started_at) return withCorrelation(NextResponse.json({ ok: true, already: true }), cid);
   const now = Date.now();
   const force = process.env.LOUDENTIFY_LOCAL_STACK === '1' && request.headers.get('x-loudentify-test') === 'force-live';
-  if (!force && (now < windowOpensAt(show) || now > windowClosesAt(show))) return withCorrelation(NextResponse.json({ error: 'Your show can only start inside its booked window.' }, { status: 409 }), cid);
+  // The refusal used to state the rule and nothing else, so an artist
+  // refused at 20:45 for a 20:40 show — comfortably inside the window —
+  // had no way to tell whether the clock, the booking or the rule was
+  // wrong, and neither did we. It now says the window it compared
+  // against. All three times come from the row and the server clock, so
+  // a mismatch between them is the answer.
+  const opens = windowOpensAt(show);
+  const closes = windowClosesAt(show);
+  if (!force && (now < opens || now > closes)) {
+    const at = (ms) => new Date(ms).toISOString().slice(11, 16);
+    return withCorrelation(NextResponse.json({
+      error: `Your show can only start inside its booked window. This one runs ${at(opens)}–${at(closes)} UTC and it is ${at(now)} UTC now.`,
+      window: { opensAt: new Date(opens).toISOString(), closesAt: new Date(closes).toISOString(), serverNow: new Date(now).toISOString(), slatedAt: show.slated_at },
+    }, { status: 409 }), cid);
+  }
   const { data: consent } = await admin.from('consent_records').select('granted').eq('user_id', show.artist_id).eq('consent_type', 'training_data').order('recorded_at', { ascending: false }).limit(1);
   const trainingAllowed = consent?.[0] ? Boolean(consent[0].granted) : true;
   // Anything thrown past here used to leave the runtime to answer, which

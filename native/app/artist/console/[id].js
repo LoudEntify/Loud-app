@@ -130,7 +130,13 @@ export default function Console() {
     // The show starts even when the recorder could not: say so once,
     // rather than letting the artist find out after the show that there
     // is nothing to post.
-    if (r.data?.recording === false) setErr('Your show is live, but it is not being recorded. Nothing to do now — finish the show, and tell us afterwards.');
+    if (r.data?.recording === false) {
+      // Two different failures, and an artist needs to tell them apart:
+      // nothing is going out at all, versus going out but not kept.
+      setErr(r.data?.targets
+        ? 'Your show is live, but it is not being recorded. Nothing to do now — finish the show, and tell us afterwards.'
+        : 'Your show is live here, but nothing is reaching YouTube. Nobody can watch yet. Check Settings → YouTube, then end and rebook.');
+    }
     await load();
   }
 
