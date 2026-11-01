@@ -149,7 +149,7 @@ export default function Profile() {
             <Button kind="strong" onPress={() => router.push('/artist/schedule')} icon={<Icon.Plus size={20} color={color.porcelain} />}>Schedule a show</Button>
 
             <View style={{ flexDirection: 'row', gap: space.s }}>
-              <Button kind="quiet" size="medium" style={{ flex: 1 }} onPress={() => router.push('/camera')} icon={<Icon.Camera size={18} color={color.ink} />}>Kit check</Button>
+              <Button kind="quiet" size="medium" style={{ flex: 1 }} onPress={() => router.push('/artist/kit-check')} icon={<Icon.Wrench size={18} color={color.ink} />}>Kit check</Button>
               <Button kind="quiet" size="medium" style={{ flex: 1 }} onPress={() => router.push('/artist/earnings')} icon={<Icon.Coin size={18} color={color.ink} />}>Earnings</Button>
             </View>
 

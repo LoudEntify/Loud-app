@@ -227,3 +227,21 @@ test('no screen is the website in a frame', () => {
   }
   assert.deepEqual(offenders, [], `\n${offenders.join('\n')}\n`);
 });
+
+test('a screen begins with its header and its imports, not with stray markup', () => {
+  // A JSX expression at the top level of a module is legal JavaScript, so
+  // Metro bundles it, nothing throws, and no other test notices — but it
+  // builds an element on every import and it means an edit landed in the
+  // wrong place. One did, in live.js, on 1 November: a duplicated card sat
+  // above the file's own header comment for an hour.
+  const strays = [];
+  for (const file of FILES) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) continue;
+      if (t.startsWith('<')) strays.push(`${rel(file)} starts with markup: ${t.slice(0, 48)}`);
+      break;                       // only the first line of real code matters
+    }
+  }
+  assert.deepEqual(strays, [], `\n${strays.join('\n')}\n`);
+});

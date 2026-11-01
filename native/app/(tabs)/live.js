@@ -1,15 +1,3 @@
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Monthly genre competitions, coming soon"
-          onPress={() => router.push('/competitions')}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: space.m, backgroundColor: color.ink, borderRadius: radius.cardLg, padding: space.l }}
-        >
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={{ fontFamily: face.bold, fontSize: 19, fontWeight: '700', color: color.porcelain }}>Monthly genre competitions</Text>
-            <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.mutedOnDark }}>Coming soon</Text>
-          </View>
-          <Icon.Chevron size={22} color={color.porcelain} />
-        </Pressable>
 // Live.dc.html / LiveLoading.dc.html — what is on, and what is next.
 //
 // A light screen: the title with Search and Inbox beside it, a row of
@@ -135,16 +123,18 @@ export default function Live() {
           </View>
         ) : null}
 
-        {/* The board links this card to Competitions.dc.html, which has no
-            screen on the phone yet. It says "Coming soon", so it says that
-            and stays flat: a card that moves under a finger and arrives
-            nowhere is worse than one that never claimed it would. */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.m, backgroundColor: color.ink, borderRadius: radius.cardLg, padding: space.l }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Monthly genre competitions, coming soon"
+          onPress={() => router.push('/competitions')}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: space.m, backgroundColor: color.ink, borderRadius: radius.cardLg, padding: space.l }}
+        >
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontFamily: face.bold, fontSize: 19, fontWeight: '700', color: color.porcelain }}>Monthly genre competitions</Text>
             <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.mutedOnDark }}>Coming soon</Text>
           </View>
-        </View>
+          <Icon.Chevron size={22} color={color.porcelain} />
+        </Pressable>
       </ScrollView>
     </Screen>
   );

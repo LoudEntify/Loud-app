@@ -15,9 +15,10 @@
 //                       database can do it; POST does it, and only after
 //                       the word is typed. Deliberately not a wipe, and
 //                       the board's own sentence is what says so.
-//   Become an artist    not on the board, but /api/profile/become-artist
-//                       and become-viewer are wired and have nowhere
-//                       else to be reached from on the phone.
+//   How you use it      not on the board. Becoming an artist has its own
+//                       screen (/become-artist) and its agreement, so
+//                       this links there; becoming a viewer again has no
+//                       screen at all, so it is done here.
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { router } from 'expo-router';
@@ -134,16 +135,19 @@ export default function AccountSettings() {
     router.replace('/login');
   }
 
-  async function switchRole() {
-    const toArtist = profile?.role !== 'artist';
+  /**
+   * Going back to watching, only. The other direction has its own
+   * screen (/become-artist) because it carries the artist agreement,
+   * and an upgrade that skipped the agreement would be an upgrade
+   * nobody agreed to.
+   */
+  async function becomeViewer() {
     setBusy('role'); setError(null);
-    const r = toArtist
-      ? await api('/api/profile/become-artist', { method: 'POST', accessToken, body: { stage_name: (form?.display_name || profile?.display_name || '').trim(), genres: form?.genres, bio: form?.bio } })
-      : await api('/api/profile/become-viewer', { method: 'POST', accessToken });
+    const r = await api('/api/profile/become-viewer', { method: 'POST', accessToken });
     setBusy(null);
     if (!r.ok) { setError(r.data?.error || 'That did not work. Nothing has been changed.'); return; }
     setSheet(null);
-    setNotice(toArtist ? 'You can book shows now. Create is in the tab bar.' : 'You are a viewer again. Your recordings are kept.');
+    setNotice('You are a viewer again. Your recordings, wallet and history are kept.');
   }
 
   const artist = profile?.role === 'artist';
@@ -256,21 +260,29 @@ export default function AccountSettings() {
             )}
           </Section>
 
-          {/* Not on the board. Both routes exist, both are audited, and
-              there is no other way to reach them from the phone. */}
+          {/* Not on the board. /api/profile/become-viewer is wired,
+              audited, and has nowhere else to be reached from on the
+              phone; becoming an artist already has its own screen. */}
           <Section title="How you use Loudentify">
-            <Row
-              icon={<Icon.Mic size={22} color={color.ink} />}
-              title={artist ? 'You perform on Loudentify' : 'You watch on Loudentify'}
-              subtitle={artist
-                ? 'Going back to watching keeps your recordings and your wallet.'
-                : 'Performing lets you book shows. You must be 18 or over.'}
-              right={(
-                <Button kind="quiet" size="small" onPress={() => setSheet('role')} accessibilityLabel={artist ? 'Become a viewer' : 'Become an artist'}>
-                  {artist ? 'Just watch' : 'Perform'}
-                </Button>
-              )}
-            />
+            {artist ? (
+              <Row
+                icon={<Icon.Mic size={22} color={color.ink} />}
+                title="You perform on Loudentify"
+                subtitle="Going back to watching keeps your recordings and your wallet."
+                right={(
+                  <Button kind="quiet" size="small" onPress={() => setSheet('role')} accessibilityLabel="Become a viewer">
+                    Just watch
+                  </Button>
+                )}
+              />
+            ) : (
+              <Row
+                icon={<Icon.Mic size={22} color={color.ink} />}
+                title="You watch on Loudentify"
+                subtitle="Performing lets you book shows. You must be 18 or over."
+                onPress={() => router.push('/become-artist')}
+              />
+            )}
           </Section>
         </View>
       </ScrollView>
@@ -305,16 +317,13 @@ export default function AccountSettings() {
       ) : null}
 
       {sheet === 'role' ? (
-        <Sheet onDismiss={() => setSheet(null)} label={artist ? 'Become a viewer' : 'Become an artist'}>
-          <Text style={text.sectionHeading}>{artist ? 'Go back to watching' : 'Perform on Loudentify'}</Text>
+        <Sheet onDismiss={() => setSheet(null)} label="Become a viewer">
+          <Text style={text.sectionHeading}>Go back to watching</Text>
           <Text style={text.body}>
-            {artist
-              ? 'Your recordings, wallet and history stay exactly as they are. You can perform again whenever you like.'
-              : 'You keep the same account, the same wallet and the same history. Performing is added, nothing is replaced.'}
+            Your recordings, wallet and history stay exactly as they are. You
+            can start performing again whenever you like.
           </Text>
-          <Button kind="strong" busy={busy === 'role'} onPress={switchRole}>
-            {artist ? 'Just watch' : 'Start performing'}
-          </Button>
+          <Button kind="strong" busy={busy === 'role'} onPress={becomeViewer}>Just watch</Button>
           <Button kind="quiet" onPress={() => setSheet(null)}>Not now</Button>
         </Sheet>
       ) : null}
