@@ -261,3 +261,23 @@ test('a performer can withdraw the training-data consent from Settings', () => {
   // Append-only: a change is a new row, never an update of the old one.
   assert.ok(!/consent_records'\)\s*\n?\s*\.update\(/.test(src), 'consent is append-only: insert a new row, never update');
 });
+
+test('a performer can connect and disconnect YouTube from Settings', () => {
+  // The privacy policy promises an artist can disconnect YouTube in
+  // Settings at any time and that we then delete the tokens. For a day
+  // the phone could not keep that promise: the WebView wrapper was the
+  // only route to the web Settings page, where the Connect and
+  // Disconnect buttons live, and removing the wrapper took the whole
+  // control with it. An artist whose connection expired — which it does
+  // weekly while the Google consent screen is under review — had no way
+  // back inside the app. None of the twelve settings boards draws this,
+  // so this test is the thing that keeps it.
+  const src = readFileSync(resolve(ROOT, 'native/app/settings/youtube.js'), 'utf8');
+  assert.match(src, /artist\/youtube\/status/, 'it reads the real connection');
+  assert.match(src, /artist\/youtube\/connect/, 'connecting starts the real OAuth flow');
+  assert.match(src, /artist\/youtube\/disconnect/, 'and disconnecting deletes the tokens');
+  assert.match(src, /Linking\.openURL/, 'consent happens in the system browser, not a web view');
+  assert.match(src, /AppState/, 'and coming back re-reads the status without a refresh press');
+  const hub = readFileSync(resolve(ROOT, 'native/app/settings/index.js'), 'utf8');
+  assert.match(hub, /\/settings\/youtube/, 'and the settings hub has a row that reaches it');
+});

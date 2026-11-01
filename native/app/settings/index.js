@@ -107,6 +107,16 @@ export default function Settings() {
                 subtitle="Cameras, operator"
                 onPress={() => router.push('/settings/devices')}
               />
+              {/* Not on any settings board, and required anyway: the
+                  privacy policy promises an artist can disconnect YouTube
+                  in Settings at any time, and until this row existed the
+                  only place to do it was the website. */}
+              <Row
+                icon={<Icon.Share size={22} color={color.ink} />}
+                title="YouTube"
+                subtitle="The channel your shows go out on"
+                onPress={() => router.push('/settings/youtube')}
+              />
             </Section>
           ) : null}
 
