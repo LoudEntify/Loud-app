@@ -96,3 +96,26 @@ jobs:
         env:
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
         run: supabase migration list --db-url "$SUPABASE_STAGING_DB_URL"
+
+      # The permission tests, against the database they are about.
+      #
+      # supabase/tests/*.sql have existed since Phase 2 and nothing ever ran
+      # them anywhere but a developer's own machine, so "row-level security
+      # is on and these roles cannot read that table" was a claim in a file
+      # rather than a fact about staging. CLAUDE.md §7 asks for permission
+      # tests per role including the negative cases, and §3 asks for the
+      # verification queries to be run against staging and recorded; this
+      # step is both, on every merge, in the run log.
+      #
+      # Safe to run against a real database: scripts/db/run-sql-tests.sh
+      # wraps each file in a transaction and rolls it back, so a passing or
+      # failing run leaves no rows behind. A test fails by raising, which
+      # stops the job — a permission regression should stop the pipeline,
+      # not be something somebody notices later.
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Permission tests against staging
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: scripts/db/run-sql-tests.sh
