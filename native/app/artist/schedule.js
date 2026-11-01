@@ -19,6 +19,7 @@ import { color } from '../../src/shared';
 import { validateBooking, earliestStart, LENGTH_OPTIONS } from '@loud/lib/schedule.js';
 import { ORIENTATION_CHOICES, DEFAULT_ORIENTATION } from '@loud/lib/orientation.js';
 import { GENRES } from '@loud/lib/genres.js';
+import { explainYouTubeError } from '@loud/lib/youtube/api.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const localDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -110,7 +111,7 @@ export default function Schedule() {
             {' · '}{result.show.orientation === 'landscape' ? 'Landscape' : 'Portrait'}
           </Text>
           {failed.length
-            ? <Text style={{ color: color.red }}>The YouTube broadcast could not be created yet ({failed[0].last_error}). The show is booked; connect your channel and it will be created when you go live.</Text>
+            ? <Text style={{ color: color.red }}>{explainYouTubeError(failed[0].last_error)} The show itself is booked.</Text>
             : <Text style={styles.muted}>Your YouTube broadcast is created and waiting.</Text>}
         </View>
         <Pressable style={[styles.btn, styles.btnTeal, { height: 52 }]} onPress={() => router.replace(`/artist/console/${result.show.id}`)}><Text style={styles.btnText}>Open the console</Text></Pressable>
