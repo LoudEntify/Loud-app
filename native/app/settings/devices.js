@@ -101,7 +101,7 @@ export default function DevicesSettings() {
                 title="No second camera"
                 body="One camera per phone, using that phone's own camera. A second phone gives the director another angle to cut to."
                 actionLabel="Add a camera"
-                onAction={() => router.push('/camera')}
+                onAction={() => router.push('/settings/pair')}
                 testID="devices-empty"
               />
             ) : null}
@@ -132,7 +132,7 @@ export default function DevicesSettings() {
               icon={<Icon.Expand size={22} color={color.ink} />}
               title="Show the pairing code"
               subtitle={'On the other phone, open Loudentify, tap "Use this phone as a camera" and scan this code.'}
-              onPress={() => router.push('/camera')}
+              onPress={() => router.push('/settings/pair')}
             />
           </Section>
 

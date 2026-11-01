@@ -184,3 +184,23 @@ putting the single WebView screen back for Settings alone (it was the blend
 of old and new UI Korey asked to be rid of), and a native OAuth client with
 a custom scheme (a second client to register and verify, two sets of
 redirect URIs, for the same consent screen).
+
+## 2026-11-01 — The pairing code gets a screen of its own, not an inline QR
+
+DevicesSettings.dc.html draws the pairing QR inline in its "Add a camera"
+section. The native rebuild kept the board's instruction and lost the code:
+the row pointed at /camera, which is the scanner — the screen the SECOND
+phone sits on — so both phones offered to scan and neither offered anything
+to scan. Built `native/app/settings/pair.js`, which mints a code through
+`{action:'invite'}` and draws it with react-native-qrcode-svg (pure JS over
+react-native-svg, already a dependency, so no new native module in the APK).
+Put on its own screen rather than inline as the board draws it, because a
+code is minted and expires in ten minutes: inline would mint a code every
+time anyone opened Devices, and the countdown would be wrong the moment the
+screen was left open. The QR encodes the same `/cam/pair?code=…` string the
+web panel encodes, so a plain phone camera opens the web pairing page and
+the Loudentify scanner reads the code straight out of it. Rejected: drawing
+the QR inline on Devices and refreshing it on a timer (codes nobody scanned,
+for a screen usually opened to check the rig rather than add to it), and
+rendering the QR server-side as an image (a round trip and a cache for
+something that is twenty lines of geometry on the device).
