@@ -1,19 +1,22 @@
-// The three doors (Discover, Live, Profile) plus Create for artists.
-// No fixed tab bar height: Android is edge-to-edge from SDK 54, so the bar
-// sizes itself from its content plus the system navigation inset.
+// The four doors: Discover, Live, Create (artists only) and Profile.
+//
+// The bar itself is native/src/ui/TabBar.js rather than the router's own,
+// because the boards ask for things the default cannot do: a teal pill
+// behind the chosen icon, a gradient capsule for Create, and a bar that
+// turns dark on Discover and light everywhere else.
 import { Tabs } from 'expo-router';
-import { Text } from 'react-native';
-import { color } from '../../src/shared';
+import { TabBar } from '../../src/ui';
 import { useSession } from '../../src/session';
-const Icon = (glyph) => ({ color: c }) => <Text style={{ color: c, fontSize: 20 }}>{glyph}</Text>;
+
 export default function TabsLayout() {
   const { profile } = useSession();
+  const artist = profile?.role === 'artist';
   return (
-    <Tabs screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: 'rgba(1,22,39,0.96)', borderTopColor: 'rgba(253,255,252,0.1)', paddingTop: 8 }, tabBarActiveTintColor: color.teal, tabBarInactiveTintColor: 'rgba(253,255,252,0.72)', tabBarLabelStyle: { fontSize: 13 } }}>
-      <Tabs.Screen name="discover" options={{ title: 'Discover', tabBarIcon: Icon('⌂') }} />
-      <Tabs.Screen name="live" options={{ title: 'Live', tabBarIcon: Icon('◉') }} />
-      <Tabs.Screen name="create" options={{ title: 'Create', tabBarIcon: Icon('+'), href: profile?.role === 'artist' ? undefined : null }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: Icon('●') }} />
+    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <TabBar {...props} />}>
+      <Tabs.Screen name="discover" options={{ title: 'Discover' }} />
+      <Tabs.Screen name="live" options={{ title: 'Live' }} />
+      <Tabs.Screen name="create" options={{ title: 'Create', href: artist ? undefined : null }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
 }

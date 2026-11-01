@@ -1,34 +1,39 @@
-// The artist console on the phone (Console.dc.html; the web twin is
-// components/artist/ConsoleScreen.jsx).
+// Console.dc.html — the screen an artist holds while they play.
 //
-// This is the screen an artist holds while they play, so it is the one that
-// least tolerates being a web page in a frame: the keyboard, the back
-// gesture and the screen staying awake all have to be the phone's own.
+// The board, top to bottom: the LIVE pill with the clock and the viewer
+// count, the director button; your own camera in a small window top right;
+// what viewers are seeing filling the screen; the last few comments; the
+// four actions — Prompt, Vote, Cuts, Fix — and the press-and-hold to end.
 //
-// What it does: go live, show how the delivery is doing, carry comments
-// from viewers, push a prompt or a vote, change the look mid-show, and end
-// the show on a press and hold. The picture it shows is the artist's own
-// camera through the capturer, when this phone is also the camera; when the
-// camera is a second phone, it shows the state rather than pretending to a
-// preview it does not have.
+// Cuts is the one the board draws as a button with nothing behind it. The
+// panel exists only on TabletConsole.dc.html, as four tiles (Main, Side,
+// Close, B-roll) with the live one bordered teal, so the sheet here is
+// built from that row and the rules in lib/liveCuts.js. Taking a cut by
+// hand leaves Auto; the director button says which is in charge.
 //
-// Everything it calls is the same API the web console calls, so the two
-// cannot drift: /console on open, /tick while live, /go-live, /end,
-// /look, /versus, /stage-request.
+// Everything it calls is the API the web console calls, so the two cannot
+// drift: /console on open, /tick while live, /go-live, /end, /look.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, AppState } from 'react-native';
+import { View, Text, Pressable, ScrollView, AppState } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as Haptics from 'expo-haptics';
+import {
+  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, Icon,
+  color, space, radius, surface, textOnDark, text, face, gradient,
+} from '../../../src/ui';
 import { api } from '../../../src/api';
 import { useSession } from '../../../src/session';
-import { styles } from '../../../src/theme';
-import { color } from '../../../src/shared';
 import { LOOK_CHOICES } from '@loud/lib/direction.js';
 import { showOrientation } from '@loud/lib/orientation.js';
+import { CUTS, cutAvailability, resolveCut, onAirLabel, directorLabel, DEFAULT_CUT } from '@loud/lib/liveCuts.js';
 
 const TICK_MS = 4000;
 const HOLD_MS = 1500;
-const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const clock = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
 
 export default function Console() {
   useKeepAwake();
@@ -37,13 +42,16 @@ export default function Console() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(null);
   const [comments, setComments] = useState([]);
+  const [hideComments, setHideComments] = useState(false);
   const [err, setErr] = useState(null);
-  const [busy, setBusy] = useState(null);     // 'live' | 'end' | 'look' | null
-  const [sheet, setSheet] = useState(null);   // 'look' | 'prompt' | null
+  const [busy, setBusy] = useState(null);      // 'live' | 'end' | 'look'
+  const [sheet, setSheet] = useState(null);    // 'cuts' | 'look' | 'prompt'
   const [promptText, setPromptText] = useState('');
   const [holdPct, setHoldPct] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const [away, setAway] = useState(false);
+  const [cut, setCut] = useState(DEFAULT_CUT);
+  const [mode, setMode] = useState('auto');
+  const [refused, setRefused] = useState(null);
   const holdRef = useRef(null);
   const lastComment = useRef(0);
 
@@ -51,25 +59,36 @@ export default function Console() {
   const live = Boolean(tick?.live ?? (show?.actual_started_at && !show?.actual_ended_at));
   const orientation = showOrientation(show);
 
+  // What the Cuts sheet can offer: this phone is always the main camera,
+  // and anything else has to have been paired. Until the camera list
+  // arrives from the console route, only Main is on.
+  const cameras = data?.cameras || { main: { live: true } };
+  const brollCount = data?.brollCount ?? 0;
+  const rows = cutAvailability({ cameras, brollCount, settings: data?.direction || null });
+
   useEffect(() => { if (!loading && !session) router.replace('/login'); }, [loading, session]);
-  useEffect(() => { const sub = AppState.addEventListener('change', (s) => setAway(s !== 'active')); return () => sub.remove(); }, []);
+  useEffect(() => { const sub = AppState.addEventListener('change', () => {}); return () => sub.remove(); }, []);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
   const load = useCallback(async () => {
     if (!accessToken || !id) return;
     const r = await api(`/api/artist/shows/${id}/console`, { accessToken });
-    if (!r.ok) { setErr(r.data?.error || 'Could not open the console.'); return; }
+    if (!r.ok) { setErr(r.data?.error || 'We could not open the console.'); return; }
     setData(r.data);
   }, [accessToken, id]);
   useEffect(() => { load(); }, [load]);
 
-  // While live: the heartbeat that keeps the broadcast delivering, and the comments.
+  // The heartbeat: it keeps the broadcast delivering and carries the cut
+  // on air, so the composed frame and the egress log agree with the sheet.
   useEffect(() => {
     if (!accessToken || !show) return undefined;
     let stop = false;
     const beat = async () => {
       if (stop) return;
-      const r = await api(`/api/artist/shows/${id}/tick`, { method: 'POST', accessToken, body: { healthy: { a: true, b: true } } });
+      const r = await api(`/api/artist/shows/${id}/tick`, {
+        method: 'POST', accessToken,
+        body: { healthy: { a: true, b: true }, cut, directorMode: mode },
+      });
       if (!stop && r.ok) setTick(r.data);
       const c = await api(`/api/viewer/comments?show=${id}&after=${lastComment.current}`);
       if (!stop && c.ok && c.data?.comments?.length) {
@@ -80,13 +99,32 @@ export default function Console() {
     beat();
     const t = setInterval(beat, TICK_MS);
     return () => { stop = true; clearInterval(t); };
-  }, [accessToken, show, id]);
+  }, [accessToken, show, id, cut, mode]);
+
+  // A camera dropping moves the picture on its own, without a tap.
+  useEffect(() => {
+    const r = resolveCut({ current: cut, requested: null, mode, cameras, brollCount, settings: data?.direction || null });
+    if (r.changed) setCut(r.role);
+  }, [cameras, brollCount, cut, mode, data]);
+
+  function takeCut(requested) {
+    const r = resolveCut({ current: cut, requested, mode, cameras, brollCount, settings: data?.direction || null });
+    if (r.refused) {
+      setRefused(r.refused);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      return;
+    }
+    setRefused(null);
+    setCut(r.role);
+    setMode(r.mode);
+    Haptics.selectionAsync().catch(() => {});
+  }
 
   async function goLive() {
     setBusy('live'); setErr(null);
     const r = await api(`/api/artist/shows/${id}/go-live`, { method: 'POST', accessToken });
     setBusy(null);
-    if (!r.ok) { setErr(r.data?.error || 'Could not go live.'); return; }
+    if (!r.ok) { setErr(r.data?.error || 'We could not start the broadcast.'); return; }
     await load();
   }
 
@@ -95,18 +133,19 @@ export default function Console() {
     const r = await api(`/api/artist/shows/${id}/look`, { method: 'PUT', accessToken, body: look });
     setBusy(null);
     if (r.ok) setData((d) => ({ ...d, show: { ...d.show, look: r.data.look } }));
-    else setErr(r.data?.error || 'Could not change the look. The show is not affected.');
+    else setErr('We could not change the look. Your show is not affected.');
   }
 
   async function pushPrompt() {
     const body = promptText.trim();
     if (!body) return;
     const r = await api('/api/show-prompts', { method: 'POST', accessToken, body: { room: show.room_name, kind: 'question', body, source: 'composed' } });
-    if (r.ok) { setPromptText(''); setSheet(null); } else setErr(r.data?.error || 'Could not push that.');
+    if (r.ok) { setPromptText(''); setSheet(null); } else setErr('We could not send that to viewers.');
   }
 
   function holdStart() {
     const started = Date.now();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     holdRef.current = setInterval(async () => {
       const pct = Math.min(100, ((Date.now() - started) / HOLD_MS) * 100);
       setHoldPct(pct);
@@ -115,113 +154,250 @@ export default function Console() {
         setBusy('end');
         const r = await api(`/api/artist/shows/${id}/end`, { method: 'POST', accessToken });
         setBusy(null);
-        if (r.ok) router.replace('/profile'); else setErr(r.data?.error || 'Could not end the show.');
+        if (r.ok) router.replace(`/artist/post-show/${id}`);
+        else setErr('We could not end the show. Try the hold again.');
       }
     }, 50);
   }
-  function holdEnd() { if (holdRef.current) { clearInterval(holdRef.current); holdRef.current = null; } setHoldPct(0); }
+  function holdEnd() {
+    if (holdRef.current) { clearInterval(holdRef.current); holdRef.current = null; }
+    setHoldPct(0);
+  }
 
   if (loading || !data) {
-    return <View style={[styles.screenDark, { padding: 20, paddingTop: 80, gap: 12 }]}><Text style={styles.bodyDark}>{err || 'Opening the console…'}</Text>{err && <Pressable style={[styles.btn, styles.btnGhostDark]} onPress={load}><Text style={styles.btnTextDark}>Try again</Text></Pressable>}</View>;
+    return (
+      <Screen dark>
+        <View style={{ flex: 1, justifyContent: 'center', padding: space.xl, gap: space.m }}>
+          {err
+            ? <ErrorPanel title="We could not open the console" body={err} onRetry={load} backLabel="Back to your profile" onBack={() => router.replace('/profile')} />
+            : <Text style={textOnDark.body}>Opening the console…</Text>}
+        </View>
+      </Screen>
+    );
   }
 
   const delivery = tick?.delivery?.state || show.delivery_state;
   const elapsed = show.actual_started_at ? now - Date.parse(show.actual_started_at) : 0;
-  const look = show.look?.lut || 'none';
+  const viewers = tick?.viewers ?? 0;
+  const lookKey = show.look?.lut || 'none';
 
   return (
-    <View style={styles.screenDark}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 56, gap: 12 }}>
-        <View style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
-          {live ? <Text style={styles.badgeLive}>LIVE</Text> : <Text style={styles.badgeSoon}>READY</Text>}
-          {live && <Text style={{ color: color.porcelain, fontSize: 17, fontWeight: '700' }}>{fmt(elapsed)}</Text>}
-          <Text style={{ color: color.porcelain }}>{tick?.viewers ?? 0} watching</Text>
-          <View style={{ flex: 1 }} />
-          <Text style={[styles.badgeSoon, { backgroundColor: delivery === 'ok' ? color.teal : color.red, color: delivery === 'ok' ? color.ink : '#fff' }]}>
-            {delivery === 'ok' ? 'DELIVERING' : String(delivery || 'waiting').toUpperCase()}
-          </Text>
-        </View>
-
-        <Text style={styles.h1Dark}>{show.title}</Text>
-        <Text style={styles.mutedDark}>
-          {show.performance_mode === 'versus' ? 'Versus' : 'Solo'} · {orientation === 'landscape' ? 'Landscape 16:9' : 'Portrait 9:16'} · {show.duration_minutes} min
-          {data.youtubeMode === 'mock' ? ' · YouTube in test mode' : ''}
+    <Screen dark>
+      {/* What viewers are seeing. The console cannot show the composed
+          frame itself (it is built server-side for the broadcast), so it
+          names the camera on air rather than implying a preview it does
+          not have. */}
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: space.s }}>
+        <Text style={{ fontFamily: face.regular, fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.7)' }}>
+          {live ? onAirLabel(cut) : 'Not live yet'}
         </Text>
+        <Text style={{ fontFamily: face.regular, fontSize: 14, color: 'rgba(253,255,252,0.5)' }}>
+          {live ? `${orientation === 'landscape' ? 'Landscape' : 'Portrait'} · ${delivery || 'starting'}` : 'Your broadcast starts when you do'}
+        </Text>
+      </View>
 
-        {away && <Text style={{ color: color.orange, fontWeight: '700' }}>Keep Loudentify in front: the show needs this screen.</Text>}
-        {err && <Text style={{ color: color.orange }}>{err}</Text>}
-
-        {!live && (
-          <Pressable style={[styles.btn, styles.btnTeal, { height: 56 }]} disabled={busy === 'live'} onPress={goLive} testID="go-live">
-            <Text style={styles.btnText}>{busy === 'live' ? 'Going live…' : 'Go live'}</Text>
-          </Pressable>
-        )}
-
-        <View style={[styles.row, { gap: 8, flexWrap: 'wrap' }]}>
-          <Pressable style={[styles.btn, styles.btnGhostDark, { flex: 1 }]} onPress={() => router.push('/camera')}><Text style={styles.btnTextDark}>Use this phone as a camera</Text></Pressable>
+      {/* Top bar */}
+      <View style={{ position: 'absolute', left: space.m, right: space.m, top: 52, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        {live ? <Badge kind="live" /> : <Badge kind="soon">READY</Badge>}
+        <Text style={{ fontFamily: face.bold, fontSize: 17, fontWeight: '700', color: color.porcelain }}>{clock(elapsed)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(1,22,39,0.6)' }}>
+          <Icon.Eye size={16} color={color.porcelain} />
+          <Text style={{ fontFamily: face.regular, fontSize: 14, color: color.porcelain }}>{viewers}</Text>
         </View>
-        <View style={[styles.row, { gap: 8 }]}>
-          <Pressable style={[styles.btn, styles.btnGhostDark, { flex: 1 }]} onPress={() => setSheet('look')}><Text style={styles.btnTextDark}>Look: {LOOK_CHOICES.find((l) => l.key === look)?.label || 'None'}</Text></Pressable>
-          <Pressable style={[styles.btn, styles.btnGhostDark, { flex: 1 }]} onPress={() => setSheet('prompt')}><Text style={styles.btnTextDark}>Ask the room</Text></Pressable>
-        </View>
+        <View style={{ flex: 1 }} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: mode === 'manual' }}
+          accessibilityLabel={directorLabel(mode)}
+          onPress={() => takeCut(mode === 'auto' ? cut : 'auto')}
+          style={{ height: 36, paddingHorizontal: 12, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: mode === 'manual' ? color.teal : 'rgba(1,22,39,0.6)' }}
+        >
+          <Icon.Sparkle size={16} color={mode === 'manual' ? color.ink : color.porcelain} />
+          <Text style={{ fontFamily: face.bold, fontSize: 15, fontWeight: '700', color: mode === 'manual' ? color.ink : color.porcelain }}>
+            {directorLabel(mode)}
+          </Text>
+        </Pressable>
+      </View>
 
-        {tick?.prompt && (
-          <View style={[styles.cardDark, { gap: 4 }]}>
-            <Text style={{ color: color.teal, fontWeight: '700', fontSize: 12, letterSpacing: 1 }}>PROMPT OPEN</Text>
-            <Text style={{ color: color.porcelain, fontWeight: '700' }}>{tick.prompt.body}</Text>
+      {/* Your own camera */}
+      <MediaTile
+        label="You"
+        accessibilityLabel="Your camera"
+        style={{ position: 'absolute', right: space.m, top: 100, width: 96, height: 128, borderRadius: 14, borderWidth: 2, borderColor: 'rgba(253,255,252,0.5)', justifyContent: 'flex-end', paddingBottom: 6 }}
+      />
+
+      {/* Comments */}
+      {!hideComments ? (
+        <View style={{ position: 'absolute', left: space.l, bottom: 216, width: 260, gap: space.sm }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={textOnDark.label}>Comments</Text>
+            <Button kind="quietDark" size="tiny" onPress={() => setHideComments(true)}>Hide</Button>
           </View>
-        )}
-
-        <View style={[styles.panelDark, { minHeight: 120, gap: 4 }]} accessibilityLabel="Comments">
-          {comments.slice(-8).map((c) => (
-            <Text key={c.id} style={{ color: color.porcelain }} numberOfLines={1}>
-              <Text style={{ fontWeight: '700', color: color.orange }}>{c.author} </Text>{c.body}
-            </Text>
-          ))}
-          {comments.length === 0 && <Text style={styles.mutedDark}>Comments appear here.</Text>}
+          <ScrollView style={{ maxHeight: 92 }} showsVerticalScrollIndicator={false}>
+            {comments.slice(-6).map((c) => (
+              <Text key={c.id} style={{ fontFamily: face.regular, fontSize: 16, lineHeight: 21, color: color.porcelain }} numberOfLines={2}>
+                <Text style={{ fontFamily: face.bold, fontWeight: '700', color: color.orange }}>{c.author} </Text>
+                {c.body}
+              </Text>
+            ))}
+            {!comments.length ? <Text style={{ fontFamily: face.regular, fontSize: 16, color: 'rgba(253,255,252,0.6)' }}>No comments yet.</Text> : null}
+          </ScrollView>
         </View>
+      ) : (
+        <View style={{ position: 'absolute', left: space.l, bottom: 216 }}>
+          <Button kind="quietDark" size="tiny" onPress={() => setHideComments(false)}>Show comments</Button>
+        </View>
+      )}
 
-        {live && (
+      {refused ? (
+        <View style={{ position: 'absolute', left: space.l, right: space.l, bottom: 180, paddingHorizontal: space.m, paddingVertical: space.s, borderRadius: 999, backgroundColor: color.ink }}>
+          <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.porcelain }}>{refused}</Text>
+        </View>
+      ) : null}
+
+      {/* The four actions */}
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 108, flexDirection: 'row', justifyContent: 'center', gap: 18 }}>
+        <Action label="Prompt" onPress={() => setSheet('prompt')}><Icon.Chat size={24} color={color.porcelain} /></Action>
+        <Action label="Vote" onPress={() => setSheet('prompt')}><Icon.Chart size={24} color={color.porcelain} /></Action>
+        <Action label="Cuts" onPress={() => setSheet('cuts')} testID="cuts"><Icon.Camera size={24} color={color.porcelain} /></Action>
+        <Action label="Fix" emphasis onPress={() => router.push(`/artist/fix/${id}`)}><Icon.Wrench size={24} color={color.ink} /></Action>
+      </View>
+
+      {/* Go live, or end the show */}
+      <View style={{ position: 'absolute', left: space.l, right: space.l, bottom: 32 }}>
+        {live ? (
           <Pressable
-            onPressIn={holdStart} onPressOut={holdEnd}
-            style={[styles.btn, { height: 56, backgroundColor: 'rgba(231,29,54,0.25)', borderWidth: 2, borderColor: color.red, overflow: 'hidden' }]}
-            testID="end-show" disabled={busy === 'end'}
+            accessibilityRole="button"
+            accessibilityLabel="Press and hold to end show"
+            onPressIn={holdStart}
+            onPressOut={holdEnd}
+            testID="end-show"
+            style={{ height: 56, borderRadius: 28, backgroundColor: color.red, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
           >
-            <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${holdPct}%`, backgroundColor: color.red }} />
-            <Text style={styles.btnTextDark}>{busy === 'end' ? 'Ending…' : 'Press and hold to end the show'}</Text>
-          </Pressable>
-        )}
-        <View style={{ height: 24 }} />
-      </ScrollView>
-
-      {sheet === 'look' && (
-        <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(1,22,39,0.6)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: color.mist, padding: 20, gap: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
-            <Text style={styles.h1}>Look</Text>
-            <Text style={styles.muted}>The grade on your broadcast. Viewers see the change within a few seconds. Your recording keeps the camera&apos;s own picture.</Text>
-            <View style={[styles.row, { flexWrap: 'wrap', gap: 8 }]}>
-              {LOOK_CHOICES.map((l) => (
-                <Pressable key={l.key} disabled={busy === 'look'} onPress={() => setLook({ lut: l.key, strength: show.look?.strength ?? 1 })}
-                  style={[styles.btn, { height: 40, paddingHorizontal: 14, backgroundColor: look === l.key ? color.porcelain : 'rgba(1,22,39,0.07)', borderWidth: look === l.key ? 2 : 0, borderColor: color.ink }]}>
-                  <Text style={{ fontWeight: look === l.key ? '700' : '400' }}>{l.label}</Text>
-                </Pressable>
-              ))}
+            {/* The hold, drawn as it fills. The board implies the gesture in
+                the copy and draws no progress; without one, a hold that is
+                nearly done looks the same as one that has not started. */}
+            <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${holdPct}%`, backgroundColor: 'rgba(0,0,0,0.25)' }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+              <Icon.Stop size={20} color={color.white} />
+              <Text style={{ fontFamily: face.bold, fontSize: 19, fontWeight: '700', color: color.white }}>
+                {busy === 'end' ? 'Ending the show' : 'Press and hold to end show'}
+              </Text>
             </View>
-            <Pressable style={[styles.btn, { height: 52, backgroundColor: color.ink }]} onPress={() => setSheet(null)}><Text style={styles.btnTextDark}>Back to the show</Text></Pressable>
-          </View>
-        </View>
-      )}
+          </Pressable>
+        ) : (
+          <Button kind="main" busy={busy === 'live'} onPress={goLive} testID="go-live">Go live</Button>
+        )}
+      </View>
 
-      {sheet === 'prompt' && (
-        <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(1,22,39,0.6)', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: color.mist, padding: 20, gap: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
-            <Text style={styles.h1}>Ask the room</Text>
-            <TextInput value={promptText} onChangeText={setPromptText} placeholder="What should I play next?" style={styles.field} placeholderTextColor="#c9cfd1" />
-            <Pressable style={[styles.btn, styles.btnTeal, { height: 52 }]} onPress={pushPrompt}><Text style={styles.btnText}>Push it</Text></Pressable>
-            <Pressable style={[styles.btn, styles.btnGhostLight, { height: 52 }]} onPress={() => setSheet(null)}><Text style={styles.btnText}>Cancel</Text></Pressable>
-          </View>
+      {err ? (
+        <View style={{ position: 'absolute', left: space.l, right: space.l, bottom: 100 }}>
+          <ErrorPanel title="That did not work" body={err} onRetry={() => setErr(null)} retryLabel="Dismiss" />
         </View>
-      )}
-    </View>
+      ) : null}
+
+      {/* ── The Cuts sheet ───────────────────────────────────────────── */}
+      {sheet === 'cuts' ? (
+        <Sheet dark label="Cuts" onDismiss={() => setSheet(null)}>
+          <View style={{ gap: 4 }}>
+            <Text style={[textOnDark.sectionHeading]}>Cuts</Text>
+            <Text style={textOnDark.supporting}>
+              {mode === 'auto'
+                ? 'The director is cutting. Take one yourself and it hands over to you.'
+                : 'You are cutting. Director: Auto hands it back.'}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: space.s }}>
+            {rows.map((c) => {
+              const on = cut === c.role;
+              return (
+                <Pressable
+                  key={c.role}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on, disabled: !c.available }}
+                  accessibilityLabel={`${c.label}${c.available ? '' : `, unavailable. ${c.why}`}`}
+                  testID={`cut-${c.role}`}
+                  onPress={() => takeCut(c.role)}
+                  style={{
+                    flex: 1, height: 96, borderRadius: radius.field, overflow: 'hidden',
+                    alignItems: 'center', justifyContent: 'center',
+                    borderWidth: on ? 3 : 2,
+                    borderStyle: c.available ? 'solid' : 'dashed',
+                    borderColor: on ? color.teal : 'rgba(253,255,252,0.3)',
+                    backgroundColor: gradient.base.mediaTile,
+                    opacity: c.available ? 1 : 0.55,
+                  }}
+                >
+                  <Text style={{ fontFamily: on ? face.bold : face.regular, fontSize: 15, fontWeight: on ? '700' : '400', color: color.porcelain }}>{c.label}</Text>
+                  {on ? <Text style={{ fontFamily: face.bold, fontSize: 11, letterSpacing: 1, color: color.teal, marginTop: 2 }}>ON AIR</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {rows.filter((c) => !c.available).map((c) => (
+            <Text key={c.role} style={textOnDark.supporting}>{c.label}: {c.why}</Text>
+          ))}
+
+          <View style={{ flexDirection: 'row', gap: space.s }}>
+            <Button kind="quietDark" size="medium" style={{ flex: 1 }} onPress={() => { takeCut('auto'); setSheet(null); }}>Back to Auto</Button>
+            <Button kind="main" size="medium" style={{ flex: 1 }} onPress={() => setSheet('look')}>Change the look</Button>
+          </View>
+        </Sheet>
+      ) : null}
+
+      {/* ── The look ─────────────────────────────────────────────────── */}
+      {sheet === 'look' ? (
+        <Sheet dark label="Look" onDismiss={() => setSheet(null)}>
+          <Text style={textOnDark.sectionHeading}>Look</Text>
+          <ScrollView style={{ maxHeight: 280 }}>
+            {LOOK_CHOICES.map((l) => (
+              <Pressable
+                key={l.key}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: lookKey === l.key }}
+                onPress={() => setLook({ lut: l.key, strength: 1 })}
+                style={{ paddingVertical: space.m, flexDirection: 'row', alignItems: 'center', gap: space.m }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[textOnDark.rowTitle]}>{l.label}</Text>
+                  <Text style={textOnDark.supporting}>{l.note}</Text>
+                </View>
+                {lookKey === l.key ? <Icon.Check size={22} color={color.teal} /> : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Button kind="quietDark" size="medium" busy={busy === 'look'} onPress={() => setSheet(null)}>Done</Button>
+        </Sheet>
+      ) : null}
+
+      {/* ── A prompt for viewers ─────────────────────────────────────── */}
+      {sheet === 'prompt' ? (
+        <Sheet label="Ask viewers something" onDismiss={() => setSheet(null)}>
+          <Text style={text.sectionHeading}>Ask viewers something</Text>
+          <Field
+            label="Your question"
+            value={promptText}
+            onChangeText={setPromptText}
+            placeholder="What should I play next?"
+            testID="prompt-text"
+          />
+          <Button kind="main" onPress={pushPrompt}>Send it to the show</Button>
+        </Sheet>
+      ) : null}
+    </Screen>
+  );
+}
+
+/** One of the four round actions. Fix is the emphasised one, in orange. */
+function Action({ label, onPress, children, emphasis = false, testID }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={label} testID={testID} onPress={onPress} style={{ width: 68, alignItems: 'center', gap: 6 }}>
+      <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: emphasis ? color.orange : surface.quietDark }}>
+        {children}
+      </View>
+      <Text style={{ fontFamily: emphasis ? face.bold : face.regular, fontSize: 14, fontWeight: emphasis ? '700' : '400', color: color.porcelain }}>{label}</Text>
+    </Pressable>
   );
 }
