@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["LoudCameraModule"] },
+  "android": { "modules": ["app.loudentify.loudcamera.LoudCameraModule"] }
+}
