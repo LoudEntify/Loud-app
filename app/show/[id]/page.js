@@ -2,6 +2,7 @@
 // the show screen itself. Open Graph metadata is read server-side with the
 // anon key through RLS (shows are public; profiles through public_profiles).
 import { createClient } from '@supabase/supabase-js';
+import { siteUrl } from '../../../lib/siteUrl';
 import ViewerShell from '../../../components/viewer/ViewerShell';
 import ShowScreen from '../../../components/viewer/ShowScreen';
 
@@ -21,7 +22,7 @@ export async function generateMetadata({ params }) {
   const who = show.performance_mode === 'versus' ? `${show.artist?.display_name || 'Artist A'} vs ${show.artist_b?.display_name || 'Artist B'}` : show.artist?.display_name || 'An artist';
   const title = `${show.title || 'Live show'} · ${who} · Loudentify`;
   const description = show.description || `${who} live on Loudentify, ${new Date(show.slated_at).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' })}. Watch free in your browser.`;
-  const base = process.env.NEXT_PUBLIC_SITE_URL || 'https://loudentify.app';
+  const base = siteUrl();
   return {
     title, description,
     openGraph: { title, description, url: `${base}/show/${show.id}`, siteName: 'Loudentify', type: 'video.other', images: [{ url: show.cover_url || `${base}/logo/loudentify-on-dark.png`, width: 1200, height: 630 }] },
