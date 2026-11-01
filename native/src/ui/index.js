@@ -8,5 +8,6 @@ export { Screen, Card, MediaTile, Sheet } from './Surface';
 export { Button, Chip, Badge, Toggle } from './Button';
 export { Skeleton, Empty, ErrorPanel, OfflineBar, Spinner, useLoadingPhase } from './states';
 export { Field } from './Field';
-export { Row, Section, ScreenHeader } from './Layout';
+export { TabBar } from './TabBar';
+export { Row, Section, ScreenHeader, IconButton } from './Layout';
 export * as Icon from './Icon';

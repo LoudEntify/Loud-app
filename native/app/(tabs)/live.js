@@ -1,29 +1,211 @@
-import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+// Live.dc.html / LiveLoading.dc.html — what is on, and what is next.
+//
+// A light screen: the title with Search and Inbox beside it, a row of
+// filter chips, "Live now" as two-up cover tiles with a red dot beside the
+// heading, then "Starting soon" as rows with a Remind me button, and the
+// competitions card at the foot.
+//
+// The chips filter on the device from what the route already returned,
+// rather than refetching per tap: the list is small, and a filter that
+// waits on the network feels broken.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, ScrollView, Pressable, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
+import {
+  Screen, Card, MediaTile, Chip, Badge, Button, Empty, ErrorPanel, Skeleton, Icon,
+  color, space, size, radius, text, face, useLoadingPhase,
+} from '../../src/ui';
 import { api } from '../../src/api';
 import { useSession } from '../../src/session';
-import { styles } from '../../src/theme';
-import { States } from '../../src/components/States';
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'following', label: 'Following' },
+  { key: 'solo', label: 'Solo' },
+  { key: 'versus', label: 'Versus' },
+];
+
+const showName = (s) => (s.performance_mode === 'versus'
+  ? `${s.artist?.display_name || 'Artist A'} vs ${s.artist_b?.display_name || 'Artist B'}`
+  : s.artist?.display_name || s.artist_name || 'Artist');
+
+const minutesUntil = (iso) => Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000));
 
 export default function Live() {
+  const { width } = useWindowDimensions();
   const { accessToken, loading } = useSession();
-  const [data, setData] = useState(null); const [error, setError] = useState(null);
-  const load = async () => { setError(null); const r = await api('/api/viewer/live', { accessToken }); if (!r.ok) { setError(true); return; } setData(r.data); };
-  useEffect(() => { if (!loading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [loading]);
-  if (error && !data) return <States.Error title="We couldn't load Live" onRetry={load} />;
-  if (!data) return <States.Loading />;
-  const name = (s) => s.performance_mode === 'versus' ? `${s.artist?.display_name} vs ${s.artist_b?.display_name}` : s.artist?.display_name || s.artist_name;
-  const Row = ({ s, live }) => <Pressable onPress={() => router.push(`/show/${s.id}`)} style={[styles.card, { marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 }]}><View style={{ flex: 1 }}><Text style={{ fontSize: 18, fontWeight: '700' }}>{name(s)}</Text><Text style={styles.muted}>{s.title}{live ? '' : ` · ${new Date(s.slated_at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`}</Text></View>{live ? <Text style={styles.badgeLive}>LIVE</Text> : <Text style={styles.badgeSoon}>SOON</Text>}</Pressable>;
+  const [data, setData] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const phase = useLoadingPhase(data === null && !failed);
+
+  const load = useCallback(async () => {
+    setFailed(false);
+    const r = await api('/api/viewer/live', { accessToken });
+    if (!r.ok) { setFailed(true); return; }
+    setData(r.data);
+  }, [accessToken]);
+
+  useEffect(() => { if (!loading) load(); }, [loading, load]);
+
+  const match = useCallback((s) => {
+    if (filter === 'all') return true;
+    if (filter === 'following') return !!s.followed;
+    if (filter === 'solo') return s.performance_mode !== 'versus';
+    if (filter === 'versus') return s.performance_mode === 'versus';
+    return (s.genre || '').toLowerCase() === filter.toLowerCase();
+  }, [filter]);
+
+  const genreChips = useMemo(
+    () => (data?.genres || []).slice(0, 4).map((g) => ({ key: g, label: g })),
+    [data],
+  );
+
+  const liveNow = (data?.liveNow || []).filter(match);
+  const soon = (data?.soon || []).filter(match);
+  const upcoming = (data?.upcoming || []).filter(match);
+  const tile = (width - space.screenEdge * 2 - space.s) / 2;
+
+  if (phase !== 'done' && phase !== 'slow') return <LiveSkeleton tile={tile} />;
+
   return (
-    <ScrollView style={styles.screenLight} contentContainerStyle={{ padding: 16, paddingTop: 56, paddingBottom: 110, gap: 12 }}>
-      <Text style={styles.h1}>Live</Text>
-      <Text style={{ fontSize: 22, fontWeight: '700' }}>Live now</Text>
-      {data.liveNow.length ? data.liveNow.map((s) => <Row key={s.id} s={s} live />) : <States.Empty inline title="Nothing live right now" body={data.soon.length ? `${data.soon.length} starting in the next few hours.` : 'Shows are booked at least 30 minutes ahead.'} />}
-      <Text style={{ fontSize: 22, fontWeight: '700' }}>Starting soon</Text>
-      {data.soon.length ? data.soon.map((s) => <Row key={s.id} s={s} />) : <Text style={styles.muted}>Nothing in the next few hours.</Text>}
-      <Text style={{ fontSize: 22, fontWeight: '700' }}>Upcoming</Text>
-      {data.upcoming.map((s) => <Row key={s.id} s={s} />)}
-    </ScrollView>
+    <Screen>
+      <ScrollView contentContainerStyle={{ padding: space.screenEdge, paddingTop: 56, paddingBottom: 120, gap: space.l }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <Text style={[text.screenTitle, { flex: 1, fontSize: 36 }]}>Live</Text>
+          <RoundAction label="Search" onPress={() => router.push('/search')}><Icon.Search size={22} color={color.ink} /></RoundAction>
+          <RoundAction label="Inbox" onPress={() => router.push('/inbox')}><Icon.Bell size={22} color={color.ink} /></RoundAction>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingRight: space.l }}>
+          {[...FILTERS, ...genreChips].map((c) => (
+            <Chip key={c.key} selected={filter === c.key} onPress={() => setFilter(c.key)}>{c.label}</Chip>
+          ))}
+        </ScrollView>
+
+        {failed && !data ? (
+          <ErrorPanel title="We could not load Live" body="It may be the connection. Try again." onRetry={load} />
+        ) : null}
+
+        <View style={{ gap: space.s }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color.red }} />
+            <Text style={[text.sectionHeading, { flex: 1 }]}>Live now</Text>
+          </View>
+
+          {liveNow.length ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s }}>
+              {liveNow.map((s) => <CoverTile key={s.id} show={s} width={tile} />)}
+            </View>
+          ) : (
+            <Empty
+              icon={<Icon.Eye size={24} color={color.ink} />}
+              title="Nothing live right now"
+              body={soon.length ? `${soon.length} ${soon.length === 1 ? 'show starts' : 'shows start'} later today.` : 'Shows are booked at least thirty minutes ahead.'}
+              actionLabel={soon.length ? undefined : 'Open Discover'}
+              onAction={() => router.push('/discover')}
+              testID="live-empty"
+            />
+          )}
+        </View>
+
+        {soon.length ? (
+          <View style={{ gap: space.s }}>
+            <Text style={text.sectionHeading}>Starting soon</Text>
+            {soon.map((s) => <SoonRow key={s.id} show={s} />)}
+          </View>
+        ) : null}
+
+        {upcoming.length ? (
+          <View style={{ gap: space.s }}>
+            <Text style={text.sectionHeading}>Later on</Text>
+            {upcoming.map((s) => <SoonRow key={s.id} show={s} />)}
+          </View>
+        ) : null}
+
+        {/* The board links this card to Competitions.dc.html, which has no
+            screen on the phone yet. It says "Coming soon", so it says that
+            and stays flat: a card that moves under a finger and arrives
+            nowhere is worse than one that never claimed it would. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.m, backgroundColor: color.ink, borderRadius: radius.cardLg, padding: space.l }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontFamily: face.bold, fontSize: 19, fontWeight: '700', color: color.porcelain }}>Monthly genre competitions</Text>
+            <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.mutedOnDark }}>Coming soon</Text>
+          </View>
+        </View>
+      </ScrollView>
+    </Screen>
+  );
+}
+
+function CoverTile({ show, width }) {
+  const versus = show.performance_mode === 'versus';
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={showName(show)} onPress={() => router.push(`/show/${show.id}`)} style={{ width }}>
+      <MediaTile style={{ width, height: 200, borderRadius: radius.card }}>
+        <View style={{ position: 'absolute', left: space.s, top: space.s, flexDirection: 'row', gap: 6 }}>
+          <Badge kind="live" />
+        </View>
+        {versus ? <View style={{ position: 'absolute', right: space.s, top: space.s }}><Badge kind="versus" /></View> : null}
+        {show.viewers != null ? (
+          <View style={{ position: 'absolute', left: space.s, bottom: space.s, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(1,22,39,0.6)' }}>
+            <Icon.Eye size={16} color={color.porcelain} />
+            <Text style={{ fontFamily: face.regular, fontSize: 14, color: color.porcelain }}>{show.viewers}</Text>
+          </View>
+        ) : null}
+      </MediaTile>
+      <View style={{ paddingTop: 6, gap: 2 }}>
+        <Text style={text.rowTitle} numberOfLines={1}>{showName(show)}</Text>
+        <Text style={text.supporting} numberOfLines={1}>{show.title}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function SoonRow({ show }) {
+  const mins = minutesUntil(show.slated_at);
+  return (
+    <Card style={{ flexDirection: 'row', alignItems: 'center', gap: space.m }}>
+      <MediaTile style={{ width: 64, height: 64, borderRadius: radius.field }} />
+      <Pressable style={{ flex: 1, gap: 2 }} accessibilityRole="button" onPress={() => router.push(`/show/${show.id}`)}>
+        <Text style={text.rowTitle} numberOfLines={1}>{showName(show)}</Text>
+        <Text style={text.supporting} numberOfLines={1}>{show.title}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color.orange }} />
+          <Text style={text.supporting}>
+            {mins > 90
+              ? new Date(show.slated_at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+              : `Starts in ${mins} min`}
+          </Text>
+        </View>
+      </Pressable>
+      <Button kind="quiet" size="small" onPress={() => router.push(`/show/${show.id}`)} icon={<Icon.Bell size={18} color={color.ink} />}>Remind me</Button>
+    </Card>
+  );
+}
+
+const RoundAction = ({ label, onPress, children }) => (
+  <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={{ width: size.touch, height: size.touch, borderRadius: size.touch / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(1,22,39,0.07)' }}>
+    {children}
+  </Pressable>
+);
+
+function LiveSkeleton({ tile }) {
+  return (
+    <Screen>
+      <View style={{ padding: space.screenEdge, paddingTop: 56, gap: space.l }}>
+        <Skeleton width={120} height={36} />
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
+          {[72, 96, 72, 88].map((w, i) => <Skeleton key={i} width={w} height={36} radius={18} />)}
+        </View>
+        <Skeleton width={140} height={22} />
+        <View style={{ flexDirection: 'row', gap: space.s }}>
+          <Skeleton width={tile} height={200} radius={16} />
+          <Skeleton width={tile} height={200} radius={16} />
+        </View>
+        <Skeleton width={160} height={22} />
+        <Skeleton width="100%" height={88} radius={16} />
+      </View>
+    </Screen>
   );
 }

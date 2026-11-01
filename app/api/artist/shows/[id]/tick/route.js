@@ -11,6 +11,7 @@ import { loadOwnedShow } from '../../../../../../lib/artistShow';
 import { deliveryTick } from '../../../../../../lib/pipeline/lifecycle';
 import { supabaseLifecycleStore, egressFor } from '../../../../../../lib/pipeline/store';
 import { composeLayout } from '../../../../../../lib/pipeline/compositor';
+import { CUT_ROLES } from '../../../../../../lib/liveCuts';
 import { lookPlan } from '../../../../../../lib/pipeline/lut';
 import { viewerCount, openPrompt } from '../../../../../../lib/showPayload';
 
@@ -26,7 +27,14 @@ export async function POST(request, { params }) {
   const egress = egressFor(show.id);
   let delivery = { state: show.delivery_state };
   if (show.actual_started_at && !show.actual_ended_at) {
-    const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, orientation: show.orientation, healthy: body.healthy || { a: true, b: true } });
+    // Which camera is on air, from the console's Cuts sheet. The console
+    // decides it (lib/liveCuts.js has the rules, and runs on the phone so
+    // a tap is answered without a round trip); the tick is what carries it
+    // into the composed frame and the egress log, so a recorded show knows
+    // which camera it was on at every moment. An unknown value is dropped
+    // rather than trusted: this is a client-supplied field.
+    const cut = CUT_ROLES.includes(body.cut) ? body.cut : null;
+    const layout = composeLayout({ mode: show.performance_mode, view: show.versus_view, orientation: show.orientation, cut, healthy: body.healthy || { a: true, b: true } });
     // The look on screen: the show's own (shows.look, set at booking from the artist's default or changed from the console), with the
     // console's per-tick colour match; an unknown look logs as none rather than failing the tick. The transition in flight, if the
     // console reports one ({ type, direction, startedAtMs, durationMs }), is logged the same way.

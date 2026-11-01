@@ -140,16 +140,12 @@ test('the journey has the screens the designs link together', () => {
  */
 const NOT_YET_REBUILT = new Set([
   'native/app/(tabs)/create.js',
-  'native/app/(tabs)/discover.js',
-  'native/app/(tabs)/live.js',
   'native/app/(tabs)/profile.js',
-  'native/app/artist/console/[id].js',
   'native/app/artist/schedule.js',
   'native/app/camera.js',
   'native/app/forgot-password.js',
   'native/app/show/[id].js',
   'native/app/spike/zoom.js',
-  'native/app/web.js',
 ]);
 
 test('a rebuilt screen never falls back to the old styles', () => {
@@ -167,5 +163,5 @@ test('the not-yet-rebuilt list names real files, and is not growing', () => {
     assert.ok(existsSync(resolve(ROOT, name)), `${name} is on the rebuild list but does not exist — remove it from the list`);
   }
   // A ceiling, so the list can only come down. Lower it as screens land.
-  assert.ok(NOT_YET_REBUILT.size <= 11, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
+  assert.ok(NOT_YET_REBUILT.size <= 7, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
 });
