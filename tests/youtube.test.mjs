@@ -150,3 +150,28 @@ test('explainYouTubeError says what to press, not what Google called it', () => 
   assert.equal(explainYouTubeError(''), null);
   assert.equal(explainYouTubeError(null), null);
 });
+
+// The site's own address is read from one place, and the private variable
+// wins over the public one.
+import { siteUrl, siteUrlIfSet } from '../lib/siteUrl.js';
+test('siteUrl prefers the private SITE_URL, still reads the public one, and never trails a slash', () => {
+  const had = { s: process.env.SITE_URL, p: process.env.NEXT_PUBLIC_SITE_URL };
+  delete process.env.SITE_URL; delete process.env.NEXT_PUBLIC_SITE_URL;
+
+  // Neither set: the pages fall back to production, the OAuth redirect does not.
+  assert.equal(siteUrl(), 'https://loudentify.app');
+  assert.equal(siteUrlIfSet(), '');
+
+  // Only the old public variable: a deployment that has not been changed keeps working.
+  process.env.NEXT_PUBLIC_SITE_URL = 'https://staging.example/';
+  assert.equal(siteUrl(), 'https://staging.example');
+  assert.equal(siteUrlIfSet(), 'https://staging.example');
+
+  // Both: the private one wins, so moving the value off the public prefix takes effect.
+  process.env.SITE_URL = 'https://private.example//';
+  assert.equal(siteUrl(), 'https://private.example');
+  assert.equal(redirectUriFor('https://whatever.example'), 'https://private.example/api/artist/youtube/callback');
+
+  if (had.s === undefined) delete process.env.SITE_URL; else process.env.SITE_URL = had.s;
+  if (had.p === undefined) delete process.env.NEXT_PUBLIC_SITE_URL; else process.env.NEXT_PUBLIC_SITE_URL = had.p;
+});
