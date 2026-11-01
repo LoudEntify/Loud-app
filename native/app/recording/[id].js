@@ -111,7 +111,10 @@ export default function Recording() {
     if (!body) return;
     if (!session) { router.push('/signup?trigger=comment'); return; }
     setSending(true); setSendError(null);
-    const position = await playerRef.current?.positionMs?.().catch?.(() => null);
+    // Stamped with where the viewer is in the recording, not the clock, so
+    // the comment sits beside the moment it is about when anyone watches
+    // this back. Null when there is no player to ask.
+    const position = (await playerRef.current?.positionMs?.()) ?? null;
     const r = await api('/api/viewer/comments', {
       method: 'POST',
       accessToken,

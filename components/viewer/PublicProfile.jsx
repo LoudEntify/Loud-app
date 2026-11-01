@@ -35,7 +35,15 @@ export default function PublicProfile({ username, artistId }) {
     setShows(s || []); setRecordings(r || []);
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [username, artistId]);
-  useEffect(() => { if (session && p) fetchFollowedArtistIds(session.user.id).then((ids) => setFollowing((ids || []).includes(p.id))); }, [session, p]);
+  // fetchFollowedArtistIds returns { ids: Set, supported }, not an array: the
+  // old `.includes` threw inside an uncaught promise, so Follow never lit up
+  // on the web profile however many artists you followed.
+  useEffect(() => {
+    if (!session || !p) return;
+    fetchFollowedArtistIds(session.user.id)
+      .then(({ ids }) => setFollowing(ids.has(p.id)))
+      .catch(() => setFollowing(false));
+  }, [session, p]);
   async function toggleFollow() {
     if (!session) { window.location.href = `/signup?trigger=follow&next=${encodeURIComponent(window.location.pathname)}`; return; }
     if (following) { await unfollowArtist(session.user.id, p.id); setFollowing(false); } else { await followArtist(session.user.id, p.id); setFollowing(true); track('follow', {}, null); }

@@ -1,3 +1,15 @@
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Monthly genre competitions, coming soon"
+          onPress={() => router.push('/competitions')}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: space.m, backgroundColor: color.ink, borderRadius: radius.cardLg, padding: space.l }}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontFamily: face.bold, fontSize: 19, fontWeight: '700', color: color.porcelain }}>Monthly genre competitions</Text>
+            <Text style={{ fontFamily: face.regular, fontSize: 15, color: color.mutedOnDark }}>Coming soon</Text>
+          </View>
+          <Icon.Chevron size={22} color={color.porcelain} />
+        </Pressable>
 // Live.dc.html / LiveLoading.dc.html — what is on, and what is next.
 //
 // A light screen: the title with Search and Inbox beside it, a row of
@@ -16,7 +28,7 @@ import {
   color, space, size, radius, text, face, useLoadingPhase,
 } from '../../src/ui';
 import { api } from '../../src/api';
-import { useSession } from '../../src/session';
+import { supabase, useSession } from '../../src/session';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -162,6 +174,45 @@ function CoverTile({ show, width }) {
   );
 }
 
+/**
+ * "Remind me", which until now only opened the show.
+ *
+ * A reminder is a row in `show_reminders` written by its owner under
+ * row-level security — there is no route, and the web writes it the same
+ * way (components/viewer/LiveTab.jsx). A guest is sent to sign up, because
+ * a reminder needs somebody to remind.
+ */
+function RemindButton({ show }) {
+  const { session } = useSession();
+  const [on, setOn] = useState(!!show.reminded);
+  const [busy, setBusy] = useState(false);
+
+  async function toggle() {
+    if (!session?.user?.id) { router.push('/signup?trigger=remind'); return; }
+    const next = !on;
+    setOn(next);                      // answer the tap at once
+    setBusy(true);
+    const sb = supabase();
+    const { error } = next
+      ? await sb.from('show_reminders').insert({ user_id: session.user.id, show_id: show.id })
+      : await sb.from('show_reminders').delete().eq('user_id', session.user.id).eq('show_id', show.id);
+    setBusy(false);
+    if (error) setOn(!next);          // and put it back if it did not take
+  }
+
+  return (
+    <Button
+      kind={on ? 'main' : 'quiet'}
+      size="small"
+      busy={busy}
+      onPress={toggle}
+      icon={<Icon.Bell size={18} color={color.ink} />}
+    >
+      {on ? 'Reminding' : 'Remind me'}
+    </Button>
+  );
+}
+
 function SoonRow({ show }) {
   const mins = minutesUntil(show.slated_at);
   return (
@@ -179,7 +230,7 @@ function SoonRow({ show }) {
           </Text>
         </View>
       </Pressable>
-      <Button kind="quiet" size="small" onPress={() => router.push(`/show/${show.id}`)} icon={<Icon.Bell size={18} color={color.ink} />}>Remind me</Button>
+      <RemindButton show={show} />
     </Card>
   );
 }

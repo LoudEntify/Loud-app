@@ -66,6 +66,9 @@ export function Button({
       testID={testID}
       disabled={off}
       onPress={onPress}
+      // Same reasoning as Chip: the two small sizes are drawn under 44 and
+      // reach it with hitSlop rather than growing and breaking the layout.
+      hitSlop={s.height >= 44 ? undefined : { top: (44 - s.height) / 2, bottom: (44 - s.height) / 2, left: 2, right: 2 }}
       style={({ pressed }) => [frame, k.fill ? { backgroundColor: k.fill } : null, pressed && !off ? { opacity: 0.85 } : null, style]}
     >
       {k.gradient ? (
@@ -95,6 +98,11 @@ export function Chip({ children, selected = false, onPress, role = 'radio', dark
       accessibilityState={role === 'radio' ? { selected } : { checked: selected }}
       testID={testID}
       onPress={onPress}
+      // The board draws a chip 36 high, and nothing tappable may be under
+      // 44x44. Both are satisfiable: the chip looks 36 and reaches 44 with
+      // hitSlop, which costs nothing visually and is the difference between
+      // a filter row a thumb can hit and one it cannot.
+      hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
       style={({ pressed }) => [{
         height: button.chip.height,
         borderRadius: button.chip.radius,

@@ -144,7 +144,6 @@ const NOT_YET_REBUILT = new Set([
   'native/app/artist/schedule.js',
   'native/app/camera.js',
   'native/app/forgot-password.js',
-  'native/app/show/[id].js',
   'native/app/spike/zoom.js',
 ]);
 
@@ -163,5 +162,54 @@ test('the not-yet-rebuilt list names real files, and is not growing', () => {
     assert.ok(existsSync(resolve(ROOT, name)), `${name} is on the rebuild list but does not exist — remove it from the list`);
   }
   // A ceiling, so the list can only come down. Lower it as screens land.
-  assert.ok(NOT_YET_REBUILT.size <= 7, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
+  assert.ok(NOT_YET_REBUILT.size <= 6, `the rebuild list has grown to ${NOT_YET_REBUILT.size}`);
+});
+
+// ── 4. A name imported from the kit is a name the kit exports ────────────
+//
+// The check above proves a component was imported; it cannot tell that the
+// import resolved to anything. `import { IconButton } from '../src/ui'`
+// when the kit never exported it is undefined at render, which React
+// reports as "type is invalid" from inside the screen rather than at the
+// import, so it is easy to ship.
+
+/** Everything native/src/ui/index.js re-exports, followed one level down. */
+function kitExports() {
+  const UI = resolve(ROOT, 'native/src/ui');
+  const index = readFileSync(join(UI, 'index.js'), 'utf8');
+  const names = new Set();
+  for (const m of index.matchAll(/export\s+\{([^}]+)\}\s+from\s+'\.\/([\w.]+)'/g)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/).pop().trim();
+      if (name) names.add(name);
+    }
+  }
+  // `export * as Icon from './Icon'` and `export * from './tokens'`
+  for (const m of index.matchAll(/export\s+\*\s+as\s+(\w+)\s+from/g)) names.add(m[1]);
+  for (const m of index.matchAll(/export\s+\*\s+from\s+'\.\/([\w.]+)'/g)) {
+    const src = readFileSync(join(UI, `${m[1].replace(/\.js$/, '')}.js`), 'utf8');
+    for (const e of src.matchAll(/export\s+(?:const|function|class|let)\s+(\w+)/g)) names.add(e[1]);
+    for (const e of src.matchAll(/export\s+\{([^}]+)\}/g)) {
+      for (const part of e[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/).pop().trim();
+        if (name) names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+test('every name a screen imports from the design system is one it exports', () => {
+  const kit = kitExports();
+  const missing = [];
+  for (const file of FILES) {
+    const src = readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/import\s+\{([^}]+)\}\s+from\s+'[^']*src\/ui'/g)) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/)[0].trim();
+        if (name && !kit.has(name)) missing.push(`${rel(file)}: the kit does not export ${name}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, [], `\n${missing.join('\n')}\n`);
 });

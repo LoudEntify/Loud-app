@@ -187,9 +187,7 @@ export default function ArtistProfile() {
   const isOwner = me?.id === artist.id;
   const isArtist = artist.role === 'artist';
   const tile = (width - space.screenEdge * 2 - space.xs) / 2;
-  const subtitle = [
-    artist.genres?.length ? artist.genres.slice(0, 3).join(' · ') : null,
-  ].filter(Boolean).join('');
+  const subtitle = artist.genres?.length ? artist.genres.slice(0, 3).join(' · ') : null;
 
   return (
     <Screen>

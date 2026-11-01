@@ -128,3 +128,18 @@ test('the surfaces are the four the board names', () => {
   assert.equal(surface.quiet, 'rgba(1,22,39,0.07)', 'the quiet button fill');
   assert.ok(BOARD.includes('0.72') && BOARD.includes('0.07'));
 });
+
+test('a control drawn under 44 reaches 44 with hitSlop', () => {
+  // "Nothing tappable under 44 by 44." The chip and the two smallest button
+  // sizes are drawn smaller than that on the boards, so they widen their
+  // touch area rather than their box. Without it a filter row is a row a
+  // thumb cannot reliably hit, which reads as the app ignoring taps.
+  const src = read('native/src/ui/Button.js');
+  const chipSrc = src.slice(src.indexOf('export function Chip'));
+  const buttonSrc = src.slice(src.indexOf('export function Button'), src.indexOf('export function Chip'));
+  assert.match(chipSrc, /hitSlop=/, 'Chip is drawn 36 high and needs hitSlop');
+  assert.match(buttonSrc, /hitSlop=/, 'the small button sizes need hitSlop');
+  for (const name of ['chip', 'tiny', 'small']) {
+    assert.ok(button[name].height < 44, `${name} is drawn under 44, which is what the hitSlop is for`);
+  }
+});

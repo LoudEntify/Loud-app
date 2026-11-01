@@ -47,3 +47,9 @@ export const Coin = (p) => <Glyph {...p}><Circle cx="12" cy="12" r="8" /><Path d
 export const Expand = (p) => <Glyph {...p}><Path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" /></Glyph>;
 export const Gear = (p) => <Glyph {...p}><Circle cx="12" cy="12" r="3.2" /><Path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6" /></Glyph>;
 export const Calendar = (p) => <Glyph {...p}><Rect x="4" y="5" width="16" height="15" rx="2" /><Path d="M4 10h16M9 3v4M15 3v4" /></Glyph>;
+export const Play = (p) => <Glyph {...p}><Path d="M7 5l12 7-12 7z" /></Glyph>;
+export const Pause = (p) => <Glyph {...p}><Path d="M8 5v14M16 5v14" /></Glyph>;
+export const Send = (p) => <Glyph {...p}><Path d="M4 12l16-7-6 7 6 7z" /></Glyph>;
+export const Pin = (p) => <Glyph {...p}><Path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" /><Circle cx="12" cy="10" r="2.6" /></Glyph>;
+export const Note = (p) => <Glyph {...p}><Circle cx="8" cy="18" r="3" /><Path d="M11 18V5l8-2v12" /><Circle cx="16" cy="15" r="3" /></Glyph>;
+export const Doc = (p) => <Glyph {...p}><Path d="M7 3h7l5 5v13H7z" /><Path d="M14 3v5h5M10 13h7M10 17h7" /></Glyph>;
