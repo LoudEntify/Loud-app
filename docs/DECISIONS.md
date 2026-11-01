@@ -223,3 +223,27 @@ the QR inline on Devices and refreshing it on a timer (codes nobody scanned,
 for a screen usually opened to check the rig rather than add to it), and
 rendering the QR server-side as an image (a round trip and a cache for
 something that is twenty lines of geometry on the device).
+
+## 2026-11-01 — A paired phone's role maps to a cut, and the console is told about it
+
+Korey asked whether the new Wide/Close/Side choice on the pairing screen
+had replaced the front/back camera toggle. It had not — they are separate
+and both unchanged — but checking turned up a defect behind the question.
+Two vocabularies had to meet and never did: a phone pairs into a role
+(`CAMERA_ROLES`: wide, close, side) and the console offers cuts
+(`lib/liveCuts.js`: main, side, close, broll), with nothing translating
+between them, and `/api/artist/shows/[id]/console` returning no rig at all.
+The screen fell back to `{ main: { live: true } }`, so Side, Close and
+B-roll were refused on every show however many phones were paired: the
+manual cue feature could not be used. Added `lib/rigCameras.js`
+(wide → main, because the camera showing the whole stage from the back is
+the one an artist performs to), had the console route return the rig,
+the direction settings and the clip count, and relabelled the pairing
+screen's "Wide" as "Main" so both screens use one word. A pairings read
+that fails leaves the old single-camera assumption in place: a show with
+Main working beats a show with every cut refused. Rejected: renaming the
+stored role from 'wide' to 'main' (it is written by the web panel and the
+shot grammar too, and a rename for vocabulary's sake is a migration and
+three call sites for no behaviour), and inferring the rig on the device
+from /api/camfeed/pair (a second poll during a live show, for data the
+console call already had to hand).

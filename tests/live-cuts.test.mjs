@@ -9,6 +9,7 @@ import {
   CUTS, CUT_ROLES, DEFAULT_CUT, DIRECTOR_MODES,
   cutAvailability, availableCuts, resolveCut, shotKeyFor, onAirLabel, directorLabel,
 } from '../lib/liveCuts.js';
+import { rigCameras } from '../lib/rigCameras.js';
 import { DEFAULT_DIRECTION, normaliseDirection } from '../lib/direction.js';
 
 const live = { main: { live: true }, side: { live: true }, close: { live: true } };
@@ -157,4 +158,43 @@ test('a degraded Versus frame still names the camera on air', () => {
   const bDown = composeLayout({ mode: 'versus', cut: 'close', healthy: { a: true, b: false } });
   assert.equal(bDown.layers[0].slot, 'a');
   assert.equal(bDown.layers[0].source, 'close');
+});
+
+test('the console knows which phones are paired, and to which cut', () => {
+  // Two vocabularies that never met. A phone pairs into a ROLE (wide,
+  // close, side); the console offers CUTS (main, side, close, broll).
+  // Nothing translated, and the console endpoint returned no rig at all,
+  // so the screen assumed one camera called main — Side, Close and
+  // B-roll were refused for every show however many phones were paired.
+  const now = Date.parse('2026-11-01T20:00:00Z');
+  const seen = '2026-11-01T19:58:00Z';
+  const rig = rigCameras([
+    { id: 'p1', role: 'wide', used_at: seen, last_seen_at: seen },
+    { id: 'p2', role: 'side', used_at: seen, last_seen_at: seen },
+  ], now);
+  assert.equal(rig.main?.live, true, 'the wide phone is the Main cut: the camera you perform to');
+  assert.equal(rig.side?.live, true);
+  assert.equal(rig.close, undefined, 'and a cut with no phone stays absent');
+
+  const cuts = Object.fromEntries(cutAvailability({ cameras: rig, brollCount: 0 }).map((c) => [c.role, c]));
+  assert.equal(cuts.side.available, true, 'so Side can be taken');
+  assert.equal(cuts.close.available, false);
+  assert.match(cuts.close.why, /Pair a phone/, 'and says what to do about it');
+
+  // A code minted but never scanned is not a camera: the honest line is
+  // "pair a phone", not "this camera stopped sending".
+  const unscanned = rigCameras([{ id: 'p3', role: 'close', used_at: null, expires_at: '2026-11-01T20:05:00Z' }], now);
+  assert.equal(unscanned.close, undefined);
+
+  // A phone last heard from yesterday is a camera that has stopped.
+  const stale = rigCameras([{ id: 'p4', role: 'close', used_at: '2026-10-31T09:00:00Z', last_seen_at: '2026-10-31T09:00:00Z' }], now);
+  assert.equal(stale.close.live, false);
+  assert.match(cutAvailability({ cameras: stale }).find((c) => c.role === 'close').why, /stopped sending/);
+
+  // Swap a phone mid-rehearsal and the live one speaks for the role.
+  const swapped = rigCameras([
+    { id: 'dead', role: 'wide', used_at: '2026-10-31T09:00:00Z', last_seen_at: '2026-10-31T09:00:00Z' },
+    { id: 'live', role: 'wide', used_at: seen, last_seen_at: seen },
+  ], now);
+  assert.equal(swapped.main.pairingId, 'live');
 });

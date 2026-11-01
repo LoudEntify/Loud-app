@@ -298,3 +298,17 @@ test('an artist can get a pairing code for a second camera', () => {
   assert.match(devices, /\/settings\/pair/, 'and "Show the pairing code" reaches it');
   assert.ok(!/title="Show the pairing code"[\s\S]{0,200}router\.push\('\/camera'\)/.test(devices), 'rather than opening the scanner');
 });
+
+test('the console is told which cameras are paired', () => {
+  // The screen read data.cameras from the first day; the endpoint never
+  // sent it, so the fallback — one camera called main — was the only
+  // answer there ever was, and three of the four cut buttons could not
+  // be pressed on any show.
+  const route = readFileSync(resolve(ROOT, 'app/api/artist/shows/[id]/console/route.js'), 'utf8');
+  assert.match(route, /camfeed_pairings/, 'the rig is read');
+  assert.match(route, /rigCameras\(/, 'and mapped from pairing roles to cuts');
+  assert.match(route, /direction_settings/, 'the shot settings too, so a cut switched off says so');
+  assert.match(route, /broll_clips/, 'and the clip count, so B-roll knows whether it has anything');
+  const screen = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(screen, /data\?\.cameras \?\? \{ main/, 'an unreadable rig still leaves Main working, rather than refusing every cut');
+});
