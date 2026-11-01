@@ -69,11 +69,27 @@ jobs:
             *) echo "::error::SUPABASE_STAGING_DB_URL does not contain the expected staging project ref ($expected). This URL may point at the wrong project — refusing to apply migrations." ; exit 1 ;;
           esac
 
+      # --include-all: apply a migration whose timestamp is older than one
+      # already on the database. Without it the push refuses, which is the
+      # right default on a single line of work and the wrong one here: we
+      # develop on branches, so a branch opened on the 12th can merge after
+      # a branch opened on the 23rd, and its migration is then "in the past"
+      # through no fault of its own. That is exactly what happened on 1 Nov
+      # — the spike's 20261012010000_director_data_spike.sql merged after
+      # 20261023120000 and 20261031120000 — and every staging deploy since
+      # has failed, so no migration has reached staging for nine hours.
+      #
+      # This is safe here and only here. Each migration is still applied
+      # once, in timestamp order, and recorded; what changes is that an
+      # older unseen one is no longer treated as a reason to stop. It does
+      # NOT go in promote.yml: on production an unexpected out-of-order
+      # migration is a signal that something was merged that nobody meant
+      # to promote, and stopping is the correct answer there.
       - name: Apply migrations to staging
         working-directory: supabase
         env:
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
-        run: supabase db push --db-url "$SUPABASE_STAGING_DB_URL" --yes
+        run: supabase db push --db-url "$SUPABASE_STAGING_DB_URL" --include-all --yes
 
       - name: Verify migrations landed
         working-directory: supabase
