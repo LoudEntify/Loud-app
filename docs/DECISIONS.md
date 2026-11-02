@@ -293,3 +293,21 @@ Rejected: putting the wordmark on the icon too (unreadable at 48dp and
 cropped by every launcher mask), and regenerating the art as SVG for the
 app (the PNG is the approved artwork, and tracing it by hand would make a
 second source of truth for the mark).
+
+## 2026-11-02 — The mark replaces the name in type wherever a logo belongs
+
+Korey asked for the mark anywhere a logo should sit but text stood in for
+it. Five places, all in the auth flow: login and signup each set
+"Loudentify" in 19 point type over the sheet and 17 point at the head of
+it, and forgot-password set it beside the back button. All five now use
+`Wordmark` from the kit, at 34 on ink and 32 on the sheet — the legibility
+floor, below which the signal arc stops resolving into three bands. That
+makes the mark slightly taller than the type it replaces, which is the
+right way round: the type was sized as a label, not as a logo. Swept the
+rest of the app and the website: every other "Loudentify" is a sentence
+(what the camera needs, who reads a report), not a logo position, and the
+eight web call sites already use `components/Logo.jsx`. Rejected: shrinking
+the mark to match the old 17 and 19 point type (it would sit below the
+floor and the arc would read as a smudge), and leaving the sheet headers
+as type because the boards draw them that way (the boards predate the
+artwork, and Korey has now ruled).

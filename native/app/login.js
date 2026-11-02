@@ -8,8 +8,18 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Screen, Button, Field, Badge, ErrorPanel, color, space, radius, text, textOnDark, face } from '../src/ui';
+import { Screen, Button, Field, Badge, ErrorPanel, Wordmark, color, space, radius, text, face } from '../src/ui';
 import { supabase } from '../src/session';
+
+// The name used to be set in type here, in the two places a logo
+// belongs: over the sheet and at the head of it. The mark carries the
+// name itself, so these are the artwork now. Both heights are the
+// legibility floor from src/ui/Wordmark.js — below it the signal arc
+// stops being three bands — which makes the mark a little taller than
+// the 19 and 17 point text it replaces, and that is the right way round:
+// the type was sized to be a label, not a logo.
+const BRAND_ON_INK = 34;
+const BRAND_ON_SHEET = 32;
 
 export default function Login() {
   const { next } = useLocalSearchParams();
@@ -38,7 +48,7 @@ export default function Login() {
       {/* What is playing behind the sheet. The board keeps it visible. */}
       <View style={{ position: 'absolute', left: space.l, right: space.l, top: 56, flexDirection: 'row', alignItems: 'center', gap: space.s }}>
         <Badge kind="live" />
-        <Text style={[textOnDark.rowTitle, { fontSize: 19 }]} numberOfLines={1}>Loudentify</Text>
+        <Wordmark height={BRAND_ON_INK} />
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
@@ -50,7 +60,7 @@ export default function Login() {
           <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: 'rgba(1,22,39,0.2)' }} />
           <ScrollView contentContainerStyle={{ gap: 14, paddingTop: 14 }} keyboardShouldPersistTaps="handled">
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={[text.rowTitle, { fontSize: 17 }]}>Loudentify</Text>
+              <Wordmark height={BRAND_ON_SHEET} onDark={false} />
               <Pressable accessibilityRole="link" onPress={() => router.replace('/signup')} hitSlop={8}>
                 <Text style={{ fontFamily: face.bold, fontSize: 16, fontWeight: '700', color: color.ink }}>Sign up</Text>
               </Pressable>
