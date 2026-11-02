@@ -273,3 +273,23 @@ the lifecycle (it is S3-only, needs five storage variables to do anything
 at all, and verifies ownership from a request this path does not have), and
 making the real egress the default (a billed meter should not start because
 a test suite went green).
+
+## 2026-11-02 — The app wears the real mark: launch screen, splash and icon
+
+The launch screen drew a teal L out of two rectangles and set the word
+"Loudentify" in type beneath it — the name on screen twice, in two
+letterforms, neither of them the brand — and the installed app wore the
+same L as its icon, while the real artwork sat unused in `public/logo`.
+Added `native/src/ui/Wordmark.js` (the native twin of
+`components/Logo.jsx`: named by the surface it sits on, width derived
+from height so it cannot be stretched, the same 32px floor where the
+signal arc stops resolving into three bands), shipped both colourways to
+`native/assets`, and pointed the launch screen, the splash and both icons
+at them. The icon is the whale-in-the-O cropped square rather than the
+4.56:1 wordmark, because Android masks an icon to a circle or squircle
+and a wide wordmark would lose its ends; the adaptive foreground sits at
+46% so it survives that mask with the ink behind it from `app.json`.
+Rejected: putting the wordmark on the icon too (unreadable at 48dp and
+cropped by every launcher mask), and regenerating the art as SVG for the
+app (the PNG is the approved artwork, and tracing it by hand would make a
+second source of truth for the mark).
