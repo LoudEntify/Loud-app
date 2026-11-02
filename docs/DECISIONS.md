@@ -454,3 +454,49 @@ migrations to production should not change on whatever day a release
 lands — it should be bumped deliberately, with the config checked.
 Rejected: renaming the key and leaving `latest` (the next release does
 this again, possibly during a show week).
+
+## 2026-11-02 — The console shows the broadcast, and Kit Check shows the rig
+
+Korey's device test, second round. The camera and the microphone now
+work: his own feed appeared and YouTube received audio. Three things
+were still wrong, two of them ours to fix here.
+
+THE CONSOLE SHOWED WORDS, NOT A PICTURE. It drew "ON AIR · CLOSE" on a
+dark screen with the artist's own camera in a 96x128 corner window,
+because "the console cannot show the composed frame itself (it is built
+server-side)". That was true of the composed frame and false of the
+picture: the artist's phone is in the room and its token carries
+canSubscribe, so every camera is already on the device, and composing
+them is the same job the egress template and a viewer's screen do.
+`native/src/ui/Stage.js` does it. Solo fills the screen with what is on
+air; versus splits and the small window is the OTHER artist, which is
+the only thing a small window was ever for. In solo the thumbnail is
+gone — it was the same picture twice — except while the camera is
+starting or has failed, which is where the reason is written.
+
+KIT CHECK DID NOT SHOW THE CAMERAS. In the pilot an artist ran Kit Check
+to see the cameras they had added and to set which one the show opens
+on; the rebuilt screen showed a list of checks and a viewfinder of the
+handset, so a second phone that had paired looked exactly like one that
+had not. Kit Check now joins the artist's own rehearsal room — the one
+/api/camfeed/pair has minted since the pairing rewrite — publishes this
+phone and subscribes to the rest, so every camera in the rig is on
+screen as a live tile. Tapping one sets `openingCut` in direction
+settings (jsonb, no migration), and the console opens on it instead of
+always opening on Main. The microphone stays off in rehearsal: an open
+mic in a room with the artist's own speakers is a feedback loop.
+
+THIS COSTS MONEY. A LiveKit room bills while it is open, so rehearsal is
+no longer free. That is the trade the pilot already made, and the room
+closes when the screen does or the app goes to the background.
+
+NOT FIXED, AND NOT GUESSED AT: YouTube receives audio and no video. The
+composite is configured exactly as `app/api/egress/start` configures the
+known-good file recording — same template, same layout, same
+EncodingOptions — so the difference is the RTMP output or the template
+rendering black under the egress browser, and neither can be told apart
+from this session: staging's database and the LiveKit dashboard are both
+out of reach here. The console's new full-screen stage is the instrument
+that splits it. Rejected: changing EncodingOptions on a hunch (the same
+options drive the recording path that works), and re-rendering the
+egress template defensively before knowing which half is at fault.

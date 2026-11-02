@@ -9,6 +9,7 @@ export { Button, Chip, Badge, Toggle } from './Button';
 export { Skeleton, Empty, ErrorPanel, OfflineBar, Spinner, useLoadingPhase } from './states';
 export { LiveNotice, NOTICE_FADE_MS } from './LiveNotice';
 export { OwnCameraView } from './OwnCameraView';
+export { Stage, camerasInRoom, cameraForCut, roleOfIdentity, slotOfIdentity } from './Stage';
 export { KEYBOARD_BEHAVIOR, KEYBOARD_OFFSET } from './keyboard';
 export { Field } from './Field';
 export { TabBar } from './TabBar';
