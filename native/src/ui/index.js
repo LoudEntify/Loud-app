@@ -9,5 +9,6 @@ export { Button, Chip, Badge, Toggle } from './Button';
 export { Skeleton, Empty, ErrorPanel, OfflineBar, Spinner, useLoadingPhase } from './states';
 export { Field } from './Field';
 export { TabBar } from './TabBar';
+export { Wordmark, WORDMARK_ASPECT, WORDMARK_MIN_HEIGHT } from './Wordmark';
 export { Row, Section, ScreenHeader, IconButton } from './Layout';
 export * as Icon from './Icon';

@@ -43,3 +43,26 @@ test('the three images Android needs are configured, not left to a default', () 
   assert.ok(splash, 'the expo-splash-screen plugin');
   assert.ok(splash[1]?.image, 'expo-splash-screen needs an image, or the build references a drawable it never writes');
 });
+
+test('the app wears its own mark, not a stand-in letter', () => {
+  // The launch screen drew a teal L out of two rectangles and set the
+  // word "Loudentify" in type beneath it — the name twice, in two
+  // letterforms, neither of them the brand — while the real artwork sat
+  // unused in public/logo. The installed app wore the same L as its
+  // icon.
+  const mark = readFileSync(resolve(NATIVE, 'assets/wordmark-on-dark.png'));
+  assert.ok(mark.length > 10_000, 'the real artwork ships with the app');
+  const launch = readFileSync(resolve(NATIVE, 'app/index.js'), 'utf8');
+  assert.match(launch, /<Wordmark/, 'and the first screen shows it');
+  assert.ok(!/backgroundColor: color\.teal/.test(launch), 'the hand-drawn L is gone');
+  assert.ok(!/>Loudentify</.test(launch), 'and the name is not also set in type beside it');
+
+  // The icon is the whale in the O: square, so it survives Android's
+  // round and squircle masks, where a 4.56:1 wordmark could not.
+  for (const [file, label] of [['assets/icon.png', 'app icon'], ['assets/adaptive-icon.png', 'adaptive icon']]) {
+    const png = readFileSync(resolve(NATIVE, file));
+    const w = png.readUInt32BE(16); const h = png.readUInt32BE(20);
+    assert.equal(w, 1024, `${label} is 1024 wide`);
+    assert.equal(h, 1024, `${label} is square`);
+  }
+});

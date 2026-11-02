@@ -9,15 +9,16 @@
 // the mark fades up only when the person has not asked for less motion,
 // and the screen is tappable throughout: nobody waits on an animation.
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Animated, Easing, AccessibilityInfo } from 'react-native';
+import { Text, Pressable, Animated, Easing, AccessibilityInfo, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
-import { Screen, color, space, textOnDark, face } from '../src/ui';
+import { Screen, Wordmark, WORDMARK_ASPECT, space, textOnDark, face } from '../src/ui';
 import { useSession } from '../src/session';
 
 const HOLD_MS = 1200;
 
 export default function Launch() {
   const { loading } = useSession();
+  const { width } = useWindowDimensions();
   const [reduceMotion, setReduceMotion] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const lift = useRef(new Animated.Value(12)).current;
@@ -50,23 +51,11 @@ export default function Launch() {
   return (
     <Screen dark>
       <Pressable accessibilityRole="button" accessibilityLabel="Open Discover" onPress={go} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.m }}>
-        <Animated.View style={{ opacity: fade, transform: [{ translateY: lift }], alignItems: 'center', gap: space.s }}>
-          <Mark />
-          <Text style={[textOnDark.screenTitle, { letterSpacing: 0.5 }]}>Loudentify</Text>
+        <Animated.View style={{ opacity: fade, transform: [{ translateY: lift }], alignItems: 'center', gap: space.m }}>
+          <Wordmark height={Math.min(width * 0.66, 300) / WORDMARK_ASPECT} />
           <Text style={[textOnDark.supporting, { fontFamily: face.regular }]}>Live music, directed as it happens.</Text>
         </Animated.View>
       </Pressable>
     </Screen>
-  );
-}
-
-/** The L, at the size the splash uses. Same geometry as the app icon. */
-function Mark() {
-  const unit = 2.6;
-  return (
-    <View style={{ width: 24 * unit, height: 36 * unit }}>
-      <View style={{ position: 'absolute', left: 0, top: 0, width: 8 * unit, height: 36 * unit, backgroundColor: color.teal }} />
-      <View style={{ position: 'absolute', left: 0, bottom: 0, width: 24 * unit, height: 8 * unit, backgroundColor: color.teal }} />
-    </View>
   );
 }
