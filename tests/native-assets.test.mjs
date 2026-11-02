@@ -13,7 +13,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const NATIVE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'native');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const NATIVE = resolve(ROOT, 'native');
 const config = JSON.parse(readFileSync(resolve(NATIVE, 'app.json'), 'utf8')).expo;
 
 /** Every './assets/…' path anywhere in the config, with the key that held it. */
@@ -90,4 +91,19 @@ test('every place a logo belongs shows the logo, not the name in type', () => {
   assert.match(kit, /WORDMARK_MIN_HEIGHT = 32/);
   assert.match(kit, /Math\.max\(WORDMARK_MIN_HEIGHT, height\)/, 'and the floor is enforced, not just documented');
   assert.ok(!/width\s*=/.test(kit.split('export function Wordmark')[1] || ''), 'no width prop, so the mark cannot be stretched');
+});
+
+test('the database tool is pinned, and its config uses keys it still accepts', () => {
+  // On 2 Nov the Supabase CLI released a version that rejects
+  // [inbucket], and the staging deploy went red with no change of ours.
+  // Mid-pilot, a production tool changing under a show is the failure
+  // worth preventing, not the key.
+  const config = readFileSync(resolve(ROOT, 'supabase/config.toml'), 'utf8');
+  assert.ok(!/^\[inbucket\]/m.test(config), 'the dropped key is gone');
+  assert.match(config, /^\[local_smtp\]/m, 'replaced by the one the CLI takes');
+  for (const wf of ['.github/workflows/staging.yml', '.github/workflows/promote.yml']) {
+    const src = readFileSync(resolve(ROOT, wf), 'utf8');
+    assert.ok(!/version: latest/.test(src), `${wf} does not take whatever released today`);
+    assert.match(src, /version: \d+\.\d+\.\d+/, `${wf} pins a version`);
+  }
 });

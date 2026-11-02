@@ -53,7 +53,13 @@ jobs:
       - name: Install Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned, not "latest". On 2 Nov the CLI released a version
+          # that rejects a config key we had, and the staging deploy
+          # went red with no change of ours — mid-pilot, that is a
+          # production tool changing under a show. Bumped deliberately,
+          # with the config checked, rather than on whatever day a
+          # release lands.
+          version: 3.0.0
 
       - name: Guard — refuse unless the DB URL is really the staging project
         env:
