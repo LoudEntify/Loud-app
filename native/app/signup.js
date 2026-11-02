@@ -10,11 +10,11 @@
 // goes to /under-age without the date travelling anywhere, which is what
 // lets that screen say "We have not kept the date you entered" honestly.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   Screen, Button, Field, Badge, Toggle, ErrorPanel, Wordmark,
-  color, space, radius, text, face,
+  color, space, radius, text, face, KEYBOARD_BEHAVIOR, KEYBOARD_OFFSET,
 } from '../src/ui';
 import { api } from '../src/api';
 import { supabase } from '../src/session';
@@ -69,7 +69,7 @@ export default function SignUp() {
         <Wordmark height={BRAND_ON_INK} />
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
+      <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} keyboardVerticalOffset={KEYBOARD_OFFSET} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <View style={{
           backgroundColor: color.mist,
           borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet,

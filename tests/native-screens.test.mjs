@@ -312,3 +312,73 @@ test('the console is told which cameras are paired', () => {
   const screen = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
   assert.match(screen, /data\?\.cameras \?\? \{ main/, 'an unreadable rig still leaves Main working, rather than refusing every cut');
 });
+
+test('a keyboard never covers the field being typed into', () => {
+  // Every screen with a field used behavior={ios ? 'padding' : undefined},
+  // and undefined means KeyboardAvoidingView does nothing. On Android the
+  // keyboard opened straight over the login form: an artist typing a
+  // password could not see the field.
+  const SCREENS = ['native/app/login.js', 'native/app/signup.js', 'native/app/forgot-password.js', 'native/app/show/[id].js', 'native/app/recording/[id].js'];
+  for (const f of SCREENS) {
+    const src = readFileSync(resolve(ROOT, f), 'utf8');
+    assert.match(src, /behavior=\{KEYBOARD_BEHAVIOR\}/, `${f} uses the shared behaviour`);
+    assert.ok(!/'ios' \? 'padding' : undefined/.test(src), `${f} no longer does nothing on Android`);
+  }
+  const kit = readFileSync(resolve(ROOT, 'native/src/ui/keyboard.js'), 'utf8');
+  assert.match(kit, /Platform\.OS === 'ios' \? 'padding' : 'height'/, "and 'height' is the Android answer");
+  // 'height' only works while the window itself resizes, so the mode is
+  // pinned rather than left to a default that could change under us.
+  const app = JSON.parse(readFileSync(resolve(ROOT, 'native/app.json'), 'utf8')).expo;
+  assert.equal(app.android.softwareKeyboardLayoutMode, 'resize');
+});
+
+test('an artist can answer their own audience', () => {
+  // The console polled comments and drew them, and offered no way to
+  // reply: somebody asks a question in front of an audience and the
+  // person it is addressed to has no field to type into.
+  const src = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(src, /<TextInput/, 'there is somewhere to type');
+  assert.match(src, /'\/api\/viewer\/comments', \{ method: 'POST'/, 'and it posts through the same route a viewer uses');
+  assert.match(src, /console-comment-send/, 'with a Send the thumb can reach');
+});
+
+test('a message on the live screen covers what it sits on', () => {
+  // The console drew errors with ErrorPanel, whose surface is twelve per
+  // cent of a red: over the four actions and the Go live button, words
+  // and buttons printed on top of each other, and the buttons underneath
+  // stayed pressable through the sentence saying something had failed.
+  const notice = readFileSync(resolve(ROOT, 'native/src/ui/LiveNotice.js'), 'utf8');
+  assert.match(notice, /backgroundColor: color\.ink/, 'the panel is opaque');
+  assert.match(notice, /pointerEvents=\{shown \? 'auto' : 'none'\}/, 'and swallows the taps aimed at what is under it');
+  assert.match(notice, /Animated\.timing/, 'fading rather than blinking into existence over a live show');
+  assert.ok(!/setTimeout/.test(notice), 'and it waits for a dismiss: nothing on a live screen times out on its own');
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(console_, /<LiveNotice message=\{err\}/, 'the console uses it');
+  assert.ok(!/<ErrorPanel title="That did not work"/.test(console_), 'in place of the translucent panel');
+});
+
+test("the artist's own phone is a camera in their own show", () => {
+  // THE reason nothing broadcast. The console never joined the LiveKit
+  // room and its "You" tile was a MediaTile with nothing behind it, so a
+  // solo artist's room was empty: nothing to compose, nothing to send,
+  // and no preview anywhere in the artist app. The compositor was ready
+  // and would have rendered a blank page.
+  const hook = readFileSync(resolve(ROOT, 'native/src/ownCamera.js'), 'utf8');
+  assert.match(hook, /\/api\/performer\/join-show/, 'it takes a token from the route the web performer uses');
+  assert.match(hook, /new CameraSession/, 'and publishes with the session the spike proved out');
+  assert.ok(!/new AccessToken|addGrant/.test(hook), 'the phone never mints or widens its own grant');
+  assert.match(hook, /starting\.current/, 'two sessions against one native camera is the black-preview bug');
+  assert.match(hook, /AppState/, 'and a camera Android reclaimed in the background comes back');
+
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(console_, /useOwnCamera\(/, 'the console starts it');
+  assert.match(console_, /<OwnCameraView/, 'and shows the real picture in the You window');
+  assert.ok(!/<MediaTile\s+label="You"/.test(console_), 'in place of the empty tile that stood there');
+  assert.match(console_, /ownCamera\.phase === OWN_CAMERA_LIVE \? \{ live: true, own: true \}/, 'and Main counts as a camera once this phone is publishing');
+
+  // VideoTrack reads publication.track without a guard; that crashed the
+  // spike on 14 Oct.
+  const view = readFileSync(resolve(ROOT, 'native/src/ui/OwnCameraView.js'), 'utf8');
+  assert.match(view, /pub\?\.track/, 'nothing renders before the publication and its track exist');
+  assert.match(view, /OWN_CAMERA_FAILED/, 'and a camera that is not sending says so rather than showing a black box');
+});

@@ -311,3 +311,61 @@ the mark to match the old 17 and 19 point type (it would sit below the
 floor and the arc would read as a smudge), and leaving the sheet headers
 as type because the boards draw them that way (the boards predate the
 artwork, and Korey has now ruled).
+
+## 2026-11-02 — Keyboard, artist comments, and messages that cover what they sit on
+
+Three faults from Korey's device test, fixed together because each is
+small and all three are in the way of testing anything else.
+
+1. Every screen with a field used `behavior={ios ? 'padding' : undefined}`,
+   and undefined means `KeyboardAvoidingView` does nothing: on Android the
+   keyboard opened over the login form. One shared `KEYBOARD_BEHAVIOR`
+   ('padding' on iOS, 'height' on Android) across all five screens, with
+   `android.softwareKeyboardLayoutMode` pinned to "resize", since 'height'
+   only works while the window resizes and "pan" would shift it twice.
+2. The console read comments and offered no way to reply. Added a field
+   and Send posting through `/api/viewer/comments`, the same route a
+   viewer uses, so there is one comment store and one set of hidden-word
+   rules. The sent comment is shown at once rather than waiting for the
+   next poll.
+3. Errors on the console used `ErrorPanel`, whose surface is 12% red —
+   right on an opaque card, wrong over the four actions and Go live,
+   where words and buttons printed over each other and the buttons stayed
+   pressable through the message. `LiveNotice` is opaque, covers the whole
+   lower region rather than its own text box, swallows touches, and fades
+   both ways. It waits for a dismiss: nothing on a live screen times out
+   on its own, because a message that vanishes while the artist is
+   looking at their hands was never delivered.
+
+Rejected: giving `ErrorPanel` an opaque variant (it is the right thing on
+every settings screen, and a flag would let the wrong one be picked on the
+one screen where it matters), and auto-dismissing the notice after a few
+seconds (see above).
+
+## 2026-11-02 — The artist's own phone is a camera in their own show
+
+Korey's device test: no camera feed on the artist app, nothing reaching
+YouTube. The cause was not the egress switch. The console never joined
+the LiveKit room at all — its "You" tile was a `MediaTile` with nothing
+behind it, and the main area said "Not live yet" in words because "the
+console cannot show the composed frame itself". The only code that
+published was `native/app/camera.js`, the screen a SECOND phone lands on
+after scanning a pairing code. So an artist with one phone had an empty
+room: nothing to compose, nothing to send, and no preview anywhere. The
+compositor would have rendered a blank page.
+
+`native/src/ownCamera.js` is a hook rather than screen code, because Kit
+Check and the console both need it and two implementations would be two
+sets of lifecycle bugs around one native camera. The token comes from
+`/api/performer/join-show`, the route the web performer already uses,
+which enforces the show window server-side; nothing on the phone mints
+or widens a grant. A start guard stops a second session racing the
+first, which is how a phone ends up with a black preview and no error,
+and an AppState listener restarts a camera Android reclaimed in the
+background. `Main` counts as a camera once this phone is publishing,
+merged in the console because the server knows the pairings and cannot
+know whether this handset is up. Rejected: publishing from Kit Check too
+(it would start LiveKit billing during rehearsal, and the rehearsal room
+belongs with the pairing-routes work), and minting the token on the
+device from a camfeed pairing (a second grant path for the one
+participant whose authority is already their account).

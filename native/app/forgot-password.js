@@ -17,12 +17,12 @@
 // way app/login.js does: the logo file is a web asset and the two screens
 // are the same sheet.
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Screen, Button, Field, Icon, Wordmark,
-  color, space, radius, surface, text, face, size, gradient,
+  color, space, radius, surface, text, face, size, gradient, KEYBOARD_BEHAVIOR, KEYBOARD_OFFSET,
 } from '../src/ui';
 import { supabase } from '../src/session';
 import { API_BASE } from '../src/config';
@@ -50,7 +50,7 @@ export default function ForgotPassword() {
 
   return (
     <Screen dark>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
+      <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} keyboardVerticalOffset={KEYBOARD_OFFSET} style={{ flex: 1, justifyContent: 'flex-end' }}>
         <View style={{
           backgroundColor: color.mist,
           borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet,
