@@ -21,12 +21,15 @@ import { View, Text, Pressable, ScrollView, KeyboardAvoidingView, Platform } fro
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  Screen, Button, Field, Icon,
+  Screen, Button, Field, Icon, Wordmark,
   color, space, radius, surface, text, face, size, gradient,
 } from '../src/ui';
 import { supabase } from '../src/session';
 import { API_BASE } from '../src/config';
 import { validateResetRequest, resetErrorMessage, resetRedirectTo, RESET_SENT_MESSAGE } from '@loud/lib/passwordReset.js';
+
+// The legibility floor from src/ui/Wordmark.js; see login.js.
+const BRAND_ON_SHEET = 32;
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -64,7 +67,7 @@ export default function ForgotPassword() {
               >
                 <Icon.Back size={22} color={color.ink} />
               </Pressable>
-              <Text style={[text.rowTitle, { fontSize: 17 }]}>Loudentify</Text>
+              <Wordmark height={BRAND_ON_SHEET} onDark={false} />
             </View>
 
             <View style={{ gap: 6 }}>

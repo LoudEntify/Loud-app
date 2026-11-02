@@ -66,3 +66,28 @@ test('the app wears its own mark, not a stand-in letter', () => {
     assert.equal(h, 1024, `${label} is square`);
   }
 });
+
+test('every place a logo belongs shows the logo, not the name in type', () => {
+  // Launch was the obvious one. Login, signup and forgot-password each
+  // set "Loudentify" in 17 or 19 point type exactly where a mark goes —
+  // over the sheet and at the head of it — which is a label standing in
+  // for artwork that ships with the app.
+  const SPOTS = ['app/index.js', 'app/login.js', 'app/signup.js', 'app/forgot-password.js'];
+  for (const file of SPOTS) {
+    const src = readFileSync(resolve(NATIVE, file), 'utf8');
+    assert.match(src, /<Wordmark/, `${file} shows the mark`);
+    assert.ok(!/>Loudentify</.test(src), `${file} does not also set the name in type where the mark sits`);
+  }
+  // On ink it must be the porcelain file: onDark is the default, so the
+  // mistake to guard is a light-sheet mark left on the default.
+  for (const file of ['app/login.js', 'app/signup.js', 'app/forgot-password.js']) {
+    const src = readFileSync(resolve(NATIVE, file), 'utf8');
+    assert.match(src, /<Wordmark[^/]*onDark=\{false\}/, `${file}'s sheet is light, so the mark on it must be the ink one`);
+  }
+  // The mark is never asked for a size below the floor where the signal
+  // arc stops resolving into three bands.
+  const kit = readFileSync(resolve(NATIVE, 'src/ui/Wordmark.js'), 'utf8');
+  assert.match(kit, /WORDMARK_MIN_HEIGHT = 32/);
+  assert.match(kit, /Math\.max\(WORDMARK_MIN_HEIGHT, height\)/, 'and the floor is enforced, not just documented');
+  assert.ok(!/width\s*=/.test(kit.split('export function Wordmark')[1] || ''), 'no width prop, so the mark cannot be stretched');
+});
