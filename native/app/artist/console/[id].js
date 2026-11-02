@@ -19,7 +19,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import {
-  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, LiveNotice, OwnCameraView, Icon,
+  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, LiveNotice, OwnCameraView, Stage, Icon,
   color, space, radius, surface, textOnDark, text, face, gradient,
 } from '../../../src/ui';
 import { api } from '../../../src/api';
@@ -57,6 +57,12 @@ export default function Console() {
   const [holdPct, setHoldPct] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [cut, setCut] = useState(DEFAULT_CUT);
+  // The camera the artist chose in Kit Check, applied once when the
+  // console first learns it. Before this every show opened on Main, so
+  // an artist whose opening shot was the close camera had to cut to it
+  // in front of an audience. Applied once, not on every poll: after
+  // that the cut is whatever the director or the artist has made it.
+  const openedOn = useRef(false);
   const [mode, setMode] = useState('auto');
   const [refused, setRefused] = useState(null);
   const holdRef = useRef(null);
@@ -65,6 +71,14 @@ export default function Console() {
   const show = data?.show;
   const live = Boolean(tick?.live ?? (show?.actual_started_at && !show?.actual_ended_at));
   const orientation = showOrientation(show);
+  const versus = show?.performance_mode === 'versus';
+
+  useEffect(() => {
+    const want = data?.direction?.openingCut;
+    if (openedOn.current || !want || show?.actual_started_at) return;
+    openedOn.current = true;
+    setCut(want);
+  }, [data, show]);
 
   // The artist's phone IS the main camera. It joins the show's own room
   // through /api/performer/join-show, the route the web performer uses,
@@ -239,15 +253,22 @@ export default function Console() {
 
   return (
     <Screen dark>
-      {/* What viewers are seeing. The console cannot show the composed
-          frame itself (it is built server-side for the broadcast), so it
-          names the camera on air rather than implying a preview it does
-          not have. */}
-      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: space.s }}>
-        <Text style={{ fontFamily: face.regular, fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.7)' }}>
+      {/* What viewers are seeing — the picture, not a description of it.
+          Every camera in the show is already on this phone (the join
+          token carries canSubscribe), so composing them the way the
+          broadcast composes them needs no server. Solo fills the screen;
+          versus splits, and the small window is the other artist, which
+          is the only thing a small window was ever for. */}
+      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 }}>
+        <Stage room={ownCamera.session?.room || null} cut={cut} versus={versus} slot={data?.slot || 'a'} />
+      </View>
+
+      {/* The label stays, over the picture rather than instead of it. */}
+      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: 160, alignItems: 'center', gap: 2 }}>
+        <Text style={{ fontFamily: face.regular, fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.85)', textShadowColor: 'rgba(1,22,39,0.8)', textShadowRadius: 6 }}>
           {live ? onAirLabel(cut) : 'Not live yet'}
         </Text>
-        <Text style={{ fontFamily: face.regular, fontSize: 14, color: 'rgba(253,255,252,0.5)' }}>
+        <Text style={{ fontFamily: face.regular, fontSize: 14, color: 'rgba(253,255,252,0.7)', textShadowColor: 'rgba(1,22,39,0.8)', textShadowRadius: 6 }}>
           {live ? `${orientation === 'landscape' ? 'Landscape' : 'Portrait'} · ${delivery || 'starting'}` : 'Your broadcast starts when you do'}
         </Text>
       </View>
@@ -287,12 +308,18 @@ export default function Console() {
         </View>
       ) : null}
 
-      <OwnCameraView
-        camera={ownCamera}
-        label="You"
-        compact
-        style={{ position: 'absolute', right: space.m, top: 100, width: 96, height: 128, borderRadius: 14, borderWidth: 2, borderColor: ownCamera.phase === OWN_CAMERA_LIVE ? color.teal : 'rgba(253,255,252,0.5)' }}
-      />
+      {/* In solo the stage IS this camera, so a thumbnail of it beside
+          itself is the same picture twice. It stays while the camera is
+          starting or has failed, because then the stage has nothing and
+          this is where the reason is written. */}
+      {versus || ownCamera.phase !== OWN_CAMERA_LIVE ? (
+        <OwnCameraView
+          camera={ownCamera}
+          label="You"
+          compact
+          style={{ position: 'absolute', right: space.m, top: 100, width: 96, height: 128, borderRadius: 14, borderWidth: 2, borderColor: ownCamera.phase === OWN_CAMERA_LIVE ? color.teal : 'rgba(253,255,252,0.5)' }}
+        />
+      ) : null}
 
       {/* Comments */}
       {!hideComments ? (

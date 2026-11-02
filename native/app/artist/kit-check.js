@@ -38,6 +38,12 @@ import {
 } from '../../src/ui';
 import { api } from '../../src/api';
 import { describeRig, rigSummary, rigReady } from '@loud/lib/rig.js';
+import { useRehearsalRoom, REHEARSAL_READY, REHEARSAL_JOINING } from '../../src/rehearsalRoom';
+import { camerasInRoom } from '../../src/ui';
+import { OPENING_CUTS } from '@loud/lib/direction.js';
+
+let KitVideoTrack = null;
+try { KitVideoTrack = require('@livekit/react-native').VideoTrack; } catch { /* Expo Go: no native LiveKit */ }
 import { isLivePairing } from '@loud/lib/pairingLiveness.js';
 import { API_BASE } from '../../src/config';
 import { supabase, useSession } from '../../src/session';
@@ -86,6 +92,16 @@ export default function KitCheck() {
   // whole arrangement again, which is the thing that made the old
   // Kit Check feel like filling in a form before every gig.
   const [rig, setRig] = useState(null);
+  // Kit Check joins the artist's own rehearsal room so the paired
+  // cameras can be SEEN, which is what the pilot did and what the
+  // rebuilt screen lost.
+  const [openingCut, setOpeningCut] = useState('main');
+  const [savingCut, setSavingCut] = useState(false);
+  const rehearsal = useRehearsalRoom({
+    accessToken,
+    enabled: Boolean(accessToken) && profile?.role === 'artist',
+    orientation: 'portrait',
+  });
   const [camera, setCamera] = useState('camera_main');
   const [show, setShow] = useState(undefined);        // undefined while reading, null when there is none
   const [place, setPlace] = useState(null);
@@ -131,6 +147,30 @@ export default function KitCheck() {
   // Camera permission, asked for once: without it there is no preview and
   // no camera check, and the screen says so rather than showing black.
   useEffect(() => { if (perm && !perm.granted && perm.canAskAgain) requestPerm(); }, [perm, requestPerm]);
+
+  // The opening cut the artist chose last time, so Kit Check shows
+  // the arrangement as they left it rather than resetting to Main.
+  useEffect(() => {
+    let alive = true;
+    if (!accessToken) return undefined;
+    api('/api/artist/direction', { accessToken }).then((r) => {
+      if (alive && r.ok && r.data?.settings?.openingCut) setOpeningCut(r.data.settings.openingCut);
+    });
+    return () => { alive = false; };
+  }, [accessToken]);
+
+  async function chooseOpeningCut(next) {
+    const before = openingCut;
+    setOpeningCut(next); setSavingCut(true);
+    const read = await api('/api/artist/direction', { accessToken });
+    const settings = { ...(read.data?.settings || {}), openingCut: next };
+    const r = await api('/api/artist/direction', { method: 'PUT', accessToken, body: { settings } });
+    setSavingCut(false);
+    // Put it back rather than leaving a choice on screen that was not
+    // saved: an artist who sets the opening shot and finds Main on air
+    // has been lied to by this screen.
+    if (!r.ok) setOpeningCut(before);
+  }
 
   // Read the rig when this opens. A failure leaves `rig` null and the
   // section says it could not read it, rather than drawing an empty
@@ -255,6 +295,11 @@ export default function KitCheck() {
     isLive: isLivePairing,
   });
 
+  // Every camera in the rehearsal room, which is the rig as it
+  // actually is rather than as the database remembers it.
+  const roomCameras = camerasInRoom(rehearsal.room);
+  const ownRoomCamera = roomCameras.find((c) => c.role === 'main') || null;
+
   if (loading) return <KitSkeleton />;
 
   if (profile && profile.role !== 'artist') {
@@ -343,10 +388,53 @@ export default function KitCheck() {
           )}
         </View>
 
-        {/* The artist's own camera with the thirds over it. Never the
+        {/* EVERY camera in the rig, not just this handset.
+            In the pilot an artist ran Kit Check to see the cameras they
+            had added and to set which one the show opens on; the
+            rebuilt screen showed a list of checks and a viewfinder of
+            the phone in your hand, so a second phone that had paired
+            looked exactly like one that had not. These are the real
+            feeds from the rehearsal room. */}
+        {roomCameras.length > 1 ? (
+          <View style={{ gap: space.s }}>
+            <Text style={textOnDark.label}>Opens on</Text>
+            <View style={{ flexDirection: 'row', gap: space.s }}>
+              {roomCameras.map((c) => {
+                const cutKey = c.role === 'wide' ? 'main' : c.role;
+                const on = cutKey === openingCut;
+                return (
+                  <Pressable
+                    key={c.identity}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`Open the show on the ${cutKey} camera`}
+                    disabled={savingCut || !OPENING_CUTS.includes(cutKey)}
+                    onPress={() => chooseOpeningCut(cutKey)}
+                    testID={`kit-cam-${cutKey}`}
+                    style={{ flex: 1, height: 150, borderRadius: radius.card, overflow: 'hidden', borderWidth: 2, borderColor: on ? color.teal : 'rgba(253,255,252,0.25)' }}
+                  >
+                    <KitFeed camera={c} />
+                    <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: 'rgba(1,22,39,0.72)' }}>
+                      <Text style={{ fontFamily: face.bold, fontSize: 14, fontWeight: '700', color: on ? color.teal : color.porcelain }} numberOfLines={1}>
+                        {on ? `${cap(cutKey)} · on air first` : cap(cutKey)}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={textOnDark.supporting}>
+              Tap a camera to open the show on it. The director takes over from there.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* The shot from this phone, with the thirds over it. Never the
             broadcast picture: there is no broadcast while this is open. */}
         <View style={{ height: 220, borderRadius: radius.cardLg, overflow: 'hidden' }}>
-          {perm?.granted ? (
+          {rehearsal.phase === REHEARSAL_READY && ownRoomCamera ? (
+            <KitFeed camera={ownRoomCamera} />
+          ) : perm?.granted ? (
             <CameraView
               style={{ flex: 1 }}
               facing={CAMERAS.find((c) => c.key === camera)?.facing || 'back'}
@@ -482,3 +570,21 @@ function KitSkeleton() {
     </Screen>
   );
 }
+
+// One camera from the rehearsal room. The guard is the spike's 14 Oct
+// crash: LiveKit's VideoTrack reads publication.track without checking
+// it exists.
+function KitFeed({ camera }) {
+  if (KitVideoTrack && camera?.publication?.track && camera?.participant) {
+    return (
+      <KitVideoTrack
+        trackRef={{ participant: camera.participant, publication: camera.publication, source: 'camera' }}
+        style={{ flex: 1 }}
+        objectFit="cover"
+      />
+    );
+  }
+  return <MediaTile label="Waiting for this camera" style={{ flex: 1 }} />;
+}
+
+const cap = (s) => (s ? `${String(s)[0].toUpperCase()}${String(s).slice(1)}` : '');
