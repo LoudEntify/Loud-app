@@ -440,3 +440,17 @@ the track mixed into the published audio rather than played out of the
 phone's speaker, and nothing in the capturer mixes. Playing it aloud so
 the microphone picks it up is what an artist does on stage anyway, and
 is one screen away; mixing it is a piece of work in the native module.
+
+## 2026-11-02 — The Supabase CLI is pinned, after it broke staging on its own
+
+The staging deploy went red on a merge that touched no SQL:
+"[inbucket] in supabase/config.toml is no longer supported. Use
+[local_smtp] instead." The workflows ran `supabase/setup-cli@v1` with
+`version: latest`, so a CLI release that dropped a config key took the
+deploy down with no change of ours. Renamed the key, and pinned the CLI
+to 3.0.0 in both `staging.yml` and `promote.yml`. The key was the
+symptom; "latest" was the fault. Mid-pilot, a tool that applies
+migrations to production should not change on whatever day a release
+lands — it should be bumped deliberately, with the config checked.
+Rejected: renaming the key and leaving `latest` (the next release does
+this again, possibly during a show week).
