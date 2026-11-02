@@ -29,16 +29,14 @@ import {
 import { api } from '../../src/api';
 import { useSession } from '../../src/session';
 import { API_BASE } from '../../src/config';
+import { RIG_ROLES } from '@loud/lib/rig.js';
 
-// lib/camfeedPairing.js CAMERA_ROLES, labelled as the console labels its
-// cuts (lib/liveCuts.js), so an artist pairing a phone and an artist
-// pressing a button are using one vocabulary. The stored value stays
-// 'wide'; lib/rigCameras.js is where the two names meet.
-const ROLES = [
-  { role: 'wide', label: 'Main', note: 'The one you perform to: the whole stage, from the back.' },
-  { role: 'close', label: 'Close', note: 'Tight on your hands or your face.' },
-  { role: 'side', label: 'Side', note: 'Off to one side of you.' },
-];
+// The jobs a device can hold come from lib/rig.js, which is also what
+// decides the grant each one gets: a camera publishes and sees nothing,
+// a control panel sees everything and publishes no picture. Listing
+// them here again would let the two drift, and the one that matters is
+// the grant.
+const ROLES = RIG_ROLES.map((r) => ({ role: r.role, label: r.label.replace(' camera', ''), note: r.note, publishes: r.publishes }));
 
 /** Minutes left on a code, floored, never below zero. */
 export function minutesLeft(expiresAt, now = Date.now()) {
@@ -119,7 +117,9 @@ export default function PairCamera() {
               <QRCode value={url} size={200} color={color.ink} backgroundColor={color.white} />
             </View>
             <Text style={[text.supporting, { textAlign: 'center' }]}>
-              On the other phone, open Loudentify, tap &quot;Use this phone as a camera&quot; and scan this code.
+              {role === 'director'
+                ? 'On the laptop or tablet that will run the show, open this link and sign in. It sends no picture; it sees yours.'
+                : 'On the other phone, open Loudentify, tap "Use this phone as a camera" and scan this code.'}
             </Text>
             <View style={{ alignItems: 'center', gap: space.xs }}>
               <Text style={[text.supporting, { letterSpacing: 1.3 }]}>OR ENTER THIS CODE</Text>

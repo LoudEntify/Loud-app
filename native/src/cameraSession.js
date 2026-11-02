@@ -54,11 +54,15 @@ export async function readProfile() {
  * 'frameRate', 'published', 'state', 'warning', 'error', 'link'.
  */
 export class CameraSession {
-  constructor({ token, url, room, facing = 'back', frameRate = FRAME_RATE_DEFAULT, flip = 'auto', orientation = 'portrait', frameSource = 'auto', onEvent }) {
+  constructor({ token, url, room, facing = 'back', frameRate = FRAME_RATE_DEFAULT, flip = 'auto', orientation = 'portrait', frameSource = 'auto', withAudio = false, onEvent }) {
     this.token = token; this.url = url; this.roomName = room;
     this.facing = FACINGS.includes(facing) ? facing : 'back';
     this.frameRateWanted = Number.isFinite(Number(frameRate)) && Number(frameRate) > 0 ? Number(frameRate) : FRAME_RATE_DEFAULT;
     this.flip = flip; this.orientation = normaliseOrientation(orientation); this.frameSource = frameSource;
+    // Off by default: a paired camera on a stand across the room adds
+    // room noise and echo to a mix that already has the performer in
+    // it. The phone the artist performs to turns it on.
+    this.withAudio = Boolean(withAudio);
     this.onEvent = onEvent || (() => {});
     this.mirror = mirrorRule(this.facing, this.flip);
     this.room = null; this.track = null; this.publication = null; this.stream = null; this.profile = null; this.capability = null;
@@ -108,6 +112,27 @@ export class CameraSession {
     this.track = track; this.publication = pub;
     this.onEvent('published', { trackSid: pub.trackSid, facing: this.facing, flip: this.mirror.flipBroadcast, sent: info?.sent ?? null, room: this.room.name ?? this.roomName, identity: this.room.localParticipant?.identity ?? null });
 
+    // ── SOUND ──────────────────────────────────────────────────
+    // The capturer is video only and nothing ever enabled the
+    // microphone, so a show would have gone out silent: a music
+    // platform broadcasting a picture of someone playing and no
+    // playing. LiveKit's own microphone track is used rather than
+    // anything in loud-camera, because the capturer owns the camera and
+    // the room already owns audio.
+    //
+    // A failure here never stops the camera. A show with a picture and
+    // no sound is a bad show; a show with neither is no show, and the
+    // degrade order (ARCHITECTURE §1) puts the stream above its parts.
+    if (this.withAudio) {
+      try {
+        await this.room.localParticipant.setMicrophoneEnabled(true);
+        this.onEvent('audio', { on: true });
+      } catch (e) {
+        this.onEvent('warning', `Your microphone is not going out: ${String(e?.message || e)}`);
+        this.onEvent('audio', { on: false, error: String(e?.message || e) });
+      }
+    }
+
     await this.applyOrientation().catch((e) => this.onEvent('warning', `Orientation: ${String(e?.message || e)}`));
     this.stateSub = LoudCamera.addStateListener((s) => { this.lastState = s; this.onEvent('state', s); });
     return { trackSid: pub.trackSid };
@@ -141,6 +166,7 @@ export class CameraSession {
 
   async stop() {
     try { this.stateSub?.remove?.(); } catch { /* closing */ }
+    try { if (this.withAudio) await this.room?.localParticipant?.setMicrophoneEnabled(false); } catch { /* closing */ }
     try { if (this.track) { await this.room?.localParticipant?.unpublishTrack(this.track); this.track.stop(); } } catch { /* closing */ }
     try { await LoudCamera.stop(); } catch { /* closing */ }
     try { await this.room?.disconnect(); } catch { /* closing */ }

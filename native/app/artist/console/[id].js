@@ -279,6 +279,14 @@ export default function Console() {
           MediaTile, and the artist's phone never joined the room at all,
           so a solo artist's show had no camera in it and nothing to
           compose. */}
+      {/* A show with a picture and no sound is a bad show, and the
+          artist should hear about it while they can still fix it. */}
+      {ownCamera.phase === OWN_CAMERA_LIVE && !ownCamera.audio ? (
+        <View style={{ position: 'absolute', right: space.m, top: 236, width: 96, paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8, backgroundColor: color.red }}>
+          <Text style={{ fontFamily: face.bold, fontSize: 11, fontWeight: '700', color: color.white, textAlign: 'center' }}>NO SOUND</Text>
+        </View>
+      ) : null}
+
       <OwnCameraView
         camera={ownCamera}
         label="You"

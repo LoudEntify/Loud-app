@@ -21,10 +21,11 @@ import {
 } from '../../src/ui';
 import { NotStored } from '../../src/settings';
 import { api } from '../../src/api';
+import { describeRig, rigSummary } from '@loud/lib/rig.js';
+import { isLivePairing } from '@loud/lib/pairingLiveness.js';
 import { useSession } from '../../src/session';
 import { available as capturerAvailable } from '../../modules/loud-camera';
 
-const ROLE_LABEL = { wide: 'Wide', close: 'Close', side: 'Side' };
 
 export default function DevicesSettings() {
   const { accessToken, loading } = useSession();
@@ -57,6 +58,9 @@ export default function DevicesSettings() {
   if (phase === 'loading') return <DevicesSkeleton />;
 
   const paired = rig?.pairings || [];
+  // One description of the rig, shared with Kit Check, so the two
+  // screens cannot disagree about which device holds which job.
+  const devices = describeRig({ pairings: paired, ownLive: capturerAvailable, isLive: isLivePairing });
 
   return (
     <Screen>
@@ -76,17 +80,44 @@ export default function DevicesSettings() {
 
           {actionError ? <ErrorPanel title="That did not work" body={actionError} onRetry={load} /> : null}
 
-          <Section title="Paired cameras">
-            {/* The phone in your hand is always the main camera and is
-                never a pairing row, so it is stated rather than listed.
-                Whether it is ready is the capturer's answer, not ours. */}
-            <Row
-              icon={<Icon.Camera size={22} color={color.ink} />}
-              title={'Main · this phone'}
-              subtitle={capturerAvailable
-                ? 'Checked when a show starts, not from here.'
-                : 'This build has no camera module, so this phone cannot be the main camera.'}
-            />
+          <Section title="Your rig">
+            {/* The saved set-up: this phone and every device paired to
+                it, each with the job it holds. Kit Check shows the same
+                rig per show and wins there; this is what it starts
+                from. The phone in your hand has no pairing row — there
+                is nothing to pair, it is the handset running the app —
+                so lib/rig.js describes it rather than the database. */}
+            {devices.map((d) => (
+              <Row
+                key={d.id}
+                icon={d.publishes
+                  ? <Icon.Camera size={22} color={color.ink} />
+                  : <Icon.Wrench size={22} color={color.ink} />}
+                title={d.own ? d.label : `${d.label}${d.status === 'waiting' ? ' · waiting' : ''}`}
+                subtitle={d.own
+                  ? (capturerAvailable
+                    ? 'Checked when a show starts, not from here.'
+                    : 'This build has no camera module, so this phone cannot be a camera.')
+                  : statusLine(paired.find((p) => p.id === d.id) || {})}
+                right={d.own ? null : (
+                  <Button
+                    kind="quiet"
+                    size="small"
+                    busy={busyId === d.id}
+                    onPress={() => revoke({ id: d.id })}
+                    accessibilityLabel={`Remove ${d.label}`}
+                  >
+                    Remove
+                  </Button>
+                )}
+              />
+            ))}
+
+            <Text style={[text.supporting, { paddingHorizontal: 4 }]}>
+              {rigSummary(devices)} This is your saved set-up; Kit Check shows
+              it again before each show and anything you change there counts
+              for that show only.
+            </Text>
 
             {rig?.degraded ? (
               <NotStored testID="devices-degraded">
@@ -106,28 +137,9 @@ export default function DevicesSettings() {
               />
             ) : null}
 
-            {paired.map((p) => (
-              <Row
-                key={p.id}
-                icon={<Icon.Camera size={22} color={color.ink} />}
-                title={`${ROLE_LABEL[p.role] || cap(p.slot) || 'Camera'}${p.live ? '' : ' · waiting'}`}
-                subtitle={statusLine(p)}
-                right={(
-                  <Button
-                    kind="quiet"
-                    size="small"
-                    busy={busyId === p.id}
-                    onPress={() => revoke(p)}
-                    accessibilityLabel={`Remove ${ROLE_LABEL[p.role] || 'camera'}`}
-                  >
-                    Remove
-                  </Button>
-                )}
-              />
-            ))}
           </Section>
 
-          <Section title="Add a camera">
+          <Section title="Add a device">
             <Row
               icon={<Icon.Expand size={22} color={color.ink} />}
               title="Show the pairing code"
@@ -139,8 +151,8 @@ export default function DevicesSettings() {
           <Section title="Operator">
             <Row
               icon={<Icon.Person size={22} color={color.ink} />}
-              title="No operator yet"
-              subtitle="A second person who runs your show from a laptop"
+              title={devices.some((d) => d.role === 'director') ? 'Control panel paired' : 'No control panel yet'}
+              subtitle="A second person who runs your show from a laptop. Pair it above as Control panel."
             />
             <NotStored testID="devices-no-invite">
               Inviting an operator is on the website. There is no invite screen
@@ -163,7 +175,6 @@ export default function DevicesSettings() {
   );
 }
 
-const cap = (s) => (s ? `${String(s)[0].toUpperCase()}${String(s).slice(1)}` : '');
 
 /**
  * The board's two states, in its own words. A pairing that has never
