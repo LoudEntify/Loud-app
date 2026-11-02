@@ -37,6 +37,8 @@ import {
   color, space, radius, surface, textOnDark, face, size,
 } from '../../src/ui';
 import { api } from '../../src/api';
+import { describeRig, rigSummary, rigReady } from '@loud/lib/rig.js';
+import { isLivePairing } from '@loud/lib/pairingLiveness.js';
 import { API_BASE } from '../../src/config';
 import { supabase, useSession } from '../../src/session';
 
@@ -77,6 +79,13 @@ export default function KitCheck() {
   const { show: showParam } = useLocalSearchParams();
   const { session, profile, loading, accessToken } = useSession();
   const [perm, requestPerm] = useCameraPermissions();
+  // The saved rig, read once when this screen opens. Korey's ruling
+  // (2 Nov): Settings holds the arrangement, Kit Check shows it per
+  // show and wins there. An artist who has already set up should see
+  // that every device is working and a way in to change it — not the
+  // whole arrangement again, which is the thing that made the old
+  // Kit Check feel like filling in a form before every gig.
+  const [rig, setRig] = useState(null);
   const [camera, setCamera] = useState('camera_main');
   const [show, setShow] = useState(undefined);        // undefined while reading, null when there is none
   const [place, setPlace] = useState(null);
@@ -122,6 +131,17 @@ export default function KitCheck() {
   // Camera permission, asked for once: without it there is no preview and
   // no camera check, and the screen says so rather than showing black.
   useEffect(() => { if (perm && !perm.granted && perm.canAskAgain) requestPerm(); }, [perm, requestPerm]);
+
+  // Read the rig when this opens. A failure leaves `rig` null and the
+  // section says it could not read it, rather than drawing an empty
+  // arrangement that an artist would read as "nothing is paired".
+  useEffect(() => {
+    let alive = true;
+    if (!accessToken) return undefined;
+    api('/api/camfeed/pair', { method: 'POST', accessToken, body: { action: 'list' } })
+      .then((r) => { if (alive) setRig(r.ok ? { pairings: r.data?.pairings || [], failed: false } : { pairings: [], failed: true }); });
+    return () => { alive = false; };
+  }, [accessToken]);
 
   // The hold: the chosen preview has to stay up, and in front, for two
   // minutes. Leaving the app resets that camera's clock, because frames
@@ -227,6 +247,14 @@ export default function KitCheck() {
     return `Stay here and you go live on your own at ${hhmm(slated)}.`;
   }, [show, slated]);
 
+  // One description of the rig, shared with Settings → Devices, so the
+  // two screens cannot disagree about which device holds which job.
+  const rigDevices = describeRig({
+    pairings: rig?.pairings || [],
+    ownLive: Boolean(perm?.granted),
+    isLive: isLivePairing,
+  });
+
   if (loading) return <KitSkeleton />;
 
   if (profile && profile.role !== 'artist') {
@@ -274,6 +302,46 @@ export default function KitCheck() {
         </View>
 
         {offline ? <OfflineBar testID="kit-offline" /> : null}
+
+        {/* ── Your rig ─────────────────────────────────────────────
+            Settings holds the arrangement; this shows it per show and
+            takes precedence here. An artist who has set up sees that
+            each device is working and a button to change it — only an
+            artist who wants to change something sees the whole
+            arrangement, which is the point of having two routes. */}
+        <View style={{ gap: space.s, padding: space.m, borderRadius: radius.cardLg, backgroundColor: surface.quietDark }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <Text style={[textOnDark.rowTitle, { flex: 1 }]}>Your rig</Text>
+            <Button kind="quietDark" size="small" onPress={() => router.push('/settings/pair')} testID="kit-rig-edit">
+              {rigDevices.length > 1 ? 'Edit' : 'Add a camera'}
+            </Button>
+          </View>
+          {rig?.failed ? (
+            <Text style={[textOnDark.supporting, { color: color.orange }]}>
+              We could not read your rig. Your cameras may still be fine; Settings → Devices will say.
+            </Text>
+          ) : (
+            <>
+              <Text style={textOnDark.supporting}>{rigSummary(rigDevices)}</Text>
+              <View style={{ gap: 6 }}>
+                {rigDevices.map((d) => (
+                  <View key={d.id} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }} testID={`kit-rig-${d.role}`}>
+                    <StatusDot status={d.status === 'ready' ? 'ready' : d.status === 'waiting' ? 'checking' : 'fix'} size={20} />
+                    <Text style={[textOnDark.body, { flex: 1 }]} numberOfLines={1}>{d.label}</Text>
+                    <Text style={textOnDark.supporting}>
+                      {d.status === 'ready' ? 'Ready' : d.status === 'waiting' ? 'Waiting to be scanned' : 'Not sending'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              {!rigReady(rigDevices) ? (
+                <Text style={[textOnDark.supporting, { color: color.orange }]}>
+                  No camera is sending yet. A show needs at least one.
+                </Text>
+              ) : null}
+            </>
+          )}
+        </View>
 
         {/* The artist's own camera with the thirds over it. Never the
             broadcast picture: there is no broadcast while this is open. */}
