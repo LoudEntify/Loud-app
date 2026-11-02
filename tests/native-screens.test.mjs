@@ -382,3 +382,67 @@ test("the artist's own phone is a camera in their own show", () => {
   assert.match(view, /pub\?\.track/, 'nothing renders before the publication and its track exist');
   assert.match(view, /OWN_CAMERA_FAILED/, 'and a camera that is not sending says so rather than showing a black box');
 });
+test('there are two routes to the rig, and they describe it the same way', () => {
+  // Korey's ruling (2 Nov): Settings holds the saved arrangement, Kit
+  // Check shows it per show and takes precedence there. An artist who
+  // has already set up sees indicators and a way in to change it, not
+  // the whole arrangement again before every gig.
+  const settings = readFileSync(resolve(ROOT, 'native/app/settings/devices.js'), 'utf8');
+  const kit = readFileSync(resolve(ROOT, 'native/app/artist/kit-check.js'), 'utf8');
+  for (const [src, where] of [[settings, 'Settings'], [kit, 'Kit Check']]) {
+    assert.match(src, /describeRig\(/, `${where} describes the rig from lib/rig.js`);
+    assert.match(src, /isLivePairing/, `${where} uses the one definition of a live device`);
+  }
+  assert.match(settings, /Your rig/, 'Settings is where the arrangement lives');
+  assert.match(kit, /kit-rig-edit/, 'and Kit Check has the way in to change it');
+  assert.match(kit, /rigSummary\(/, 'showing the state of the rig rather than the rig');
+  // Neither screen may keep its own idea of what the roles are.
+  assert.ok(!/ROLE_LABEL = \{/.test(settings), 'no second table of role names in Settings');
+  const pair = readFileSync(resolve(ROOT, 'native/app/settings/pair.js'), 'utf8');
+  assert.match(pair, /RIG_ROLES\.map/, 'and the pairing screen offers the roles the model defines');
+});
+
+test('a control panel is paired like a camera and granted nothing like one', () => {
+  // One grant served both jobs. Giving a director the data channel it
+  // needs would have meant giving every camera on a stand the same.
+  const pairing = readFileSync(resolve(ROOT, 'lib/camfeedPairing.js'), 'utf8');
+  assert.match(pairing, /roleGrants\(role\)/, 'the grant is decided by the job');
+  assert.match(pairing, /CAMERA_ROLES = RIG_ROLE_NAMES/, 'and the roles the route accepts come from the model');
+  const pair = readFileSync(resolve(ROOT, 'native/app/settings/pair.js'), 'utf8');
+  assert.match(pair, /It sends no picture; it sees yours/, 'the screen says what a control panel does');
+});
+
+test('an artist can put a clip or a track in their library from the phone', () => {
+  // Studio Library listed and deleted and could not upload: picking a
+  // file needed a document picker the build did not carry, so every
+  // clip and backing track had to come from a laptop, and an artist
+  // standing in a venue could not add one.
+  const up = readFileSync(resolve(ROOT, 'native/src/upload.js'), 'utf8');
+  assert.match(up, /upload-url/, 'it asks the server where to put the file');
+  assert.match(up, /\/register/, 'and registers it afterwards');
+  assert.match(up, /XMLHttpRequest/, 'with XHR, because fetch has no upload progress');
+  assert.match(up, /xhr\.timeout/, 'and a timeout, so a dead transfer is a stated failure rather than a spinner');
+  assert.ok(!/fetch\(/.test(up), 'the big transfer never goes through our own server');
+
+  const studio = readFileSync(resolve(ROOT, 'native/app/settings/studio.js'), 'utf8');
+  assert.match(studio, /studio-upload-/, 'the board\'s Upload button is drawn now');
+  assert.match(studio, /startUpload\('track'\)|startUpload\(tab === 'tracks' \? 'track' : 'broll'\)/, 'for both tracks and B-roll');
+  assert.ok(!/Uploading from the phone is not in this build/.test(studio), 'and the line saying it could not is gone');
+});
+
+test('the performing phone sends sound, and says so when it cannot', () => {
+  // The capturer is video only and nothing ever enabled the microphone,
+  // so a show would have gone out silent: a music platform broadcasting
+  // a picture of someone playing and no playing.
+  const cam = readFileSync(resolve(ROOT, 'native/src/cameraSession.js'), 'utf8');
+  assert.match(cam, /setMicrophoneEnabled\(true\)/, 'the microphone is published');
+  assert.match(cam, /this\.withAudio = Boolean\(withAudio\)/, 'and only by the phone told to carry the sound');
+  assert.match(cam, /withAudio = false/, 'a paired camera on a stand is silent by default: room noise and echo');
+  // A failure must never take the camera down with it.
+  assert.match(cam, /Your microphone is not going out/, 'a mic that fails is a warning, not the end of the show');
+
+  const own = readFileSync(resolve(ROOT, 'native/src/ownCamera.js'), 'utf8');
+  assert.match(own, /withAudio: true/, "the artist's own phone carries the sound");
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(console_, /NO SOUND/, 'and the console says so while the artist can still fix it');
+});

@@ -24,6 +24,7 @@ import {
   color, space, radius, surface, text, useLoadingPhase,
 } from '../../src/ui';
 import { NotStored } from '../../src/settings';
+import { pickFile, uploadFile } from '../../src/upload';
 import { api } from '../../src/api';
 import { supabase, useSession, AUTH_CONFIGURED } from '../../src/session';
 import { MAX_TOTAL_BYTES, megabytes } from '@loud/lib/mediaQuota.js';
@@ -44,6 +45,9 @@ export default function StudioLibrary() {
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [options, setOptions] = useState(null);     // the item whose sheet is open
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [uploadError, setUploadError] = useState(null);
   const phase = useLoadingPhase(lib === null && !failed);
 
   const load = useCallback(async () => {
@@ -77,6 +81,22 @@ export default function StudioLibrary() {
   useEffect(() => { if (!loading) load(); }, [loading, load]);
 
   /** Delete one item. Each kind has its own route; all four are owner-scoped. */
+  // Pick, upload, register — src/upload.js, the same three steps and
+  // the same routes the website uses. The list is re-read afterwards
+  // rather than having the new row pushed in by hand: the server knows
+  // the duration, the real size and the quota, and guessing any of them
+  // here would be a second answer that could disagree.
+  async function startUpload(kind) {
+    setUploadError(null);
+    const file = await pickFile(kind).catch((e) => { setUploadError(String(e?.message || e)); return null; });
+    if (!file) return;
+    setUploading(true); setProgress(0);
+    const r = await uploadFile({ kind, file, accessToken, onProgress: setProgress });
+    setUploading(false); setProgress(0);
+    if (!r.ok) { setUploadError(r.error); return; }
+    await load();
+  }
+
   async function remove(item) {
     setOptions(null);
     setBusyId(item.id);
@@ -153,11 +173,39 @@ export default function StudioLibrary() {
             <Text style={text.supporting}>Up to 100 MB per video. Sound is muted when you upload.</Text>
           </Card>
 
-          <NotStored testID="studio-no-upload">
-            Uploading from the phone is not in this build: it needs a file
-            picker the app does not carry yet. Add tracks and B-roll on
-            loudentify.app, and they appear here.
-          </NotStored>
+          {/* The board draws "Upload B-roll" here. It was not drawn
+              because picking a file needed a document picker the build
+              did not carry, so an artist standing in a venue could not
+              add a clip or a track without going to a laptop. The same
+              three steps the website uses (src/upload.js), through the
+              same routes, so there is one storage layout and one set of
+              quota rules. */}
+          {tab === 'tracks' || tab === 'broll' ? (
+            <View style={{ gap: space.s }}>
+              <Button
+                kind="main"
+                busy={uploading}
+                onPress={() => startUpload(tab === 'tracks' ? 'track' : 'broll')}
+                testID={`studio-upload-${tab}`}
+              >
+                {uploading
+                  ? `Uploading ${Math.round(progress * 100)}%`
+                  : tab === 'tracks' ? 'Upload a backing track' : 'Upload B-roll'}
+              </Button>
+              {uploading ? (
+                <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(1,22,39,0.12)', overflow: 'hidden' }}>
+                  <View style={{ width: `${Math.round(progress * 100)}%`, height: '100%', borderRadius: 4, backgroundColor: color.teal }} />
+                </View>
+              ) : null}
+              {uploadError ? (
+                <ErrorPanel title="That upload did not finish" body={uploadError} onRetry={() => setUploadError(null)} retryLabel="Dismiss" />
+              ) : null}
+            </View>
+          ) : (
+            <NotStored testID="studio-no-upload">
+              Set lists and cue sheets are built on loudentify.app and appear here.
+            </NotStored>
+          )}
 
           {tab === 'tracks' ? (
             <ItemList

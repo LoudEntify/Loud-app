@@ -369,3 +369,74 @@ know whether this handset is up. Rejected: publishing from Kit Check too
 belongs with the pairing-routes work), and minting the token on the
 device from a camfeed pairing (a second grant path for the one
 participant whose authority is already their account).
+## 2026-11-02 — Two routes to one rig: Settings saves it, Kit Check wins per show
+
+Korey's ruling. Settings holds the arrangement — which device is the main
+camera, which is the control panel for a human director, what the rest
+are — and it persists until edited. Kit Check shows the same rig before
+each show and takes precedence there: an artist who has set up sees an
+indicator per device and an Edit button, and only an artist who wants to
+change something sees the whole arrangement.
+
+`lib/rig.js` is the one description, used by both screens so they cannot
+disagree. The artist's own handset is a device in it with no pairing row
+(there is nothing to pair; it is the phone running the app) and holds
+`wide`/Main unless a paired phone already does, because a second camera
+at the same angle is not a second angle. An unscanned code reads as
+"waiting", never "offline" — saying a phone nobody has picked up has gone
+offline sends an artist looking for a fault that does not exist.
+
+`director` joins the stored roles. `roleGrants` decides what each job may
+do: a camera publishes video and subscribes to nothing, because it sits on
+a stand; a control panel subscribes to everything and publishes data and
+no picture, because a laptop on a table is not a camera angle. Before
+this, one grant served both, so giving a director the data channel would
+have meant giving every camera the same. `CAMERA_ROLES` is now derived
+from the model rather than typed a second time.
+
+Rejected: a migration for the saved rig (the live `camfeed_pairings` rows
+already are the saved rig, and `role` has no CHECK, so `director` needed
+no schema change), renaming the stored `wide` to `main` to match the cut
+(a migration and three call sites for a word, when the screens can simply
+say "Main"), and building a control-panel screen on the phone (the
+director console is `components/DirectorShotPanel.jsx` on the web; a
+paired control panel is told to open it there rather than given a stub).
+
+## 2026-11-02 — Uploads from the phone, and the show gets a soundtrack
+
+Two things from Korey's list, and the second was not on it.
+
+UPLOADS. Studio Library listed and deleted and could not upload, because
+picking a file needed a document picker the build did not carry — so
+every clip and backing track had to come from a laptop, and an artist
+standing in a venue could not add one. `native/src/upload.js` does the
+same three steps `lib/brollUpload.js` does on the web, through the same
+routes: signed URL, PUT straight to storage, register. The big transfer
+never touches our server, which is why the web does it this way, and
+copying the shape means one storage layout and one set of quota rules.
+XHR rather than fetch, for the same reason the web gives: fetch has no
+upload progress, and in React Native XHR is also the only way to send a
+content:// URI without reading the file into memory.
+
+SOUND. Found while looking for cue tracks: the capturer is video only
+and nothing ever called `setMicrophoneEnabled`, so a show would have
+gone out silent. A music platform broadcasting a picture of someone
+playing and no playing is not a show. The artist's own phone now carries
+the audio; a paired camera on a stand does not, because its microphone
+would add room noise and echo to a mix that already has the performer in
+it. A microphone that fails is a warning rather than the end of the
+camera, per the degrade order, and the console shows NO SOUND while the
+artist can still do something about it.
+
+Rejected: `expo-av` for the upload (it is for playback, and deprecated),
+pushing the new row into the list by hand after a register (the server
+knows the duration, the real size and the quota, and guessing any of
+them here would be a second answer that could disagree), and publishing
+audio from every paired camera (echo, and three microphones in one room
+is a worse mix than one).
+
+STILL NOT BUILT: a cue track that plays into the broadcast. That needs
+the track mixed into the published audio rather than played out of the
+phone's speaker, and nothing in the capturer mixes. Playing it aloud so
+the microphone picks it up is what an artist does on stage anyway, and
+is one screen away; mixing it is a piece of work in the native module.

@@ -53,6 +53,10 @@ export function useOwnCamera({ showId, accessToken, enabled = true, facing = 'ba
   const [error, setError] = useState(null);
   const [track, setTrack] = useState(null);
   const [status, setStatus] = useState(null);
+  // Whether the microphone is going out. A show with a picture and no
+  // sound is a bad show, and the artist should be told rather than find
+  // out afterwards.
+  const [audio, setAudio] = useState(false);
   const session = useRef(null);
   // Guards a second start while the first is still connecting. Two
   // CameraSessions against one native camera is the black-preview bug.
@@ -62,7 +66,7 @@ export function useOwnCamera({ showId, accessToken, enabled = true, facing = 'ba
     starting.current = false;
     const s = session.current;
     session.current = null;
-    setTrack(null); setStatus(null); setPhase(OWN_CAMERA_IDLE);
+    setTrack(null); setStatus(null); setAudio(false); setPhase(OWN_CAMERA_IDLE);
     if (s) await s.stop().catch(() => {});
   }, []);
 
@@ -88,9 +92,14 @@ export function useOwnCamera({ showId, accessToken, enabled = true, facing = 'ba
       room: join.data.roomName,
       facing,
       orientation,
+      // The artist's own phone carries the sound. A paired camera on a
+      // stand does not: its microphone would add room noise and echo to
+      // a mix that already has the performer in it.
+      withAudio: true,
       onEvent: (kind, payload) => {
         if (kind === 'published') { setTrack(payload?.trackSid || true); setPhase(OWN_CAMERA_LIVE); }
         if (kind === 'state') setStatus(cam.status());
+        if (kind === 'audio') setAudio(Boolean(payload?.on));
         // A warning is the camera telling the artist something about the
         // shot — the phone on its side, a frame rate it could not hold —
         // and it must not read as a failure, because the camera is running.
@@ -128,5 +137,5 @@ export function useOwnCamera({ showId, accessToken, enabled = true, facing = 'ba
     return () => sub.remove();
   }, [enabled, start]);
 
-  return { phase, error, session: session.current, track, status, start, stop, retry: () => { stop().then(start); } };
+  return { phase, error, session: session.current, track, status, audio, start, stop, retry: () => { stop().then(start); } };
 }
