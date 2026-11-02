@@ -14,12 +14,12 @@
 // Everything it calls is the API the web console calls, so the two cannot
 // drift: /console on open, /tick while live, /go-live, /end, /look.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, AppState } from 'react-native';
+import { View, Text, Pressable, ScrollView, AppState, TextInput } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import {
-  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, Icon,
+  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, LiveNotice, Icon,
   color, space, radius, surface, textOnDark, text, face, gradient,
 } from '../../../src/ui';
 import { api } from '../../../src/api';
@@ -29,6 +29,10 @@ import { showOrientation } from '@loud/lib/orientation.js';
 import { CUTS, cutAvailability, resolveCut, onAirLabel, directorLabel, DEFAULT_CUT } from '@loud/lib/liveCuts.js';
 
 const TICK_MS = 4000;
+// app/api/viewer/comments/route.js truncates at 500; stopping the field
+// there means the artist never loses the end of a sentence they typed.
+const COMMENT_MAX = 500;
+
 const HOLD_MS = 1500;
 const clock = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -42,6 +46,8 @@ export default function Console() {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(null);
   const [comments, setComments] = useState([]);
+  const [comment, setComment] = useState('');
+  const [sending, setSending] = useState(false);
   const [hideComments, setHideComments] = useState(false);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(null);      // 'live' | 'end' | 'look'
@@ -146,6 +152,25 @@ export default function Console() {
     setBusy(null);
     if (r.ok) setData((d) => ({ ...d, show: { ...d.show, look: r.data.look } }));
     else setErr('We could not change the look. Your show is not affected.');
+  }
+
+  // The artist posting into their own show. Failures land in the same
+  // notice as everything else rather than a silent no-op, because a
+  // comment that does not appear looks like the audience ignoring you.
+  async function sendComment() {
+    const body = comment.trim();
+    if (!body || sending) return;
+    setSending(true);
+    const r = await api('/api/viewer/comments', { method: 'POST', accessToken, body: { showId: id, body } });
+    setSending(false);
+    if (!r.ok) { setErr(r.data?.error || 'We could not send that comment.'); return; }
+    setComment('');
+    // Show it at once rather than waiting for the next poll: the artist
+    // typed it, so the slowest thing on screen should not be their own
+    // words coming back.
+    if (r.data?.comment) {
+      setComments((prev) => (prev.some((c) => c.id === r.data.comment.id) ? prev : [...prev, r.data.comment].slice(-40)));
+    }
   }
 
   async function pushPrompt() {
@@ -254,6 +279,29 @@ export default function Console() {
             ))}
             {!comments.length ? <Text style={{ fontFamily: face.regular, fontSize: 16, color: 'rgba(253,255,252,0.6)' }}>No comments yet.</Text> : null}
           </ScrollView>
+          {/* The artist could read the room and not answer it. The board
+              draws comments as a feed, which is what a viewer's screen
+              is; an artist's is a conversation, and half of one is worse
+              than none — somebody asks a question in front of an
+              audience and the person it is addressed to has no way to
+              reply. Same route the viewer posts through, so one comment
+              store and one set of hidden-word rules. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s }}>
+            <TextInput
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Say something"
+              placeholderTextColor="rgba(253,255,252,0.5)"
+              maxLength={COMMENT_MAX}
+              returnKeyType="send"
+              onSubmitEditing={sendComment}
+              blurOnSubmit={false}
+              accessibilityLabel="Say something to your audience"
+              testID="console-comment"
+              style={{ flex: 1, height: 40, paddingHorizontal: space.m, borderRadius: 20, backgroundColor: 'rgba(1,22,39,0.6)', color: color.porcelain, fontFamily: face.regular, fontSize: 16 }}
+            />
+            <Button kind="quietDark" size="small" busy={sending} onPress={sendComment} testID="console-comment-send">Send</Button>
+          </View>
         </View>
       ) : (
         <View style={{ position: 'absolute', left: space.l, bottom: 216 }}>
@@ -302,11 +350,11 @@ export default function Console() {
         )}
       </View>
 
-      {err ? (
-        <View style={{ position: 'absolute', left: space.l, right: space.l, bottom: 100 }}>
-          <ErrorPanel title="That did not work" body={err} onRetry={() => setErr(null)} retryLabel="Dismiss" />
-        </View>
-      ) : null}
+      {/* Covers the actions and the Go live button rather than printing
+          over them, and blocks the taps aimed at them while it is up.
+          240 reaches from the bottom of the screen to just under the
+          comments, which is everything this message sits on top of. */}
+      <LiveNotice message={err} onDismiss={() => setErr(null)} cover={240} testID="console-notice" />
 
       {/* ── The Cuts sheet ───────────────────────────────────────────── */}
       {sheet === 'cuts' ? (

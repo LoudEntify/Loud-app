@@ -71,7 +71,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#011627"
-      }
+      },
+      "softwareKeyboardLayoutMode": "resize"
     },
     "plugins": [
       "expo-router",

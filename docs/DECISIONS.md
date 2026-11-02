@@ -311,3 +311,33 @@ the mark to match the old 17 and 19 point type (it would sit below the
 floor and the arc would read as a smudge), and leaving the sheet headers
 as type because the boards draw them that way (the boards predate the
 artwork, and Korey has now ruled).
+
+## 2026-11-02 — Keyboard, artist comments, and messages that cover what they sit on
+
+Three faults from Korey's device test, fixed together because each is
+small and all three are in the way of testing anything else.
+
+1. Every screen with a field used `behavior={ios ? 'padding' : undefined}`,
+   and undefined means `KeyboardAvoidingView` does nothing: on Android the
+   keyboard opened over the login form. One shared `KEYBOARD_BEHAVIOR`
+   ('padding' on iOS, 'height' on Android) across all five screens, with
+   `android.softwareKeyboardLayoutMode` pinned to "resize", since 'height'
+   only works while the window resizes and "pan" would shift it twice.
+2. The console read comments and offered no way to reply. Added a field
+   and Send posting through `/api/viewer/comments`, the same route a
+   viewer uses, so there is one comment store and one set of hidden-word
+   rules. The sent comment is shown at once rather than waiting for the
+   next poll.
+3. Errors on the console used `ErrorPanel`, whose surface is 12% red —
+   right on an opaque card, wrong over the four actions and Go live,
+   where words and buttons printed over each other and the buttons stayed
+   pressable through the message. `LiveNotice` is opaque, covers the whole
+   lower region rather than its own text box, swallows touches, and fades
+   both ways. It waits for a dismiss: nothing on a live screen times out
+   on its own, because a message that vanishes while the artist is
+   looking at their hands was never delivered.
+
+Rejected: giving `ErrorPanel` an opaque variant (it is the right thing on
+every settings screen, and a flag would let the wrong one be picked on the
+one screen where it matters), and auto-dismissing the notice after a few
+seconds (see above).

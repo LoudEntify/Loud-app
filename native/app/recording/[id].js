@@ -22,11 +22,11 @@
 // controls, so the board's own transport is left off rather than drawn
 // twice.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, Linking, Share as RNShare, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Linking, Share as RNShare, useWindowDimensions, KeyboardAvoidingView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   Screen, Card, MediaTile, Badge, Button, Field, IconButton, Empty, ErrorPanel, Skeleton, Icon,
-  color, space, radius, playerFrame, textOnDark, face, useLoadingPhase,
+  color, space, radius, playerFrame, textOnDark, face, useLoadingPhase, KEYBOARD_BEHAVIOR, KEYBOARD_OFFSET,
 } from '../../src/ui';
 import { Player } from '../../src/player/PlayerSource';
 import { api } from '../../src/api';
@@ -166,7 +166,7 @@ export default function Recording() {
 
   return (
     <Screen dark>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} keyboardVerticalOffset={KEYBOARD_OFFSET} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: space.screenEdge, paddingTop: 52, paddingBottom: 28, gap: space.m }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s }}>
             <IconButton label="Back" dark onPress={() => router.back()}><Icon.Back size={22} color={color.porcelain} /></IconButton>

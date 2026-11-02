@@ -312,3 +312,47 @@ test('the console is told which cameras are paired', () => {
   const screen = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
   assert.match(screen, /data\?\.cameras \?\? \{ main/, 'an unreadable rig still leaves Main working, rather than refusing every cut');
 });
+
+test('a keyboard never covers the field being typed into', () => {
+  // Every screen with a field used behavior={ios ? 'padding' : undefined},
+  // and undefined means KeyboardAvoidingView does nothing. On Android the
+  // keyboard opened straight over the login form: an artist typing a
+  // password could not see the field.
+  const SCREENS = ['native/app/login.js', 'native/app/signup.js', 'native/app/forgot-password.js', 'native/app/show/[id].js', 'native/app/recording/[id].js'];
+  for (const f of SCREENS) {
+    const src = readFileSync(resolve(ROOT, f), 'utf8');
+    assert.match(src, /behavior=\{KEYBOARD_BEHAVIOR\}/, `${f} uses the shared behaviour`);
+    assert.ok(!/'ios' \? 'padding' : undefined/.test(src), `${f} no longer does nothing on Android`);
+  }
+  const kit = readFileSync(resolve(ROOT, 'native/src/ui/keyboard.js'), 'utf8');
+  assert.match(kit, /Platform\.OS === 'ios' \? 'padding' : 'height'/, "and 'height' is the Android answer");
+  // 'height' only works while the window itself resizes, so the mode is
+  // pinned rather than left to a default that could change under us.
+  const app = JSON.parse(readFileSync(resolve(ROOT, 'native/app.json'), 'utf8')).expo;
+  assert.equal(app.android.softwareKeyboardLayoutMode, 'resize');
+});
+
+test('an artist can answer their own audience', () => {
+  // The console polled comments and drew them, and offered no way to
+  // reply: somebody asks a question in front of an audience and the
+  // person it is addressed to has no field to type into.
+  const src = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(src, /<TextInput/, 'there is somewhere to type');
+  assert.match(src, /'\/api\/viewer\/comments', \{ method: 'POST'/, 'and it posts through the same route a viewer uses');
+  assert.match(src, /console-comment-send/, 'with a Send the thumb can reach');
+});
+
+test('a message on the live screen covers what it sits on', () => {
+  // The console drew errors with ErrorPanel, whose surface is twelve per
+  // cent of a red: over the four actions and the Go live button, words
+  // and buttons printed on top of each other, and the buttons underneath
+  // stayed pressable through the sentence saying something had failed.
+  const notice = readFileSync(resolve(ROOT, 'native/src/ui/LiveNotice.js'), 'utf8');
+  assert.match(notice, /backgroundColor: color\.ink/, 'the panel is opaque');
+  assert.match(notice, /pointerEvents=\{shown \? 'auto' : 'none'\}/, 'and swallows the taps aimed at what is under it');
+  assert.match(notice, /Animated\.timing/, 'fading rather than blinking into existence over a live show');
+  assert.ok(!/setTimeout/.test(notice), 'and it waits for a dismiss: nothing on a live screen times out on its own');
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(console_, /<LiveNotice message=\{err\}/, 'the console uses it');
+  assert.ok(!/<ErrorPanel title="That did not work"/.test(console_), 'in place of the translucent panel');
+});

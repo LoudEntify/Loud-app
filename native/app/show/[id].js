@@ -17,11 +17,11 @@
 //   Report    goes to site_messages via /api/site/contact with topic
 //             'report' — a real place a human reads, rather than nowhere
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, useWindowDimensions, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, useWindowDimensions, KeyboardAvoidingView } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import {
   Screen, Sheet, Button, Badge, ErrorPanel, Skeleton, Icon,
-  color, space, radius, surface, playerFrame, text, textOnDark, face, useLoadingPhase,
+  color, space, radius, surface, playerFrame, text, textOnDark, face, useLoadingPhase, KEYBOARD_BEHAVIOR, KEYBOARD_OFFSET,
 } from '../../src/ui';
 import { api } from '../../src/api';
 import { supabase, useSession } from '../../src/session';
@@ -134,7 +134,7 @@ export default function Show() {
 
   return (
     <Screen dark>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} keyboardVerticalOffset={KEYBOARD_OFFSET} style={{ flex: 1 }}>
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingTop: 52, paddingHorizontal: space.m }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Leave show" onPress={() => router.back()} style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(1,22,39,0.5)' }}>
