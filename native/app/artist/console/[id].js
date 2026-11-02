@@ -19,11 +19,12 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import {
-  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, LiveNotice, Icon,
+  Screen, MediaTile, Sheet, Button, Badge, Field, ErrorPanel, LiveNotice, OwnCameraView, Icon,
   color, space, radius, surface, textOnDark, text, face, gradient,
 } from '../../../src/ui';
 import { api } from '../../../src/api';
 import { useSession } from '../../../src/session';
+import { useOwnCamera, OWN_CAMERA_LIVE } from '../../../src/ownCamera';
 import { LOOK_CHOICES } from '@loud/lib/direction.js';
 import { showOrientation } from '@loud/lib/orientation.js';
 import { CUTS, cutAvailability, resolveCut, onAirLabel, directorLabel, DEFAULT_CUT } from '@loud/lib/liveCuts.js';
@@ -65,12 +66,30 @@ export default function Console() {
   const live = Boolean(tick?.live ?? (show?.actual_started_at && !show?.actual_ended_at));
   const orientation = showOrientation(show);
 
-  // What the Cuts sheet can offer: the rig as the console route reports
-  // it, keyed by cut (lib/rigCameras.js). null — not {} — means the
-  // server could not read the pairings at all, and then the old
-  // single-camera assumption is the kinder answer: a show with Main
-  // working beats a show with every cut refused.
-  const cameras = data?.cameras ?? { main: { live: true } };
+  // The artist's phone IS the main camera. It joins the show's own room
+  // through /api/performer/join-show, the route the web performer uses,
+  // which enforces the window server-side. Without this the room is
+  // empty: nothing to compose, nothing to broadcast, and no preview.
+  const ownCamera = useOwnCamera({
+    showId: id,
+    accessToken,
+    enabled: Boolean(accessToken && show?.id),
+    orientation,
+  });
+
+  // What the Cuts sheet can offer: the rig as the console route reports it (lib/rigCameras.js), plus
+  // the phone in the artist's hand. Main is this phone unless a paired
+  // camera already holds that role: the server knows about pairings and
+  // cannot know whether this handset is publishing, so the two are
+  // merged here rather than guessed at either end. null — not {} —
+  // means the server could not read the pairings, and then the old
+  // single-camera assumption is the kinder answer.
+  const serverCameras = data?.cameras ?? { main: { live: true } };
+  const cameras = {
+    ...serverCameras,
+    main: serverCameras.main || (ownCamera.phase === OWN_CAMERA_LIVE ? { live: true, own: true } : undefined),
+  };
+  if (!cameras.main) delete cameras.main;
   const brollCount = data?.brollCount ?? 0;
   const rows = cutAvailability({ cameras, brollCount, settings: data?.direction || null });
 
@@ -256,11 +275,15 @@ export default function Console() {
         </Pressable>
       </View>
 
-      {/* Your own camera */}
-      <MediaTile
+      {/* Your own camera — the real one. This tile used to be an empty
+          MediaTile, and the artist's phone never joined the room at all,
+          so a solo artist's show had no camera in it and nothing to
+          compose. */}
+      <OwnCameraView
+        camera={ownCamera}
         label="You"
-        accessibilityLabel="Your camera"
-        style={{ position: 'absolute', right: space.m, top: 100, width: 96, height: 128, borderRadius: 14, borderWidth: 2, borderColor: 'rgba(253,255,252,0.5)', justifyContent: 'flex-end', paddingBottom: 6 }}
+        compact
+        style={{ position: 'absolute', right: space.m, top: 100, width: 96, height: 128, borderRadius: 14, borderWidth: 2, borderColor: ownCamera.phase === OWN_CAMERA_LIVE ? color.teal : 'rgba(253,255,252,0.5)' }}
       />
 
       {/* Comments */}

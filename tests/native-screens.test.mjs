@@ -356,3 +356,29 @@ test('a message on the live screen covers what it sits on', () => {
   assert.match(console_, /<LiveNotice message=\{err\}/, 'the console uses it');
   assert.ok(!/<ErrorPanel title="That did not work"/.test(console_), 'in place of the translucent panel');
 });
+
+test("the artist's own phone is a camera in their own show", () => {
+  // THE reason nothing broadcast. The console never joined the LiveKit
+  // room and its "You" tile was a MediaTile with nothing behind it, so a
+  // solo artist's room was empty: nothing to compose, nothing to send,
+  // and no preview anywhere in the artist app. The compositor was ready
+  // and would have rendered a blank page.
+  const hook = readFileSync(resolve(ROOT, 'native/src/ownCamera.js'), 'utf8');
+  assert.match(hook, /\/api\/performer\/join-show/, 'it takes a token from the route the web performer uses');
+  assert.match(hook, /new CameraSession/, 'and publishes with the session the spike proved out');
+  assert.ok(!/new AccessToken|addGrant/.test(hook), 'the phone never mints or widens its own grant');
+  assert.match(hook, /starting\.current/, 'two sessions against one native camera is the black-preview bug');
+  assert.match(hook, /AppState/, 'and a camera Android reclaimed in the background comes back');
+
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+  assert.match(console_, /useOwnCamera\(/, 'the console starts it');
+  assert.match(console_, /<OwnCameraView/, 'and shows the real picture in the You window');
+  assert.ok(!/<MediaTile\s+label="You"/.test(console_), 'in place of the empty tile that stood there');
+  assert.match(console_, /ownCamera\.phase === OWN_CAMERA_LIVE \? \{ live: true, own: true \}/, 'and Main counts as a camera once this phone is publishing');
+
+  // VideoTrack reads publication.track without a guard; that crashed the
+  // spike on 14 Oct.
+  const view = readFileSync(resolve(ROOT, 'native/src/ui/OwnCameraView.js'), 'utf8');
+  assert.match(view, /pub\?\.track/, 'nothing renders before the publication and its track exist');
+  assert.match(view, /OWN_CAMERA_FAILED/, 'and a camera that is not sending says so rather than showing a black box');
+});
