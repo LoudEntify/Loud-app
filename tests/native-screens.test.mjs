@@ -382,7 +382,6 @@ test("the artist's own phone is a camera in their own show", () => {
   assert.match(view, /pub\?\.track/, 'nothing renders before the publication and its track exist');
   assert.match(view, /OWN_CAMERA_FAILED/, 'and a camera that is not sending says so rather than showing a black box');
 });
-
 test('there are two routes to the rig, and they describe it the same way', () => {
   // Korey's ruling (2 Nov): Settings holds the saved arrangement, Kit
   // Check shows it per show and takes precedence there. An artist who

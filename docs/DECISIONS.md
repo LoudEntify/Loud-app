@@ -369,7 +369,6 @@ know whether this handset is up. Rejected: publishing from Kit Check too
 belongs with the pairing-routes work), and minting the token on the
 device from a camfeed pairing (a second grant path for the one
 participant whose authority is already their account).
-
 ## 2026-11-02 — Two routes to one rig: Settings saves it, Kit Check wins per show
 
 Korey's ruling. Settings holds the arrangement — which device is the main
