@@ -383,3 +383,43 @@ pressing End keeps running until its window closes.
 rather than the broken-monkey page, within about ten to twenty seconds —
 a headless browser has to start and YouTube has to accept the first
 frames before it will show anything.
+
+## Put the production site behind "coming soon" (3 Nov)
+
+The gate is built and OFF. Production shows the site as normal until you
+turn it on, and turning it on or off is one environment variable and a
+redeploy — no code change, no promote run.
+
+1. Promote this to production the usual way (Actions → **promote** →
+   Run workflow → approve the `production` environment). Nothing
+   changes on the live site from the merge alone.
+2. Vercel → **loud-app** → Settings → Environment Variables → the
+   **Production** environment. Add `SITE_MODE` with the value
+   `coming_soon`. Mark it **Config**, not public: it is read on the
+   server only and a public prefix would ship it to the browser.
+3. Vercel → Deployments → the latest Production one → **Redeploy**.
+   Environment variables are read at build time, so nothing changes
+   until you do this.
+
+To take the gate down later: delete `SITE_MODE` (or set it to anything
+else) and redeploy. Shared links still work the moment it comes down,
+because the gate rewrites rather than redirects — nothing has been
+taught to point at /coming-soon.
+
+**What stays reachable with the gate up, on purpose:**
+
+- `/api/…` — the native app's production backend and YouTube's OAuth
+  callback. Gate this and every artist is locked out of their own
+  account.
+- `/egress` — LiveKit's compositor renders the broadcast from this
+  page. Gate it and shows go out blank.
+- `/cam…` — what a scanned pairing QR opens on a second phone.
+- `/privacy` and `/legal…` — Google's OAuth consent screen links to the
+  policy and the app stores require it to resolve. A policy that 404s
+  while an app is live is a compliance problem rather than a closed
+  shop. **Tell me if you want these behind the gate too** and it is one
+  line.
+
+Everything else — the home page, Discover, log in, sign up, the
+dashboard, artist pages, show pages, pricing, Get the app — renders the
+mark and the words "Coming soon", with no links on it at all.
