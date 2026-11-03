@@ -500,3 +500,40 @@ out of reach here. The console's new full-screen stage is the instrument
 that splits it. Rejected: changing EncodingOptions on a hunch (the same
 options drive the recording path that works), and re-rendering the
 egress template defensively before knowing which half is at fault.
+
+## 2026-11-03 — The production site goes behind "coming soon", by environment variable
+
+Korey asked for the production website to show the mark and "coming
+soon" and nothing else: no sign-up, no log-in, no functionality.
+
+An environment variable (`SITE_MODE=coming_soon`) read by the
+middleware, not a code switch, because taking the gate down must not
+need a deploy of the app, and because one build then serves staging
+open and production closed. A rewrite, not a redirect, so a shared
+`/show/…` link still works the day the gate comes down rather than
+having taught every browser and crawler to point at `/coming-soon`.
+
+The decision inside the decision is what stays open. Four things run on
+the production domain that are not a person browsing, and blocking them
+would break the product rather than close it: `/api/…` (the native
+app's production backend and YouTube's OAuth callback — gating it locks
+every artist out of their own account), `/egress` (LiveKit's compositor
+renders the broadcast from that page), `/cam…` (what a scanned pairing
+QR opens), and `/privacy` + `/legal…` (Google's consent screen links to
+the policy and the app stores require it to resolve; a policy that 404s
+while an app is live is a compliance problem, not a closed shop). The
+legal pages are the one judgement call against the literal ask, flagged
+in NEEDS_KOREY for him to overrule in one line.
+
+`lib/siteGate.js` holds the predicate, separate from `middleware.js`,
+which imports `next/server` and cannot be loaded by a plain script —
+same reasoning as `lib/showWindow.js` and `lib/pairingLiveness.js`: a
+predicate deciding whether anyone can reach the product has to be
+runnable on its own. Matching is segment-aware, because a gate a
+lookalike path like `/apifoo` can talk its way through is not a gate.
+
+Rejected: deleting the pages or the routes (unpickable apart later, and
+a pilot that resumes next week would be a revert of a deletion);
+`NEXT_PUBLIC_` for the flag (it would ship to the browser for no gain);
+and a redirect (teaches every shared link and every crawler the wrong
+URL).
