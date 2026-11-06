@@ -47,6 +47,7 @@ import {
   CONTROLS, PRESET, normaliseChain, clampControl, isPreset, controlFor,
 } from '@loud/lib/audio/chain.js';
 import { applyVocalChain } from '../../src/vocalChain';
+import { useAudioMeter } from '../../src/audioMeter';
 
 /** The controls grouped the way the board groups them, by what they do to a voice. */
 const GROUPS = [
@@ -71,6 +72,10 @@ export default function AudioSettings() {
   const [settings, setSettings] = useState(null);
   const [failed, setFailed] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  // Live, while this screen is in front. The chain measures the input
+  // whether or not effects are on, which is the state an artist checking
+  // their microphone is usually in.
+  const meter = useAudioMeter(settings !== null);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -220,6 +225,48 @@ export default function AudioSettings() {
 
           <Card style={{ gap: space.s }}>
             <Text style={text.sectionHeading}>Microphone</Text>
+
+            {/* The signal indicator. Measured on the raw input inside
+                the chain, so it is the microphone's own level and not
+                anything the settings above have done to it. */}
+            <View style={{ gap: 6 }} testID="audio-meter">
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.m }}>
+                <Text style={[text.rowTitle, { flex: 1 }]}>Input level</Text>
+                <Text
+                  style={[text.supporting, { fontSize: 15 }]}
+                  accessibilityLiveRegion="polite"
+                  accessibilityLabel={meter.level.line}
+                >
+                  {meter.level.line}
+                </Text>
+              </View>
+              <Meter level={meter.level} />
+              {meter.level.action ? (
+                <Text style={[text.supporting, { fontSize: 15 }]}>{meter.level.action}.</Text>
+              ) : null}
+              {!meter.installed ? (
+                <Text style={[text.supporting, { fontSize: 15 }]}>
+                  The meter reads the microphone once a show or a kit check has
+                  started the camera. Nothing is being captured right now.
+                </Text>
+              ) : null}
+            </View>
+
+            {/* What the compressor is actually doing, which is the only
+                honest way to show that it works: a threshold and a ratio
+                tell an artist nothing about their own voice. */}
+            {settings.effectsOn ? (
+              <View style={{ gap: 6 }} testID="audio-reduction">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.m }}>
+                  <Text style={[text.rowTitle, { flex: 1 }]}>Compression</Text>
+                  <Text style={[text.supporting, { fontSize: 15 }]}>{meter.reduction.line}</Text>
+                </View>
+                <View style={{ height: 6, borderRadius: radius.pill, backgroundColor: 'rgba(1,22,39,0.12)', overflow: 'hidden' }}>
+                  <View style={{ width: `${meter.reduction.fraction * 100}%`, height: '100%', backgroundColor: color.orange }} />
+                </View>
+              </View>
+            ) : null}
+
             <NotStored>
               The camera module does not report this phone&apos;s audio inputs, so
               there is no list to choose from. Your show uses whichever
@@ -252,6 +299,36 @@ export default function AudioSettings() {
         </View>
       </ScrollView>
     </Screen>
+  );
+}
+
+/**
+ * The level bar: filled to the average, with a notch at the peak.
+ *
+ * Two marks rather than one because they answer different questions. The
+ * bar follows the average, which is readable; the notch is the loudest
+ * recent frame, which is what actually clips. A bar that jumped to every
+ * peak would be unreadable, and an average alone hides the one syllable
+ * that distorts.
+ *
+ * Colour comes from the verdict, so the bar and the words cannot
+ * disagree.
+ */
+function Meter({ level }) {
+  const fill = level.band === 'clipping' || level.band === 'hot' ? color.red
+    : level.band === 'good' ? color.teal
+    : color.orange;
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{ height: 10, borderRadius: radius.pill, backgroundColor: 'rgba(1,22,39,0.12)', overflow: 'hidden' }}
+    >
+      <View style={{ width: `${level.fraction * 100}%`, height: '100%', backgroundColor: fill }} />
+      {level.peakFraction > 0 ? (
+        <View style={{ position: 'absolute', left: `${Math.min(99, level.peakFraction * 100)}%`, top: 0, bottom: 0, width: 2, backgroundColor: color.ink }} />
+      ) : null}
+    </View>
   );
 }
 

@@ -19,6 +19,7 @@ import { Back, Check, Warn, Clock } from '../viewer/Icons';
 import { describeRig, rigSummary } from '../../lib/rig.js';
 import { isLivePairing } from '../../lib/pairingLiveness.js';
 import { cameraTiles, tileDetail, readyState } from '../../lib/kitCheck.js';
+import { describeLevel } from '../../lib/audio/meter.js';
 
 const HOLD_MS = Number(process.env.NEXT_PUBLIC_KITCHECK_HOLD_MS || 120000); // two minutes; tests shorten it
 const CROPS = [['conversation', 'Conversation'], ['performing', 'Performing'], ['corner', 'Corner']];
@@ -55,10 +56,23 @@ export default function KitCheckScreen({ showId = null }) {
           const ctx = new AC(); const src = ctx.createMediaStreamSource(s); const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
           const buf = new Float32Array(an.fftSize); let peak = 0; let samples = 0;
           const iv = setInterval(() => {
-            an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-            const rms = Math.sqrt(sum / buf.length); peak = Math.max(peak, rms); samples += 1;
-            if (peak > 0.02) setCheck('mic_signal', { status: 'ready', detail: 'Real signal from your voice', level: rms });
-            else if (samples > 8) setCheck('mic_signal', { status: 'fix', detail: 'No signal yet. Say something, or switch mic in Fix.', level: rms });
+            an.getFloatTimeDomainData(buf);
+            let sum = 0; let framePeak = 0;
+            for (let i = 0; i < buf.length; i++) { sum += buf[i] * buf[i]; const m = Math.abs(buf[i]); if (m > framePeak) framePeak = m; }
+            const rms = Math.sqrt(sum / buf.length);
+            peak = Math.max(peak, framePeak); samples += 1;
+            // The verdict comes from lib/audio/meter.js, which the phone's
+            // meter also reads. It used to be `peak > 0.02` here and
+            // nothing at all on the phone, which is how the same voice
+            // could pass in a browser and show no indicator in the app.
+            //
+            // Judged on the PEAK rather than the running average, because
+            // an artist clips on their loudest syllable and an average
+            // that looks healthy hides it.
+            const verdict = describeLevel({ peak, rms });
+            if (verdict.ok) setCheck('mic_signal', { status: 'ready', detail: verdict.line, level: rms });
+            else if (verdict.band === 'hot' || verdict.band === 'clipping') setCheck('mic_signal', { status: 'fix', detail: `${verdict.line} ${verdict.action}.`, level: rms });
+            else if (samples > 8) setCheck('mic_signal', { status: 'fix', detail: `${verdict.line} ${verdict.action}.`, level: rms });
             else setCheck('mic_signal', { status: 'checking', detail: 'Say a few words', level: rms });
           }, 500);
           s.__micInterval = iv;
