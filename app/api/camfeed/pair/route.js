@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { verifySession } from '../../../../lib/verifyArtistAuth';
 import {
   CAMERA_ROLES,
+  EXCLUSIVE_ROLES,
   PAIRING_TTL_MS,
   REHEARSAL_TOKEN_TTL,
   SHOW_TOKEN_TTL,
@@ -231,13 +232,32 @@ async function createInvite({ admin, caps, body, userId, raw = false }) {
     // instead of a filter expression split across a query string.
     const { data: existing } = await admin
       .from('camfeed_pairings')
-      .select('id, used_at, expires_at, last_seen_at, revoked_at')
+      .select('id, role, used_at, expires_at, last_seen_at, revoked_at')
       .eq('created_by', userId)
       .is('revoked_at', null);
     const liveCount = (existing || []).filter((p) => isLivePairing(p)).length;
     if (liveCount >= MAX_LIVE_PAIRINGS) {
       const err = { error: `You already have ${MAX_LIVE_PAIRINGS} cameras paired. Remove one first.`, status: 409 };
       return raw ? err : NextResponse.json({ error: err.error }, { status: err.status });
+    }
+
+    // ── ONE MAIN, ONE CONTROL PANEL ─────────────────────────────
+    // Korey's rig on 5 Nov held two devices both called Main: his own
+    // phone and a second one paired into the same role. Both claimed
+    // the same cut, the Kit Check tiles both read "Main · on air
+    // first", and which one a viewer saw was whichever the fallback
+    // chain reached first. Two pictures claiming one cut is not a
+    // second angle, it is a coin toss.
+    //
+    // Refused at minting rather than at redemption, because a code
+    // already in somebody's hand is the wrong place to discover it.
+    if (EXCLUSIVE_ROLES.includes(role)) {
+      const held = (existing || []).find((p) => p.role === role && isLivePairing(p));
+      if (held) {
+        const what = role === 'director' ? 'a control panel' : 'a main camera';
+        const err = { error: `You already have ${what}. Remove it first, or pair this one as another angle.`, status: 409 };
+        return raw ? err : NextResponse.json({ error: err.error }, { status: err.status });
+      }
     }
   }
 
