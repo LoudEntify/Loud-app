@@ -16,6 +16,9 @@ import { windowOpensAt } from '../../lib/showWindow';
 import { track } from '../../lib/telemetry';
 import { Skeleton, ErrorState } from '../viewer/States';
 import { Back, Check, Warn, Clock } from '../viewer/Icons';
+import { describeRig, rigSummary } from '../../lib/rig.js';
+import { isLivePairing } from '../../lib/pairingLiveness.js';
+import { cameraTiles, tileDetail, readyState } from '../../lib/kitCheck.js';
 
 const HOLD_MS = Number(process.env.NEXT_PUBLIC_KITCHECK_HOLD_MS || 120000); // two minutes; tests shorten it
 const CROPS = [['conversation', 'Conversation'], ['performing', 'Performing'], ['corner', 'Corner']];
@@ -125,9 +128,32 @@ export default function KitCheckScreen({ showId = null }) {
     })();
   }, [accessToken]);
 
+  // The rig, as DEVICES, from the same function the phone uses
+  // (lib/kitCheck.js). Korey, 5 Nov: the camera list has to read as the
+  // extra camera devices. The phone had two chips that were its own two
+  // lenses; this screen had no camera list at all, which is the same
+  // mistake with the volume at zero — an artist could not see here
+  // whether their other phones were paired.
+  //
+  // No live tiles yet: the browser does not join the rehearsal room on
+  // this screen. What it shows is which cameras EXIST and what each one
+  // is doing, which is the part the two screens must agree about.
+  const [pairings, setPairings] = useState([]);
+  useEffect(() => {
+    if (!accessToken) return;
+    let alive = true;
+    api('/api/camfeed/pair', { method: 'POST', accessToken, body: { action: 'list' } })
+      .then((r) => { if (alive) setPairings(r.ok ? (r.data?.pairings || []) : []); });
+    return () => { alive = false; };
+  }, [accessToken]);
+  const devices = describeRig({ pairings, ownLive: !camErr, isLive: isLivePairing });
+  const tiles = cameraTiles({ devices, cameras: [] });
+
   const list = [['mic_signal', 'Mic signal'], ['camera_frames', 'Camera'], ['connection', 'Connection'], ['charging', 'Charging'], ['dnd', 'Do Not Disturb'], ['headphones', 'Headphones']];
-  const ready = list.filter(([k]) => checks[k].status === 'ready').length;
-  const toFix = list.filter(([k]) => checks[k].status === 'fix').length;
+  // A verdict and the one next action, not a score: the rule from
+  // docs/ONE_JOURNEY.md section 6, shared with the phone so the two
+  // screens cannot reach different conclusions from the same checks.
+  const verdict = readyState({ devices, checks });
   const save = useCallback(async () => {
     if (!accessToken) return;
     await api(`/api/artist/shows/${showId || 'none'}/kit-check`, { method: 'POST', accessToken, body: { items: list.map(([k]) => ({ item: k, status: checks[k].status, detail: checks[k].detail })) } });
@@ -157,6 +183,15 @@ export default function KitCheckScreen({ showId = null }) {
         {camErr && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center', fontSize: 15 }}>{camErr}</div>}
         <span className="v-kicker" style={{ position: 'absolute', left: 8, bottom: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(1,22,39,0.7)', fontSize: 12 }}>Your camera only</span>
       </div>
+      <div className="v-col" style={{ gap: 6 }}>
+        <span className="v-muted" style={{ fontSize: 14 }}>{rigSummary(devices)}</span>
+        <div className="v-row" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Cameras in your rig" data-testid="kit-cameras">
+          {tiles.map((t) => (
+            <span key={t.key} className="v-chip v-chip-dark" data-status={t.status} title={tileDetail(t)}>{t.chip}</span>
+          ))}
+          <a className="v-btn v-btn-ghost-dark" style={{ height: 40 }} href="/camera" data-testid="kit-add-camera">Add camera</a>
+        </div>
+      </div>
       <ul aria-label="Checks" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {list.map(([k, label]) => { const c = checks[k]; return (
           <li key={k} className="v-row v-panel-dark" style={{ padding: '10px 12px', gap: 12 }} data-testid={`check-${k}`} data-status={c.status}>
@@ -167,7 +202,7 @@ export default function KitCheckScreen({ showId = null }) {
           </li>); })}
       </ul>
       <div className="v-panel-dark v-col" style={{ padding: 14, gap: 4 }}>
-        <span style={{ fontSize: 18, fontWeight: 700 }}>{ready} of {list.length} ready{toFix ? `, ${toFix} to fix` : ''}</span>
+        <span style={{ fontSize: 18, fontWeight: 700 }} data-testid="kit-verdict">{verdict.line}</span>
         <span className="v-muted" style={{ fontSize: 15 }}>{show ? (untilSlot > 0 ? `Stay here and you go live on your own at ${new Date(slated).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (in ${Math.ceil(untilSlot / 60000)} min).` : goingLive ? 'Going live now…' : 'Your slot has started.') : 'No show booked for this check.'}</span>
       </div>
       <div className="v-row" style={{ gap: 8, flexWrap: 'wrap' }}>

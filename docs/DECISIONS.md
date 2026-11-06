@@ -654,3 +654,50 @@ Rejected: a convolution reverb on the phone (cost), computing
 coefficients in Kotlin (untestable, and a second definition of the
 chain), and processing in the compositor (no DSP hooks in egress, and
 the artist's monitoring would not match what goes out).
+
+## 2026-11-06 — Kit Check: the camera list is devices, and Ready is a verdict
+
+Korey, 5 Nov, two reports about one screen: "I need the camera list below
+the feed screen to read as the extra camera devices. I noticed that when
+I click side it just flops the current camera", and "the kit check …
+leaves the user going in resultless circles".
+
+Both were in the code as written. The camera list was
+
+    const CAMERAS = [
+      { key: 'camera_main', chip: 'Main', facing: 'back' },
+      { key: 'camera_side', chip: 'Side', facing: 'front' },
+    ];
+
+— the back and front lenses of this one handset, wearing the words off
+the design board. So an artist with three phones paired saw two chips
+that were none of them, pressing one turned their own phone around, and
+the two-minute frame hold restarted against the same camera each time
+they switched. The footer then said "4 of 7 ready, 2 to fix", which asks
+an artist standing in a venue to work out for themselves whether that is
+good enough to start.
+
+`lib/kitCheck.js` now decides both, for both platforms. `cameraTiles`
+joins the rig's devices (lib/rig.js describeRig) to what is actually
+publishing in the rehearsal room, by role: this phone draws its own
+preview locally, a paired phone draws that phone's feed, an unscanned
+code says it is waiting, and a phone that stopped says so — never the
+same sentence for two different situations. Front or back is a setting
+inside this phone's own tile, which is the only place it means anything,
+since you cannot turn someone else's handset around from here.
+
+`readyState` returns one blocker with the action that clears it, in a
+fixed order (no camera sending, connection, mic, charging, Do Not
+Disturb, headphones), or "Ready to go live." A measurement still running
+is not a blocker: calling an unfinished check a failure is a large part
+of what made the screen feel like an exam.
+
+The web twin now reads the same two functions. It gained the camera list
+it never had — it could not show an artist whether their other phones
+were paired at all — without live tiles for now, because the browser does
+not join the rehearsal room on that screen.
+
+Rejected: keeping a lens switcher in the camera list and adding devices
+beside it (two kinds of thing in one row is how the confusion started),
+and showing a count alongside the verdict (the count is the thing that
+does not help).

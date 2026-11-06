@@ -121,7 +121,7 @@ The parts that genuinely cannot be shared, because the platforms differ:
 | Capability | Web | Mobile |
 |---|---|---|
 | Camera capture | `getUserMedia` | `loud-camera` native module |
-| Audio processing | Web Audio API | **not yet built** |
+| Audio processing | Web Audio API | `LoudVocalChain.kt` (6 Nov) |
 | Publishing | `livekit-client` | `livekit-client` + RN WebRTC |
 | File picking | `<input type=file>` | `expo-document-picker` |
 
@@ -205,6 +205,42 @@ Each step ends with something testable rather than a half-migration.
 | 5 | Camera list shows devices, not lenses, on both | The confusion Korey hit is gone |
 | 6 | Full pilot test: desktop artist, phone cameras, real viewers | Evidence |
 | 7 | Native audio chain, if chosen | Phone is self-sufficient |
+
+### Where this stands, 6 November
+
+| # | State |
+|---|---|
+| 1 | Done. `lib/audio/chain.js` holds the parameters; the web reads from it. |
+| 5 | Done. `lib/kitCheck.js` makes the camera list devices, on both platforms. |
+| 7 | Done, and taken out of "if chosen": Korey's ruling was build it. `lib/audio/dsp.js` derives the coefficients, `LoudVocalChain.kt` runs the loop. iOS still outstanding. |
+| 2, 3, 4, 6 | Not started. |
+
+Step 4 is partly paid for: the Ready band is now a verdict with one
+action rather than a score, shared by both screens, which was the
+specific thing that made the screen feel like circles. The four-band
+layout of section 6 is still to build.
+
+### A correction to section 5 above
+
+Section 5 said the mobile audio chain was "not yet built" and listed
+three options. That was right about audio and wrong by omission about
+everything else: when Korey asked for the camera, technique and colour
+work to be integrated, I found all ten modules already written and
+tested — `proMode` (manual ISO, shutter, white balance, exposure, locks),
+`zoomPlan`, `survey`, `facing`, `frameRate`, `region`, `orientation`,
+`commands`, `clock`, `capture` — in `native/src/spike/`, reachable only
+by the spike route.
+
+And the web was importing them across the boundary:
+`components/spike/ControllerScreen.jsx` had
+`import { proWarnings } from '../../native/src/spike/proMode.js'`.
+
+So the layer-2 table above was wrong in a way that mattered: these are
+not platform capabilities at all. They are decisions, they were always
+platform-free, and they are now `lib/camera/`. The lesson for the
+remaining steps is the one Korey gave on 5 November and I have now had to
+learn twice in a week: survey what exists before describing what is
+missing.
 
 Steps 1 to 5 are the "architect before building" Korey asked for. Step 6
 is the test he wants. Step 7 is the decision above.
