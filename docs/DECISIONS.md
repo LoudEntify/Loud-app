@@ -571,3 +571,48 @@ start with its own constants and reconciling later (that is the drift,
 not a step towards avoiding it), and moving the graph-building code
 itself into shared space (there is nothing to share — one builds Web
 Audio nodes, the other configures Kotlin).
+
+## 2026-11-06 — The native vocal chain: Kotlin runs the loop, JavaScript owns the maths
+
+Korey's ruling: build the native audio path for the phone and leave
+Web Audio for the web, so each platform has a working path, and mirror
+them so the two do not feel like different products.
+
+Done, with the work split by what can be proved. `lib/audio/dsp.js`
+derives every coefficient — RBJ cookbook high-pass, compressor slope
+and knee, one-pole envelope time constants, Schroeder delay lengths —
+from the same parameters `lib/audio/chain.js` already gives the web.
+`LoudVocalChain.kt` computes nothing: it is handed those numbers and
+runs the per-sample loop, installed as LiveKit's capture
+post-processor, which is the one point on a phone where processed audio
+can enter the broadcast.
+
+The reason for that split is testability. A compressor either sounds
+right or it does not, and only ears settle that; but a high-pass either
+attenuates below its cutoff or it does not, and that is arithmetic.
+Run in JavaScript it can be tested by pushing real sine waves through
+the difference equation and measuring what comes out, which
+tests/audio-dsp.test.mjs now does: 1kHz passes above 0.99, 20Hz stops
+below 0.1, the corner sits at -3dB, and the filter's shape matches Web
+Audio's own defaults so the two platforms are the same filter. What
+remains in Kotlin is twenty lines of arithmetic with a reference
+implementation beside it.
+
+The reverb is the one deliberate difference. The web convolves a
+1.4-second generated impulse; the phone runs four combs into two
+all-passes, about six multiply-accumulates per sample, because a
+convolution inside a 10ms callback on a phone that is also encoding
+video is not affordable. At the preset's 0.12 mix the goal is "less dry
+phone mic", which both reach.
+
+Two guards against failure modes a live show would expose:
+`setVocalChain` resolves `{ok:false}` rather than throwing, so a chain
+that will not install cannot stop a show; and `resetAudioProcessing`
+disables the loop until JavaScript sends a config for the new sample
+rate, because a chain running yesterday's coefficients is worse than no
+chain — it is wrong in a way nobody hears until playback.
+
+Rejected: a convolution reverb on the phone (cost), computing
+coefficients in Kotlin (untestable, and a second definition of the
+chain), and processing in the compositor (no DSP hooks in egress, and
+the artist's monitoring would not match what goes out).

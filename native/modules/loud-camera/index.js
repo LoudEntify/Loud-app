@@ -77,3 +77,26 @@ export function cost() { return native ? native.cost() : null; }
 export function writeGzip(path, text) { return native ? native.writeGzip(path, text) : missing(); }
 export function uploadFile(path, url, contentType, headers = {}) { return native ? native.uploadFile(path, url, contentType, headers) : missing(); }
 export function addStateListener(fn) { return native ? native.addListener('onState', fn) : { remove() {} }; }
+
+/**
+ * Install or update the artist's vocal chain.
+ *
+ * `config` comes from nativeChainConfig() in lib/audio/dsp.js, plus an
+ * `enabled` flag. Every value in it is already in the units the native
+ * loop uses: dB converted to linear gain, filter coefficients rather
+ * than a frequency, delay lengths in samples. Nothing is computed on
+ * the other side.
+ *
+ * Resolves `{ ok: false, error }` rather than rejecting when the chain
+ * cannot be installed: a vocal chain that will not start must never
+ * stop a show, and the artist simply goes out dry, which is the pilot's
+ * own default anyway.
+ */
+export function setVocalChain(config) {
+  return native ? native.setVocalChain(config) : Promise.resolve({ ok: false, error: 'no native module' });
+}
+
+/** Whether the chain is installed and running. For the console's own status line. */
+export function vocalChainState() {
+  return native ? native.vocalChainState() : Promise.resolve({ installed: false, enabled: false });
+}

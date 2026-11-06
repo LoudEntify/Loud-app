@@ -5,6 +5,7 @@ import android.os.Looper
 import android.os.SystemClock
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.ReactContext
+import com.livekit.reactnative.LiveKitReactNative
 import com.oney.WebRTCModule.WebRTCModule
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
@@ -34,6 +35,7 @@ import java.util.zip.GZIPOutputStream
  */
 class LoudCameraModule : Module() {
   private var capturer: LoudCameraXCapturer? = null
+  private var vocalChain: LoudVocalChain? = null
   private var controller: LoudCaptureController? = null
   private val main = Handler(Looper.getMainLooper())
   private var ticking = false
@@ -151,6 +153,37 @@ class LoudCameraModule : Module() {
     }
     AsyncFunction("proRead") { -> capturer?.proRead() }
 
+    // ── The vocal chain ──────────────────────────────────────────
+    // LiveKit's capture post-processor is the one point on a phone
+    // where processed audio can enter the broadcast: every 10ms of
+    // microphone passes through it between the hardware and the
+    // encoder. React Native has no Web Audio and the mic is published
+    // natively, which is why this could not be written in JavaScript.
+    //
+    // Every coefficient comes from lib/audio/dsp.js, which derives them
+    // from lib/audio/chain.js, the one definition shared with the web.
+    // Nothing here computes a number.
+    AsyncFunction("setVocalChain") { config: Map<String, Any?>, promise: Promise ->
+      try {
+        val chain = vocalChain ?: LoudVocalChain().also {
+          vocalChain = it
+          LiveKitReactNative.audioProcessingController.capturePostProcessor = it
+        }
+        chain.setConfig(vocalChainConfig(config))
+        chain.setEnabled(config["enabled"] as? Boolean ?: false)
+        promise.resolve(mapOf("ok" to true, "enabled" to chain.isEnabled()))
+      } catch (e: Throwable) {
+        // A chain that will not start must never stop a show. The
+        // artist goes out dry, which is how the pilot's own default
+        // ships anyway (effectsOn false).
+        promise.resolve(mapOf("ok" to false, "error" to (e.message ?: e.toString())))
+      }
+    }
+
+    AsyncFunction("vocalChainState") { ->
+      mapOf("installed" to (vocalChain != null), "enabled" to (vocalChain?.isEnabled() ?: false))
+    }
+
     // Orientation (docs/DECISIONS.md 2026-10-14): portrait | landscape,
     // fixed for the show; the JS side refuses it while live.
     // The JS side computes the plan (orientation.js orientationPlan) and passes the content rotation; the capturer applies that number.
@@ -191,4 +224,52 @@ class LoudCameraModule : Module() {
       mapOf("status" to status, "bytes" to f.length(), "body" to body)
     }
   }
+}
+
+/**
+ * The config map from JS into the chain's own shape.
+ *
+ * Every value is already in the units the loop uses: dB converted to
+ * linear gain, filter coefficients rather than a frequency, delay
+ * lengths in samples. lib/audio/dsp.js did all of it, and
+ * tests/audio-dsp.test.mjs proved it by pushing real signals through
+ * the same difference equation this chain runs.
+ *
+ * Missing values fall back to the data class defaults, which are the
+ * pilot's preset at 48kHz, so a malformed map gives a working chain
+ * rather than silence.
+ */
+private fun vocalChainConfig(m: Map<String, Any?>): LoudVocalChain.Config {
+  fun f(key: String, fallback: Float): Float = (m[key] as? Number)?.toFloat() ?: fallback
+  fun nested(key: String): Map<*, *>? = m[key] as? Map<*, *>
+  fun nf(group: Map<*, *>?, key: String, fallback: Float): Float =
+    (group?.get(key) as? Number)?.toFloat() ?: fallback
+
+  val hp = nested("highpass")
+  val comp = nested("compressor")
+  val rev = nested("reverb")
+  val combs = (rev?.get("combs") as? List<*>)?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+  val allpasses = (rev?.get("allpasses") as? List<*>)?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+  val d = LoudVocalChain.Config()
+
+  return LoudVocalChain.Config(
+    inputGain = f("inputGain", d.inputGain),
+    b0 = nf(hp, "b0", d.b0), b1 = nf(hp, "b1", d.b1), b2 = nf(hp, "b2", d.b2),
+    a1 = nf(hp, "a1", d.a1), a2 = nf(hp, "a2", d.a2),
+    thresholdDb = nf(comp, "thresholdDb", d.thresholdDb),
+    slope = nf(comp, "slope", d.slope),
+    kneeDb = nf(comp, "kneeDb", d.kneeDb),
+    attack = nf(comp, "attack", d.attack),
+    release = nf(comp, "release", d.release),
+    makeupGain = f("makeupGain", d.makeupGain),
+    dryGain = f("dryGain", d.dryGain),
+    wetGain = f("wetGain", d.wetGain),
+    processedGain = f("processedGain", d.processedGain),
+    bypassGain = f("bypassGain", d.bypassGain),
+    outputGain = f("outputGain", d.outputGain),
+    combDelays = if (combs.isEmpty()) d.combDelays else combs.map { (it["delay"] as? Number)?.toInt() ?: 1 }.toIntArray(),
+    combFeedback = if (combs.isEmpty()) d.combFeedback else combs.map { (it["feedback"] as? Number)?.toFloat() ?: 0f }.toFloatArray(),
+    allpassDelays = if (allpasses.isEmpty()) d.allpassDelays else allpasses.map { (it["delay"] as? Number)?.toInt() ?: 1 }.toIntArray(),
+    allpassFeedback = if (allpasses.isEmpty()) d.allpassFeedback else allpasses.map { (it["feedback"] as? Number)?.toFloat() ?: 0.5f }.toFloatArray(),
+  )
 }
