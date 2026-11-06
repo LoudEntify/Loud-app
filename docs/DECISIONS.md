@@ -537,3 +537,37 @@ a pilot that resumes next week would be a revert of a deletion);
 `NEXT_PUBLIC_` for the flag (it would ship to the browser for no gain);
 and a redirect (teaches every shared link and every crawler the wrong
 URL).
+
+## 2026-11-06 — The vocal chain is defined once, implemented twice
+
+Korey's ruling: build the native DSP for mobile, keep the web path for
+web, so each platform has a working path of its own, and make them
+mirror each other so the user experience does not conflict. The new
+camera, technique and colour work on the native app stays and is
+integrated.
+
+Step 1 of docs/ONE_JOURNEY.md, and the step that makes "mirror each
+other" true rather than a hope. The chain was already defined twice on
+one platform: as defaults in `createPilotAudioTrack`'s signature and
+again as a PRESET object in AudioDeckPanel, whose own comment admitted
+it mirrored them "so the knobs display correctly". A third copy in
+Kotlin is how an artist ends up sounding different on their phone than
+on their laptop with nobody able to say why.
+
+`lib/audio/chain.js` now holds the numbers, the ranges, the switch
+defaults and the two rules the graph exists to keep: bypass is a
+crossfade rather than a disconnect, because disconnecting a live audio
+node clicks; and the monitor can never reach the broadcast, because an
+artist monitoring themselves into the stream is a feedback loop in
+front of an audience. It imports nothing and names no platform, so it
+loads in Next, in Metro and in a plain Node test — the same rule as
+lib/showWindow.js and lib/rig.js. `chainSettings()` hands a platform
+its numbers already in the units its nodes take, so neither side
+computes any of them.
+
+The web now reads from it and holds no numbers of its own. The native
+DSP will read from the same place. Rejected: letting the native side
+start with its own constants and reconciling later (that is the drift,
+not a step towards avoiding it), and moving the graph-building code
+itself into shared space (there is nothing to share — one builds Web
+Audio nodes, the other configures Kotlin).
