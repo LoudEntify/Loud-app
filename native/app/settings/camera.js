@@ -29,8 +29,8 @@ import {
 } from '../../src/ui';
 import { NotStored } from '../../src/settings';
 import { available as capturerAvailable, survey } from '../../modules/loud-camera';
-import { normaliseProfile } from '../../src/spike/survey';
-import { facingCapabilities, FACING_LABEL } from '../../src/spike/facing';
+import { normaliseProfile } from '@loud/lib/camera/survey.js';
+import { facingCapabilities, FACING_LABEL } from '@loud/lib/camera/facing.js';
 
 export default function CameraSettings() {
   const [caps, setCaps] = useState(null);

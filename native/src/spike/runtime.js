@@ -17,18 +17,18 @@ import Constants from 'expo-constants';
 import { api } from '../api';
 import { API_BASE } from '../config';
 import * as LoudCamera from '../../modules/loud-camera';
-import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from './commands';
-import { clampPro, proWarnings, matchResidual, STAGES } from './proMode';
-import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from './frameRate';
-import { FACINGS, facingCapability, describeFacing, commandAllowed, mirrorRule, FLIP_OVERRIDES } from './facing';
-import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from './orientation';
+import { TOPIC, zoomCommand, panCommand, proCommand, matchCommand, stageCommand, surveyRequest, orientationCommand, mountStatus, ack, encode, decode, ackLatencies, summariseLatencies, slowCommandDiagnosis, mintId, bopCommand } from '@loud/lib/camera/commands.js';
+import { clampPro, proWarnings, matchResidual, STAGES } from '@loud/lib/camera/proMode.js';
+import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from '@loud/lib/camera/frameRate.js';
+import { FACINGS, facingCapability, describeFacing, commandAllowed, mirrorRule, FLIP_OVERRIDES } from '@loud/lib/camera/facing.js';
+import { DEFAULT_ORIENTATION, normaliseOrientation, physicalOrientation, orientationMismatch, orientationPlan, mountOf, nextMountPlan } from '@loud/lib/camera/orientation.js';
 
 /** How often the camera re-reads the gravity sensor before the lock (setup only: never during a show). */
 export const MOUNT_WATCH_MS = 2000;
-import { capsFor, zoomPlan, panPlan, bopPlan, tightnessFor, PAN_DEFAULTS, BOP_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from './zoomPlan';
-import { measureOffset, RESYNC_EVERY_MS } from './clock';
-import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from './capture';
-import { normaliseProfile, surveyFileName } from './survey';
+import { capsFor, zoomPlan, panPlan, bopPlan, tightnessFor, PAN_DEFAULTS, BOP_DEFAULTS, SHOT_HOME, FRAME_SOURCES } from '@loud/lib/camera/zoomPlan.js';
+import { measureOffset, RESYNC_EVERY_MS } from '@loud/lib/camera/clock.js';
+import { CaptureBuffer, uploadDue, BATCH_EVERY_MS } from '@loud/lib/camera/capture.js';
+import { normaliseProfile, surveyFileName } from '@loud/lib/camera/survey.js';
 
 export const APP_VERSION = Constants.expoConfig?.version || '0.0.0';
 

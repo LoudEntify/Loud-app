@@ -3,10 +3,10 @@
 // diagnosis and the diagnostic records (14 Oct retest build).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, builtInRotationShown, quarterTurn, mountOf, nextMountPlan } from '../native/src/spike/orientation.js';
-import { orientationCommand, ack, encode, decode, slowCommandDiagnosis, SLOW_COMMAND_MS } from '../native/src/spike/commands.js';
-import { capsFor, realise, regionCarriesPan, panPlan, zoomPlan, unrealisable, SHOT_HOME } from '../native/src/spike/zoomPlan.js';
-import { CaptureBuffer } from '../native/src/spike/capture.js';
+import { physicalOrientation, physicalFormat, orientationMismatch, normaliseOrientation, frameSizeFor, orientationLine, ORIENTATIONS, uprightRotation, orientationPlan, textureCorrection, builtInRotationShown, quarterTurn, mountOf, nextMountPlan } from '../lib/camera/orientation.js';
+import { orientationCommand, ack, encode, decode, slowCommandDiagnosis, SLOW_COMMAND_MS } from '../lib/camera/commands.js';
+import { capsFor, realise, regionCarriesPan, panPlan, zoomPlan, unrealisable, SHOT_HOME } from '../lib/camera/zoomPlan.js';
+import { CaptureBuffer } from '../lib/camera/capture.js';
 
 const G = 9.81;
 const g35 = { deviceZoom: { available: true, min: 1, max: 4 }, qualityCeiling: { zoom: 2.1, reason: 'sensor crop would drop below 1080p' } };

@@ -15,11 +15,11 @@ import { useSession } from '../../src/session';
 import { File } from 'expo-file-system';
 import * as LoudCamera from '../../modules/loud-camera';
 import { SpikeSession, runSurvey, latestReportFile, listReportFiles, shareReportFile } from '../../src/spike/runtime';
-import { FRAME_SOURCES } from '../../src/spike/zoomPlan';
-import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT, frameRateOptions } from '../../src/spike/frameRate';
-import { FACINGS, facingCapability, describeFacing, FLIP_OVERRIDES, mirrorRule } from '../../src/spike/facing';
-import { proWarnings, residualLine, STAGES } from '../../src/spike/proMode';
-import { ORIENTATIONS } from '../../src/spike/orientation';
+import { FRAME_SOURCES } from '@loud/lib/camera/zoomPlan.js';
+import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT, frameRateOptions } from '@loud/lib/camera/frameRate.js';
+import { FACINGS, facingCapability, describeFacing, FLIP_OVERRIDES, mirrorRule } from '@loud/lib/camera/facing.js';
+import { proWarnings, residualLine, STAGES } from '@loud/lib/camera/proMode.js';
+import { ORIENTATIONS } from '@loud/lib/camera/orientation.js';
 
 const mono = { color: color.porcelain, fontSize: 13, fontFamily: 'monospace' };
 

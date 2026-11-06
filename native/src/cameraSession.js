@@ -28,10 +28,10 @@
 // in one app is two WebRTC worlds that disagree about the same track.
 import { Room, RoomEvent, Track, LocalVideoTrack } from 'livekit-client';
 import * as LoudCamera from '../modules/loud-camera';
-import { normaliseProfile } from './spike/survey';
-import { facingCapability, describeFacing, mirrorRule, FACINGS } from './spike/facing';
-import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from './spike/frameRate';
-import { orientationPlan, normaliseOrientation, physicalOrientation, orientationMismatch } from './spike/orientation';
+import { normaliseProfile } from '@loud/lib/camera/survey.js';
+import { facingCapability, describeFacing, mirrorRule, FACINGS } from '@loud/lib/camera/facing.js';
+import { resolveFrameRate, frameRateWarnings, FRAME_RATE_DEFAULT } from '@loud/lib/camera/frameRate.js';
+import { orientationPlan, normaliseOrientation, physicalOrientation, orientationMismatch } from '@loud/lib/camera/orientation.js';
 
 const APP_VERSION = '0.1.0';
 

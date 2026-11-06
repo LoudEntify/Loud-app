@@ -25,8 +25,8 @@ import {
 } from '../src/ui';
 import { api } from '../src/api';
 import { CameraSession } from '../src/cameraSession';
-import { FACINGS } from '../src/spike/facing';
-import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT } from '../src/spike/frameRate';
+import { FACINGS } from '@loud/lib/camera/facing.js';
+import { FRAME_RATE_CHOICES, FRAME_RATE_DEFAULT } from '@loud/lib/camera/frameRate.js';
 
 let VideoTrack = null;
 try { VideoTrack = require('@livekit/react-native').VideoTrack; } catch { /* Expo Go: no native LiveKit */ }

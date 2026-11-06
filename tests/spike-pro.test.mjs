@@ -3,10 +3,10 @@
 // match targets and residuals; plus the commands and the stage tag.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { proSupport, clampPro, kelvinToRgb, kelvinToGains, gainsToKelvin, proWarnings, matchTargets, matchResidual, residualLine, KELVIN_RANGE, PRO_CONTROLS } from '../native/src/spike/proMode.js';
-import { proCommand, matchCommand, stageCommand, surveyRequest, encode, decode } from '../native/src/spike/commands.js';
-import { CaptureBuffer } from '../native/src/spike/capture.js';
-import { normaliseProfile } from '../native/src/spike/survey.js';
+import { proSupport, clampPro, kelvinToRgb, kelvinToGains, gainsToKelvin, proWarnings, matchTargets, matchResidual, residualLine, KELVIN_RANGE, PRO_CONTROLS } from '../lib/camera/proMode.js';
+import { proCommand, matchCommand, stageCommand, surveyRequest, encode, decode } from '../lib/camera/commands.js';
+import { CaptureBuffer } from '../lib/camera/capture.js';
+import { normaliseProfile } from '../lib/camera/survey.js';
 
 // A FULL-level camera with everything, a LIMITED one with nothing manual, a fixed-focus one.
 const full = {

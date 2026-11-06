@@ -572,6 +572,44 @@ not a step towards avoiding it), and moving the graph-building code
 itself into shared space (there is nothing to share — one builds Web
 Audio nodes, the other configures Kotlin).
 
+## 2026-11-06 — Camera, techniques and colour move to lib/camera/
+
+Korey asked that the camera, technique and colour work recently designed
+for the native app be integrated into it. Surveying first, as the
+architecture note said to: none of it needed building. All ten modules
+existed, platform-free and covered by ten test files —
+`native/src/spike/`, where only the spike route could reach them.
+
+The web reached them anyway, across the boundary:
+`components/spike/ControllerScreen.jsx` imported
+`'../../native/src/spike/proMode.js'`, and `lib/spike/controllerSession.js`
+imported six more the same way. So the colour controls, the zoom plan,
+the mirror rule and the director's wire protocol were owned by the mobile
+folder and borrowed by the website. That is the drift mechanism from the
+audio chain in a different costume, and it is why the artist journey has
+none of these capabilities while the spike route has all of them.
+
+The ten modules are now `lib/camera/`, imported `@loud/lib/camera/x.js`
+by the phone and `lib/camera/x.js` by the web. No logic changed; this is
+a move and an import rewrite.
+
+One duplicate came out of it. `ORIENTATIONS`, `DEFAULT_ORIENTATION` and
+`normaliseOrientation` were defined in both `lib/orientation.js` and the
+moved orientation module — identical behaviour, two definitions. The
+camera module now re-exports them. `lib/orientation.js` says what an
+orientation IS, because that is a property of a show; `lib/camera/`
+owns the device layer: rotation, gravity, mount, texture.
+
+`tests/camera-shared.test.mjs` is the guard: nothing in `lib/camera/` may
+name a platform, nothing outside `native/` may import from `native/`, and
+orientation may not be defined twice. The third assertion sweeps the
+whole repository rather than the files I touched, because the next such
+import will be written somewhere I am not looking.
+
+Rejected: leaving them where they are and importing across the boundary
+from the artist screens too (that is the fault, not a workaround for it),
+and copying them into `lib/` (two copies of a compressor threshold is how
+the audio chain went wrong last week).
 ## 2026-11-06 — The native vocal chain: Kotlin runs the loop, JavaScript owns the maths
 
 Korey's ruling: build the native audio path for the phone and leave

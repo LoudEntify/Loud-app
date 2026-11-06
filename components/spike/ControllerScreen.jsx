@@ -13,8 +13,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Room } from 'livekit-client';
 import { useSession } from '../../lib/useSession';
 import { WebControllerSession } from '../../lib/spike/controllerSession';
-import { proWarnings, residualLine, STAGES } from '../../native/src/spike/proMode.js';
-import { ORIENTATIONS } from '../../native/src/spike/orientation.js';
+import { proWarnings, residualLine, STAGES } from '../../lib/camera/proMode.js';
+import { ORIENTATIONS } from '../../lib/camera/orientation.js';
 
 const mono = { fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 13, lineHeight: 1.4, wordBreak: 'break-word' };
 const small = { height: 40, padding: '0 14px', fontSize: 15 };

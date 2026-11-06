@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { WebControllerSession, browserDeviceId, browserProfile, absoluteUploadUrl, EVENTS, ROLE } from '../lib/spike/controllerSession.js';
-import { TOPIC, decode, encode, ack, mountStatus } from '../native/src/spike/commands.js';
+import { TOPIC, decode, encode, ack, mountStatus } from '../lib/camera/commands.js';
 import { clockUpstreamBase, fetchUpstreamClock } from '../lib/spike/clockUpstream.js';
 
 const UA_MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -244,7 +244,7 @@ test('a relayed clock still yields a correct offset on the laptop: the round tri
   let t = 0; const now = () => t;
   const staging = async () => { t += 40; return { ok: true, status: 200, json: async () => ({ serverMs: 5_000_000 + t }) }; }; // staging is 5,000 s ahead
   const localRoute = async () => { t += 5; const r = await fetchUpstreamClock('https://s', { fetchImpl: staging }); t += 5; return { ok: r.ok, status: 200, json: async () => ({ serverMs: r.serverMs, via: 'https://s' }) }; };
-  const { measureOffset } = await import('../native/src/spike/clock.js');
+  const { measureOffset } = await import('../lib/camera/clock.js');
   const o = await measureOffset({ base: '', fetchImpl: localRoute, now, samples: 3 });
   assert.equal(o.rttMs, 50);                 // 5 + 40 + 5, the whole trip
   assert.equal(o.errorBoundMs, 25);

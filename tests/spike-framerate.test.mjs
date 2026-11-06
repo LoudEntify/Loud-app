@@ -3,7 +3,7 @@
 // ranges the HAL advertises, and the warnings.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FRAME_RATE_CHOICES, cleanRanges, frameRateSupport, frameRateOptions, resolveFrameRate, frameRateWarnings } from '../native/src/spike/frameRate.js';
+import { FRAME_RATE_CHOICES, cleanRanges, frameRateSupport, frameRateOptions, resolveFrameRate, frameRateWarnings } from '../lib/camera/frameRate.js';
 
 // Samsung-like: fixed 24, 30 and 60, plus variable ranges. Moto-like: 30 fixed, 15–30 variable. Bare: nothing reported.
 const samsung = [[7, 30], [15, 30], [24, 24], [30, 30], [8, 60], [60, 60]];

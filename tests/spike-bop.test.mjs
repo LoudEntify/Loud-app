@@ -2,8 +2,8 @@
 // (zoomPlan.js bopPlan, docs/DECISIONS.md 2026-10-21). Platform-free.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bopPlan, bopCurve, bopPulse, unrealisable, realise, BOP_DEFAULTS, BOP_DIRECTIONS, MIN_PAN_ZOOM, SHOT_HOME, capsFor } from '../native/src/spike/zoomPlan.js';
-import { bopCommand } from '../native/src/spike/commands.js';
+import { bopPlan, bopCurve, bopPulse, unrealisable, realise, BOP_DEFAULTS, BOP_DIRECTIONS, MIN_PAN_ZOOM, SHOT_HOME, capsFor } from '../lib/camera/zoomPlan.js';
+import { bopCommand } from '../lib/camera/commands.js';
 
 const gpuCaps = { frameSource: 'gpu', panPath: 'crop', deviceZoom: { available: true, min: 0.6, max: 10 }, digitalMax: 1.2 };   // the S25 Ultra
 const g35 = { primaryCameraId: '0', deviceZoom: { available: true, min: 1, max: 4 }, lenses: [{ id: '0', sensor: { activeArray: { width: 4080, height: 3072, left: 0, top: 0 }, maxDigitalZoom: 4 } }] };

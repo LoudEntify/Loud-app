@@ -4,7 +4,7 @@
 // front unless the front camera really advertises more.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FACINGS, FLIP_OVERRIDES, lensesFacing, primaryLensFacing, facingCapability, facingCapabilities, describeFacing, commandAllowed, mirrorRule } from '../native/src/spike/facing.js';
+import { FACINGS, FLIP_OVERRIDES, lensesFacing, primaryLensFacing, facingCapability, facingCapabilities, describeFacing, commandAllowed, mirrorRule } from '../lib/camera/facing.js';
 
 const sensor = (w, h, cropping = 'freeform', maxDigital = 4) => ({ activeArray: { width: w, height: h }, pixelArray: { width: w, height: h }, croppingType: cropping, maxDigitalZoom: maxDigital, apertures: [1.8] });
 const proFull = { hardwareLevel: 'full', manualSensor: true, manualPostProcessing: true, readSensorSettings: true, isoRange: [50, 6400], shutterNsRange: [20000, 500000000], evRange: [-12, 12], evStep: 0.1667, focus: { minDiopters: 10, calibration: 'approximate', afModes: ['off', 'auto'] }, awbModes: ['off', 'auto'], awbLockAvailable: true, aeModes: ['off', 'on'], aeLockAvailable: true, fpsRanges: [[24, 24], [30, 30], [60, 60]] };
