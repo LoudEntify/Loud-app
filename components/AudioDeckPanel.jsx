@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PRESET } from '../lib/audio/chain';
 import Knob from './Knob';
 import LevelMeterFader from './LevelMeterFader';
 import BackingTrackPanel from './BackingTrackPanel';
@@ -15,19 +16,13 @@ import { getAudioHost, subscribeAudioHost } from '../lib/audioHost';
 
 const AUTO_DISABLED_NOTICE_MS = 4_000; // how long "Monitoring off -- you're live" stays visible
 
-// The tested-good starting point every performer goes live with. Manual
-// mix is off by default -- these values are already applied by
-// createPilotAudioTrack()'s own defaults, this object just mirrors them so
-// the knobs display correctly and so re-enabling "preset" can restore them.
-const PRESET = {
-  inputDb: 0,
-  highpass: 80,
-  threshold: -24,
-  ratio: 3,
-  gainDb: 4,
-  reverbMix: 0.12,
-  outputDb: 0,
-};
+// The tested-good starting point every performer goes live with, from
+// lib/audio/chain.js. It used to be written out again here, "so the
+// knobs display correctly", which made two copies of the same seven
+// numbers on one platform. A native chain on the phone (Korey's ruling,
+// 6 Nov) would have made three, and three copies of a compressor
+// threshold is how an artist sounds different on their phone than on
+// their laptop with nobody able to say why.
 
 export default function AudioDeckPanel({
   nodes,
