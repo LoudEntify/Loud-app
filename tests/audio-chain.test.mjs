@@ -134,3 +134,39 @@ test('the web holds no second copy of the numbers', () => {
     assert.ok(!code.includes(forbidden), `and reaches for no platform: ${forbidden}`);
   }
 });
+
+test('the stored row and the chain are the same seven numbers, clamped both ways', async () => {
+  const { chainFromRow, chainToRow, PRESET, CONTROLS, SWITCHES } = await import('../lib/audio/chain.js');
+
+  // No row at all is the preset, not an empty chain: a new artist gets
+  // the settings the pilot was performed through.
+  const fresh = chainFromRow(null);
+  for (const c of CONTROLS) assert.equal(fresh[c.key], PRESET[c.key], `${c.key} should start at the preset`);
+
+  // A row written by an older build, or by hand, cannot put a phone and
+  // a browser into different states: anything out of range is clamped on
+  // the way out, anything missing takes the preset.
+  const wild = chainFromRow({ settings: { ratio: 9999, highpass: -5, threshold: -24, unknownKey: 'ignored' } });
+  const ratio = CONTROLS.find((c) => c.key === 'ratio');
+  const highpass = CONTROLS.find((c) => c.key === 'highpass');
+  assert.equal(wild.ratio, ratio.max);
+  assert.equal(wild.highpass, highpass.min);
+  assert.equal(wild.threshold, -24, 'a value inside its range is kept exactly');
+  assert.equal(wild.gainDb, PRESET.gainDb, 'a missing control takes the preset');
+  assert.ok(!('unknownKey' in wild), 'an unknown key does not survive the round trip');
+
+  // monitorOn is stored but never trusted on read (SWITCHES): an artist
+  // who left monitoring on last time should not find it on when they
+  // plug a wired headset in at a venue.
+  assert.equal(chainFromRow({ settings: { monitorOn: true } }).monitorOn, SWITCHES.monitorOn);
+  assert.equal(SWITCHES.monitorOn, false);
+
+  // And on the way in: the row carries normalised settings, so the
+  // database cannot hold a value no platform can apply.
+  const row = chainToRow('artist-1', { ratio: -3, reverbMix: 5, effectsOn: true });
+  assert.equal(row.artist_id, 'artist-1');
+  assert.equal(row.settings.ratio, ratio.min);
+  assert.equal(row.settings.reverbMix, CONTROLS.find((c) => c.key === 'reverbMix').max);
+  assert.equal(row.settings.effectsOn, true);
+  assert.ok(Date.parse(row.updated_at) > 0, 'the row stamps its own update time');
+});

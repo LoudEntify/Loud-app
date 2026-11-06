@@ -701,3 +701,48 @@ Rejected: keeping a lens switcher in the camera list and adding devices
 beside it (two kinds of thing in one row is how the confusion started),
 and showing a count alongside the verdict (the count is the thing that
 does not help).
+
+## 2026-11-06 — Audio settings get a store, and the screen that said they could not
+
+`native/app/settings/audio.js` used to be four notices explaining that
+none of it was built: no vocal chain in the capturer, no store behind a
+saved place, no delay check. They were true when written, and
+docs/ONE_JOURNEY.md §3 is about why they were the wrong artefact.
+
+What they were waiting on now exists, so three of the four come out.
+`audio_settings` (one row per artist, jsonb, keyed on the user id exactly
+as `direction_settings` is) stores the artist's own seven numbers;
+`/api/artist/audio` reads and writes them under the service role with
+every change audited; the screen has the controls, and each change
+reaches both the row and the capturer.
+
+NOT per place, though the board offered "Settings for [Saved place]".
+Places do not exist, and a place-keyed store would ask an artist to tune
+a compressor per venue before they have tuned one at all. A place key can
+join the primary key later without moving the column.
+
+Steppers rather than sliders. Every control publishes its own step —
+0.5 dB of input trim, 5 Hz of low cut, 1 dB of threshold — and a thumb on
+a phone cannot hit those, while a dragged slider sends a stream of values
+at a live DSP. Minus and plus hit the published step exactly and read out
+the number the artist set. The filled track still shows where in the
+range the value sits, which is what the slider was for. A slider library
+would also have had to be version-picked blind: Expo's version service is
+unreachable from the build box, and taking npm's latest major instead of
+the SDK's pinned one is the mistake of expo-document-picker and
+expo-crypto, twice in one week. Core primitives cannot be mispinned.
+
+`monitorOn` is stored and then ignored on read. SWITCHES says monitoring
+starts false every session, and an artist who left it on last time should
+not discover it when they plug a wired headset in at a venue.
+
+Verified against a Postgres 16 with all 63 migrations applied from
+scratch: columns as declared, one SELECT policy and no other,
+`supabase/tests/audio_settings_access.sql` passing (anon sees nothing;
+the owner reads only their own row; no client insert, update or delete;
+the service role upserts; deleting the account cascades the settings
+away), and the rollback dropping the table cleanly.
+
+Still not built, and still saying so on the screen: the microphone picker
+(the capturer reports no audio inputs), the live input meter, and the
+headphone delay check. Those three are the next PR.
