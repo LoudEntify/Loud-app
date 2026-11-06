@@ -446,3 +446,33 @@ test('the performing phone sends sound, and says so when it cannot', () => {
   const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
   assert.match(console_, /NO SOUND/, 'and the console says so while the artist can still fix it');
 });
+
+test('a backing track carries the hash its route refuses to work without', () => {
+  // /api/tracks/upload-url rejects an upload with no sha256, and its own
+  // error says "this is a client bug, not a bad file". It was: the first
+  // native uploader never sent one, so every backing-track upload from
+  // the phone failed at the first call while B-roll, whose route wants
+  // no hash, went through.
+  const src = readFileSync(resolve(ROOT, 'native/src/upload.js'), 'utf8');
+  assert.match(src, /sha256OfFile/, 'the file is hashed');
+  assert.match(src, /CryptoDigestAlgorithm\.SHA256/, 'over its bytes, not its name');
+  assert.match(src, /hashed: true/, 'for tracks');
+  assert.match(src, /hashed: false/, 'and not for B-roll, whose route wants none');
+  assert.match(src, /alreadyHave/, 'and a track already held is a success, not a second upload');
+});
+
+test('one device holds Main, and one holds the control panel', () => {
+  // Korey's rig held two devices both called Main: his own phone and a
+  // second paired into the same role. Both claimed the same cut and the
+  // Kit Check tiles both read "Main · on air first", so which one a
+  // viewer saw was whichever the fallback chain reached first.
+  const route = readFileSync(resolve(ROOT, 'app/api/camfeed/pair/route.js'), 'utf8');
+  assert.match(route, /EXCLUSIVE_ROLES\.includes\(role\)/, 'an exclusive role is checked');
+  assert.match(route, /select\('id, role,/, 'against the roles already held');
+  assert.match(route, /Remove it first, or pair this one as another angle/, 'and says what to do');
+  // Refused at minting: a code already in somebody's hand is the wrong
+  // place to find out.
+  const mintIdx = route.indexOf('EXCLUSIVE_ROLES.includes(role)');
+  const insertIdx = route.indexOf('.insert(row)');
+  assert.ok(mintIdx > 0 && mintIdx < insertIdx, 'before the row is written, not after');
+});
