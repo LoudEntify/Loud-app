@@ -746,3 +746,51 @@ away), and the rollback dropping the table cleanly.
 Still not built, and still saying so on the screen: the microphone picker
 (the capturer reports no audio inputs), the live input meter, and the
 headphone delay check. Those three are the next PR.
+
+## 2026-11-06 — Headphone delay: the rules move to lib/audio/sync.js
+
+Korey, 5 Nov: "The Blue tooth earphone calibrator is not built." It is
+built, and has been performed through — on the web, in
+lib/audioSyncCalibration.js. What was never built is any way for the
+phone to run it, for the same reason as the vocal chain: the measurement
+is Web Audio (an AudioContext scheduling clicks, an AnalyserNode hearing
+the reply) and React Native has none of it.
+
+Split where the chain is split. Playing a click and timing a vocal onset
+is platform work. Deciding whether twelve measurements can be trusted,
+and what to tell the artist, is arithmetic — so `lib/audio/sync.js` now
+owns the click train, the rejection gates, the median and the verdict,
+and the web measurement re-exports them under its old names rather than
+keeping its own. Its local `median` and `medianAbsoluteDeviation` are
+deleted, and its result block is one call to `summariseCalibration`.
+
+The rejection rules are the whole safety of the feature and are now
+tested as such: a bad measurement applied is worse than none, because
+over- or under-compensating puts an artist further behind the track than
+leaving them alone and they would not know why. Too few answers heard is
+a refusal that reports no median at all, because a median there would
+read as an answer. Answers that disagree too much are refused even when
+there are twelve of them, but the median IS shown beside that refusal, so
+the artist can see it was close. A cancelled run applies nothing.
+
+The lead-in reps are dropped inside the shared function rather than by
+each caller, so no platform can forget and report a measurement polluted
+by the artist finding the tempo.
+
+One number was a duplicate in disguise: the web clamped compensation to
+`SYNC_DELAY_MAX_S * 1000`, the length of the delay node it builds.
+That is now `MAX_COMPENSATION_MS` in the shared module, with a test
+tying the two together — if they drifted, the web would set a delay
+longer than its own node, Web Audio would silently clamp it, and the
+artist would be told 600ms was corrected while 500 was.
+
+What this does NOT do: give the phone the measurement. That needs a
+click played and a vocal onset timed in Kotlin, because a 10 Hz poll
+cannot time a 20ms onset. The native screen's notice about the delay
+check therefore stands for now, and it is the next piece.
+
+Rejected: reimplementing the statistics on the phone (the drift that
+lib/audio/chain.js exists to prevent), and a simpler "measure the
+Bluetooth codec latency" approach (the spec-sheet number is not what
+makes a performer sing behind the track — the round trip through their
+ears and back through the microphone is).
