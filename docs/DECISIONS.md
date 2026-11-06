@@ -746,3 +746,48 @@ away), and the rollback dropping the table cleanly.
 Still not built, and still saying so on the screen: the microphone picker
 (the capturer reports no audio inputs), the live input meter, and the
 headphone delay check. Those three are the next PR.
+
+## 2026-11-06 — The signal indicator, and the effects switch stops being a flag
+
+Korey, 5 Nov: "There is no audio signal indicator." There is now, on both
+platforms, and making it work required one change to the chain.
+
+`LoudVocalChain` had an `enabled` field that the effects switch set, and
+`isEnabled()` returned it — so with effects off, LiveKit never called
+`processAudio` at all. A meter living in that loop would only have read a
+level once the artist switched processing on, which is useless for the
+thing a meter is for: knowing whether the microphone is hearing you.
+
+So `enabled` is gone and `configured` replaces it, meaning only that a
+config computed for this sample rate has arrived. The effects switch was
+already fully expressed by the crossfade — processedGain and bypassGain,
+one of them zero, rule 1 of lib/audio/chain.js — so it never needed a
+flag beside it. The loop now runs whenever a config exists and the two
+gains decide what comes out, which is what rule 1 said all along. The
+rate-change guard is unchanged: `resetAudioProcessing` clears
+`configured` so the loop cannot run yesterday's coefficients.
+
+The meter reads after the input trim and before the chain, which is
+"what the microphone is hearing" rather than what the settings have done
+to it, and holds its peak until read — so polling at 10 Hz against 100
+frames a second loses nothing: each read reports the loudest frame since
+the last rather than whichever one it landed on.
+
+`lib/audio/meter.js` decides what a level MEANS, because a meter reading
+"good" on a laptop and "quiet" on a phone for the same voice is worse
+than no meter: the artist would trust whichever they saw last. Five
+bands, each carrying the line to show and the action that fixes it, and
+"good" carrying no action because the answer is yes. Judged on peak
+rather than average: an artist clips on their loudest syllable and an
+average that looks healthy hides it.
+
+The web's Kit Check had its own rule inline — `peak > 0.02` — and now
+reads the shared module, so the same voice reaches the same verdict in
+both places. The compressor's gain reduction is shown too, because a
+threshold and a ratio tell an artist nothing about their own voice.
+
+Rejected: an event stream from Kotlin per frame (100 bridge crossings a
+second for a bar nobody looks at closely), a meter in the console as well
+(the console is for the show; this is a setup instrument), and keeping
+`enabled` alongside `configured` (two fields meaning nearly the same
+thing is how the next bug gets written).

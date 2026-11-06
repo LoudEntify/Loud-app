@@ -53,8 +53,33 @@ import kotlin.math.pow
 class LoudVocalChain : AudioProcessorInterface {
 
   // ── Coefficients, all set from JS ────────────────────────────
-  @Volatile private var enabled = false
+  //
+  // `configured` is not the effects switch. It means a config computed
+  // for THIS sample rate has arrived, and nothing else. The effects
+  // switch is the crossfade: processedGain and bypassGain, one of which
+  // is zero (rule 1 above). So the loop runs whenever a config exists,
+  // even with effects off, and the only difference is which of the two
+  // gains carries the signal.
+  //
+  // That is what lets the input meter work with effects off. A level the
+  // artist can only see once they have switched processing on would be
+  // useless for the thing a meter is for: knowing whether the microphone
+  // is hearing you at all.
+  @Volatile private var configured = false
   @Volatile private var cfg: Config = Config()
+
+  // ── What the meter reads ─────────────────────────────────────
+  // Written by the audio thread, read by JS. Floats, so a read can only
+  // be stale by one 10ms frame, never torn.
+  //
+  // `level` is the INPUT, after the trim and before the chain: what the
+  // microphone is hearing. `reduction` is how many dB the compressor is
+  // taking off right now, which is the only honest way to show that
+  // compression is working — a threshold and a ratio tell an artist
+  // nothing about their own voice.
+  @Volatile private var levelPeak = 0f
+  @Volatile private var levelRms = 0f
+  @Volatile private var reductionPeak = 0f
 
   /** Everything the loop needs. Replaced wholesale, never edited in place, so a mid-frame change cannot tear. */
   data class Config(
@@ -98,11 +123,33 @@ class LoudVocalChain : AudioProcessorInterface {
   private var apBuf: Array<FloatArray> = arrayOf()
   private var apIdx = IntArray(0)
 
-  fun setEnabled(on: Boolean) { enabled = on }
+  /**
+   * The meter, as JS reads it: input level and compressor action over
+   * the frames since the last read.
+   *
+   * Peak-since-read rather than an instantaneous sample, because a UI
+   * polling at 10 Hz against 100 frames a second would otherwise show
+   * whichever single frame it happened to land on, which for speech
+   * means a meter that misses most of the words.
+   */
+  fun meter(): Map<String, Any?> {
+    val out = mapOf(
+      "configured" to configured,
+      "peak" to levelPeak,
+      "rms" to levelRms,
+      "reductionDb" to reductionPeak,
+      "sampleRate" to rate,
+      "channels" to channels,
+    )
+    levelPeak = 0f
+    reductionPeak = 0f
+    return out
+  }
 
   /** Called from JS whenever a knob moves. Cheap, and safe at any time. */
   fun setConfig(next: Config) {
     cfg = next
+    configured = true
     // Delay lines are sized by the config, so a change that resizes them
     // rebuilds them. Everything else is read per sample.
     if (combBuf.size != next.combDelays.size || combBuf.indices.any { combBuf[it].size != next.combDelays[it] }) {
@@ -117,7 +164,7 @@ class LoudVocalChain : AudioProcessorInterface {
     apIdx = IntArray(c.allpassDelays.size)
   }
 
-  override fun isEnabled(): Boolean = enabled
+  override fun isEnabled(): Boolean = configured
 
   override fun getName(): String = "LoudVocalChain"
 
@@ -137,18 +184,26 @@ class LoudVocalChain : AudioProcessorInterface {
     // no chain, because it is wrong in a way nobody can hear until the
     // recording is played back.
     rate = newRate
-    enabled = false
+    configured = false
+    levelPeak = 0f; levelRms = 0f; reductionPeak = 0f
     initializeAudioProcessing(newRate, channels)
   }
 
   override fun processAudio(numBands: Int, numFrames: Int, buffer: ByteBuffer) {
     val c = cfg
-    if (!enabled || numBands != 1) return
+    if (!configured || numBands != 1) return
 
     buffer.order(ByteOrder.nativeOrder())
     val pcm = buffer.asShortBuffer()
     val total = numFrames * channels
     if (pcm.capacity() < total) return
+
+    // Meter accumulators for this frame. Kept local and written once at
+    // the end: a volatile write per sample would cost more than the
+    // chain does.
+    var framePeak = 0f
+    var sumSquares = 0f
+    var frameReduction = 0f
 
     for (i in 0 until total) {
       val ch = if (channels > 1) i % channels else 0
@@ -156,6 +211,14 @@ class LoudVocalChain : AudioProcessorInterface {
 
       // Input trim. Everything before this is raw hardware level.
       val trimmed = input * c.inputGain
+
+      // The meter reads here: after the trim, before the chain. This is
+      // "what the microphone is hearing", which is the question a level
+      // meter answers, and it is the same number whether effects are on
+      // or off.
+      val mag = abs(trimmed)
+      if (mag > framePeak) framePeak = mag
+      sumSquares += trimmed * trimmed
 
       // ── The processed path ───────────────────────────────────
       // High-pass: the same difference equation tests/audio-dsp.test.mjs
@@ -171,6 +234,7 @@ class LoudVocalChain : AudioProcessorInterface {
       val coef = if (levelDb > envDb[ch]) c.attack else c.release
       envDb[ch] = levelDb + coef * (envDb[ch] - levelDb)
       val reduction = gainReductionDb(envDb[ch], c)
+      if (reduction > frameReduction) frameReduction = reduction
       val compressed = hp * 10f.pow(-reduction / 20f) * c.makeupGain
 
       // Reverb, mono-fed and parallel: the dry signal is never reduced
@@ -185,6 +249,13 @@ class LoudVocalChain : AudioProcessorInterface {
 
       pcm.put(i, (max(-1f, min(1f, out)) * 32767f).toInt().toShort())
     }
+
+    // Published once per frame. The peaks hold until JS reads them, so a
+    // meter polling slower than 100 Hz still sees every syllable; the
+    // RMS is this frame's, which is what a steady bar should follow.
+    if (framePeak > levelPeak) levelPeak = framePeak
+    if (frameReduction > reductionPeak) reductionPeak = frameReduction
+    levelRms = if (total > 0) kotlin.math.sqrt(sumSquares / total) else 0f
   }
 
   /** The soft knee, transcribed from gainReductionDb in lib/audio/dsp.js. */

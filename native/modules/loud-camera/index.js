@@ -81,8 +81,12 @@ export function addStateListener(fn) { return native ? native.addListener('onSta
 /**
  * Install or update the artist's vocal chain.
  *
- * `config` comes from nativeChainConfig() in lib/audio/dsp.js, plus an
- * `enabled` flag. Every value in it is already in the units the native
+ * `config` comes from nativeChainConfig() in lib/audio/dsp.js. There is
+ * no enable flag: the effects switch is the crossfade inside the config
+ * (processedGain and bypassGain, one of them zero), so the loop runs
+ * whenever a config exists. That is what lets the input meter report a
+ * level with effects off, which is the state an artist checking their
+ * microphone is usually in. Every value in it is already in the units the native
  * loop uses: dB converted to linear gain, filter coefficients rather
  * than a frequency, delay lengths in samples. Nothing is computed on
  * the other side.
@@ -96,7 +100,18 @@ export function setVocalChain(config) {
   return native ? native.setVocalChain(config) : Promise.resolve({ ok: false, error: 'no native module' });
 }
 
-/** Whether the chain is installed and running. For the console's own status line. */
+/**
+ * The chain's state and its meter:
+ * { installed, configured, peak, rms, reductionDb, sampleRate, channels }.
+ *
+ * `peak` and `reductionDb` are the highest since the LAST call and are
+ * cleared by it, so a screen polling at 10 Hz still sees every syllable
+ * of speech that passed at 100 frames a second. `rms` is the most recent
+ * frame's, which is what a steady bar should follow.
+ *
+ * Levels are 0..1 on the sample scale, not dB: the screen decides how to
+ * draw them.
+ */
 export function vocalChainState() {
-  return native ? native.vocalChainState() : Promise.resolve({ installed: false, enabled: false });
+  return native ? native.vocalChainState() : Promise.resolve({ installed: false, configured: false });
 }

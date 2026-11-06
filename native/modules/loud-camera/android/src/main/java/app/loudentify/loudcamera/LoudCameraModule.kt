@@ -169,9 +169,12 @@ class LoudCameraModule : Module() {
           vocalChain = it
           LiveKitReactNative.audioProcessingController.capturePostProcessor = it
         }
+        // No separate enable flag. The effects switch IS the crossfade
+        // inside the config (processedGain / bypassGain, one of them
+        // zero), so the loop runs whenever a config exists and the
+        // meter can report the input level with effects off.
         chain.setConfig(vocalChainConfig(config))
-        chain.setEnabled(config["enabled"] as? Boolean ?: false)
-        promise.resolve(mapOf("ok" to true, "enabled" to chain.isEnabled()))
+        promise.resolve(mapOf("ok" to true, "configured" to chain.isEnabled()))
       } catch (e: Throwable) {
         // A chain that will not start must never stop a show. The
         // artist goes out dry, which is how the pilot's own default
@@ -180,8 +183,12 @@ class LoudCameraModule : Module() {
       }
     }
 
+    // The meter: input level and compressor action since the last read.
+    // Cheap enough to poll — it reads four floats and clears two.
     AsyncFunction("vocalChainState") { ->
-      mapOf("installed" to (vocalChain != null), "enabled" to (vocalChain?.isEnabled() ?: false))
+      val chain = vocalChain
+      if (chain == null) mapOf("installed" to false, "configured" to false)
+      else mapOf("installed" to true) + chain.meter()
     }
 
     // Orientation (docs/DECISIONS.md 2026-10-14): portrait | landscape,
