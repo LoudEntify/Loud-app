@@ -38,6 +38,7 @@ import {
 } from '../../src/ui';
 import { api } from '../../src/api';
 import { describeRig, rigSummary, rigReady } from '@loud/lib/rig.js';
+import { cameraTiles, defaultTile, tileDetail, readyState, FACING_LABEL } from '@loud/lib/kitCheck.js';
 import { useRehearsalRoom, REHEARSAL_READY, REHEARSAL_JOINING } from '../../src/rehearsalRoom';
 import { camerasInRoom } from '../../src/ui';
 import { OPENING_CUTS } from '@loud/lib/direction.js';
@@ -63,21 +64,23 @@ const PROBE_BYTES = 400 * 1024;
  */
 const ROWS = [
   { key: 'mic_signal', item: 'mic_signal', title: 'Mic signal', icon: Icon.Mic, confirm: 'Confirm', confirmed: 'Real signal from your voice' },
-  { key: 'camera_main', item: 'camera_frames', title: 'Main camera', icon: Icon.Camera },
-  { key: 'camera_side', item: 'camera_frames', title: 'Side camera', icon: Icon.Camera },
+  // ONE row for this handset's camera, where there were two.
+  //
+  // The two were "Main" and "Side", which were the back and front lenses
+  // of this phone dressed as two cameras — so switching chips restarted
+  // the two-minute hold against the same device, and an artist with three
+  // phones paired had a check for none of them. The paired phones are
+  // reported by the rig band above, from their pairings, which is a real
+  // signal rather than a preview staying up. This row is this phone.
+  { key: 'camera_frames', item: 'camera_frames', title: 'This phone’s camera', icon: Icon.Camera },
   { key: 'connection', item: 'connection', title: 'Connection', icon: Icon.Cloud },
   { key: 'charging', item: 'charging', title: 'Charging' },
   { key: 'dnd', item: 'dnd', title: 'Do Not Disturb', icon: Icon.Bell, confirm: 'Turn on', confirmed: 'On (confirmed by you)' },
   { key: 'headphones', item: 'headphones', title: 'Headphones', confirm: 'Confirm', confirmed: 'Wired, no delay' },
 ];
 
-const CAMERAS = [
-  { key: 'camera_main', chip: 'Main', facing: 'back' },
-  { key: 'camera_side', chip: 'Side', facing: 'front' },
-];
-
-const START_OF = { mic_signal: 'Say a few words, then confirm', camera_main: 'Holding frames, 0 of 2 minutes', camera_side: 'Not checked yet', connection: 'Measuring', charging: 'Checking the battery', dnd: 'Calls could interrupt your show', headphones: 'Wired is best for singing' };
-const START_STATUS = { mic_signal: 'checking', camera_main: 'checking', camera_side: 'skipped', connection: 'checking', charging: 'checking', dnd: 'fix', headphones: 'skipped' };
+const START_OF = { mic_signal: 'Say a few words, then confirm', camera_frames: 'Holding frames, 0 of 2 minutes', connection: 'Measuring', charging: 'Checking the battery', dnd: 'Calls could interrupt your show', headphones: 'Wired is best for singing' };
+const START_STATUS = { mic_signal: 'checking', camera_frames: 'checking', connection: 'checking', charging: 'checking', dnd: 'fix', headphones: 'skipped' };
 
 const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -102,7 +105,12 @@ export default function KitCheck() {
     enabled: Boolean(accessToken) && profile?.role === 'artist',
     orientation: 'portrait',
   });
-  const [camera, setCamera] = useState('camera_main');
+  // Which DEVICE the preview is showing, and — separately — which way
+  // round this handset's own lens points. They were one piece of state
+  // and that was the bug: choosing another camera turned this phone
+  // around instead of showing the other phone.
+  const [showingKey, setShowingKey] = useState('own');
+  const [facing, setFacing] = useState('back');
   const [show, setShow] = useState(undefined);        // undefined while reading, null when there is none
   const [place, setPlace] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -112,7 +120,7 @@ export default function KitCheck() {
   const [checks, setChecks] = useState(() => Object.fromEntries(
     ROWS.map((r) => [r.key, { status: START_STATUS[r.key], detail: START_OF[r.key] }]),
   ));
-  const held = useRef({ camera_main: null, camera_side: null });
+  const held = useRef({ camera_frames: null });
 
   const setCheck = useCallback((key, value) => setChecks((c) => ({ ...c, [key]: value })), []);
 
@@ -188,20 +196,24 @@ export default function KitCheck() {
   // stop arriving when the phone is showing something else.
   useEffect(() => {
     if (!perm?.granted) {
-      setCheck('camera_main', { status: 'fix', detail: 'Allow camera access to check it' });
+      setCheck('camera_frames', { status: 'fix', detail: 'Allow camera access to check it' });
       return undefined;
     }
-    held.current[camera] = held.current[camera] ?? Date.now();
-    const away = AppState.addEventListener('change', (s) => { if (s !== 'active') held.current[camera] = Date.now(); });
+    // One clock, for this handset. Turning the lens around does not
+    // restart it: it is the same camera hardware either way, and an
+    // artist who flips the phone to check their framing should not lose
+    // two minutes for it.
+    held.current.camera_frames = held.current.camera_frames ?? Date.now();
+    const away = AppState.addEventListener('change', (s) => { if (s !== 'active') held.current.camera_frames = Date.now(); });
     const tick = setInterval(() => {
-      const since = Date.now() - (held.current[camera] || Date.now());
+      const since = Date.now() - (held.current.camera_frames || Date.now());
       const mins = Math.floor(since / 60_000);
-      setCheck(camera, since >= HOLD_MS
+      setCheck('camera_frames', since >= HOLD_MS
         ? { status: 'ready', detail: 'Held frames for 2 minutes' }
         : { status: 'checking', detail: `Holding frames, ${mins} of 2 minutes` });
     }, 1000);
     return () => { clearInterval(tick); away.remove(); };
-  }, [camera, perm?.granted, setCheck]);
+  }, [perm?.granted, setCheck]);
 
   // Charging, and it keeps listening.
   useEffect(() => {
@@ -254,8 +266,6 @@ export default function KitCheck() {
 
   useEffect(() => { if (accessToken) measureConnection(); }, [accessToken, measureConnection]);
 
-  const ready = ROWS.filter((r) => checks[r.key].status === 'ready').length;
-  const toFix = ROWS.filter((r) => checks[r.key].status === 'fix').length;
 
   /** Framing is the preview's own pill, not a row: it is ready once there is a picture. */
   const framing = perm?.granted ? 'ready' : 'fix';
@@ -298,7 +308,13 @@ export default function KitCheck() {
   // Every camera in the rehearsal room, which is the rig as it
   // actually is rather than as the database remembers it.
   const roomCameras = camerasInRoom(rehearsal.room);
-  const ownRoomCamera = roomCameras.find((c) => c.role === 'main') || null;
+
+  // The camera list, as DEVICES (lib/kitCheck.js). The web twin builds
+  // its list from the same function, so the two screens cannot come to
+  // different conclusions about which cameras exist.
+  const tiles = cameraTiles({ devices: rigDevices, cameras: roomCameras });
+  const showing = tiles.find((t) => t.key === showingKey) || defaultTile(tiles);
+  const verdict = readyState({ devices: rigDevices, checks });
 
   if (loading) return <KitSkeleton />;
 
@@ -432,12 +448,16 @@ export default function KitCheck() {
         {/* The shot from this phone, with the thirds over it. Never the
             broadcast picture: there is no broadcast while this is open. */}
         <View style={{ height: 220, borderRadius: radius.cardLg, overflow: 'hidden' }}>
-          {rehearsal.phase === REHEARSAL_READY && ownRoomCamera ? (
-            <KitFeed camera={ownRoomCamera} />
+          {showing && !showing.own ? (
+            // Another phone in the rig. Its own picture, from the
+            // rehearsal room — not this handset's other lens.
+            showing.showing === 'feed' && rehearsal.phase === REHEARSAL_READY
+              ? <KitFeed camera={showing.feed} />
+              : <MediaTile label={tileDetail(showing)} style={{ flex: 1 }} />
           ) : perm?.granted ? (
             <CameraView
               style={{ flex: 1 }}
-              facing={CAMERAS.find((c) => c.key === camera)?.facing || 'back'}
+              facing={facing}
               accessibilityLabel="Your own camera, as a rehearsal"
             />
           ) : (
@@ -448,7 +468,7 @@ export default function KitCheck() {
             {['33.3%', '66.6%'].map((at) => <View key={`h${at}`} style={{ position: 'absolute', top: at, left: 0, right: 0, height: 1, backgroundColor: 'rgba(253,255,252,0.22)' }} />)}
           </View>
           <Text style={{ position: 'absolute', top: 12, left: 12, fontFamily: face.regular, fontSize: 14, letterSpacing: 1.1, textTransform: 'uppercase', color: 'rgba(253,255,252,0.75)' }}>
-            {camera === 'camera_main' ? 'Main camera view' : 'Side camera view'}
+            {showing ? showing.chip : 'No camera'}
           </Text>
           {framing === 'ready' ? (
             <View style={{ position: 'absolute', bottom: 12, left: '50%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 6, paddingRight: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(1,22,39,0.72)' }}>
@@ -458,14 +478,32 @@ export default function KitCheck() {
           ) : null}
         </View>
 
-        <View style={{ flexDirection: 'row', gap: space.sm }} accessibilityRole="radiogroup" accessibilityLabel="Camera">
-          {CAMERAS.map((c) => (
-            <Chip key={c.key} dark selected={camera === c.key} onPress={() => setCamera(c.key)}>{c.chip}</Chip>
+        {/* The camera list: one chip per DEVICE in the rig, which is
+            what Korey asked for and what this row never was. */}
+        <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }} accessibilityRole="radiogroup" accessibilityLabel="Cameras in your rig">
+          {tiles.map((t) => (
+            <Chip key={t.key} dark selected={showing?.key === t.key} onPress={() => setShowingKey(t.key)}>
+              {t.chip}
+            </Chip>
           ))}
           <Button kind="quietDark" size="chip" onPress={() => router.push('/camera')} icon={<Icon.Plus size={18} color={color.porcelain} />}>
             Add camera
           </Button>
         </View>
+
+        {/* Front or back is a setting on THIS phone, so it appears
+            inside this phone's own selection and nowhere else. You
+            cannot turn someone else's handset around from here. */}
+        {showing?.own && showing.facings ? (
+          <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }} accessibilityRole="radiogroup" accessibilityLabel="Which way this phone points">
+            <Text style={[textOnDark.supporting, { fontSize: 15 }]}>This phone points</Text>
+            {showing.facings.map((f) => (
+              <Chip key={f} dark selected={facing === f} onPress={() => setFacing(f)}>{FACING_LABEL[f]}</Chip>
+            ))}
+          </View>
+        ) : null}
+
+        <Text style={[textOnDark.supporting, { fontSize: 15 }]}>{tileDetail(showing)}</Text>
 
         <View accessibilityLabel="Checks">
           {ROWS.map((r, i) => (
@@ -490,16 +528,18 @@ export default function KitCheck() {
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${ready} of ${ROWS.length} ready${toFix ? `, ${toFix} to fix` : ''}. ${footerLine}`}
+          accessibilityLabel={`${verdict.line} ${footerLine}`}
           onPress={finish}
           disabled={saving}
           style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: space.m, padding: 14, paddingHorizontal: space.l, borderRadius: 18, backgroundColor: 'rgba(253,255,252,0.1)', opacity: pressed || saving ? 0.85 : 1 })}
           testID="kit-finish"
         >
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[textOnDark.rowTitle, { fontSize: 18 }]}>
-              {ready} of {ROWS.length} ready{toFix ? `, ${toFix} to fix` : ''}
-            </Text>
+            {/* A verdict, not a score. "4 of 7 ready" told an artist
+                standing in a venue to work out for themselves whether
+                that was good enough. This says either that they can go
+                live, or the one thing to do next. */}
+            <Text style={[textOnDark.rowTitle, { fontSize: 18 }]}>{verdict.line}</Text>
             <Text style={[textOnDark.supporting, { fontSize: 15 }]}>{saved && !show ? 'Saved. Nothing streams either way.' : footerLine}</Text>
           </View>
           <Icon.Chevron size={22} color={color.porcelain} />
