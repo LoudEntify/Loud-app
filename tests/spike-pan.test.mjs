@@ -5,9 +5,9 @@
 // full sensor (the 15 Oct report: a pan applied the full sensor after the first move).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { regionFor, windowOfRect, insideActive, toSensorRect, bandOf, displayWindowOf } from '../native/src/spike/region.js';
-import { shotWindow as sw } from '../native/src/spike/zoomPlan.js';
-import { capsFor, panPlan, shotWindow, zoomPlan, SHOT_HOME, PAN_DEFAULTS } from '../native/src/spike/zoomPlan.js';
+import { regionFor, windowOfRect, insideActive, toSensorRect, bandOf, displayWindowOf } from '../lib/camera/region.js';
+import { shotWindow as sw } from '../lib/camera/zoomPlan.js';
+import { capsFor, panPlan, shotWindow, zoomPlan, SHOT_HOME, PAN_DEFAULTS } from '../lib/camera/zoomPlan.js';
 
 const ACTIVE = { left: 0, top: 0, width: 4080, height: 3072 };
 const profile = { primaryCameraId: '0', lenses: [{ id: '0', facing: 'back', sensor: { activeArray: ACTIVE, maxDigitalZoom: 4 } }], deviceZoom: { available: true, min: 1, max: 4 }, qualityCeiling: { zoom: 2.1 } };

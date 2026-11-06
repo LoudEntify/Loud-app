@@ -1,11 +1,11 @@
 // Unit tests for the platform-free spike modules in native/src/spike.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseZoomMode, capsFor, realise, unrealisable, shotWindow, shotRoom, zoomPlan, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX, PAN_DEFAULTS, SHOT_HOME, MIN_PAN_ZOOM } from '../native/src/spike/zoomPlan.js';
-import { zoomCommand, panCommand, ack, encode, decode, roundTripMs, ackLatencies, summariseLatencies, TOPIC } from '../native/src/spike/commands.js';
-import { pickOffset, measureOffset, toServerMs } from '../native/src/spike/clock.js';
-import { CaptureBuffer, uploadDue, objectPath, BATCH_EVERY_MS, STATE_SAMPLE_MS, MAX_BUFFER_RECORDS } from '../native/src/spike/capture.js';
-import { normaliseProfile, surveyFileName, qualityCeiling, zoomRanges, bandWidthPx } from '../native/src/spike/survey.js';
+import { chooseZoomMode, capsFor, realise, unrealisable, shotWindow, shotRoom, zoomPlan, panPlan, ease, tightnessFor, DIGITAL_ZOOM_MAX, PAN_DEFAULTS, SHOT_HOME, MIN_PAN_ZOOM } from '../lib/camera/zoomPlan.js';
+import { zoomCommand, panCommand, ack, encode, decode, roundTripMs, ackLatencies, summariseLatencies, TOPIC } from '../lib/camera/commands.js';
+import { pickOffset, measureOffset, toServerMs } from '../lib/camera/clock.js';
+import { CaptureBuffer, uploadDue, objectPath, BATCH_EVERY_MS, STATE_SAMPLE_MS, MAX_BUFFER_RECORDS } from '../lib/camera/capture.js';
+import { normaliseProfile, surveyFileName, qualityCeiling, zoomRanges, bandWidthPx } from '../lib/camera/survey.js';
 
 const deviceProfile = { deviceZoom: { available: true, min: 0.6, max: 8 } };
 const fixedProfile = { deviceZoom: { available: false, min: 1, max: 1, reason: 'zoom range is 1 to 1' } };
