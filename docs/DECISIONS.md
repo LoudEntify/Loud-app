@@ -890,3 +890,64 @@ specification), leaving the routes open and only fixing the links (Korey
 would still find the pages, and so would anyone with an old link), and a
 rewrite for the old share link (the address bar would keep lying about
 where the person is).
+
+## 2026-11-07 — The headphone delay check runs on the phone
+
+The last of the four notices on native/app/settings/audio.js comes down,
+and unlike the other three this one needed the measurement built rather
+than wired up.
+
+What it measures is not a codec's advertised latency: a click leaves for
+the artist's ears, they answer it out loud, and their voice returns
+through the microphone. That round trip is what makes a performer sing
+behind the track, and one measurement covers every kind of gear — wired
+comes back near zero, Bluetooth comes back as the real delay.
+
+Split where every other audio piece is split. `lib/audio/sync.js` now
+also owns the onset gates (the band ratio, the sustain, the blanking
+window, the adaptive floor) and `onsetStep`, a pure state machine over
+explicit state. `LoudSyncCalibration.kt` transcribes it. The state
+machine is proved in tests/audio-sync.test.mjs by pushing synthetic
+frames through it: the click coming back is refused for being in the
+wrong band, a loud short burst is refused for not holding, and a
+confirmed onset is timed from where the voice STARTED rather than where
+it was confirmed — getting that wrong would make every reading one
+sustain gate too long and overshoot every correction by 40ms.
+
+Two band-passes rather than an FFT. The web asks an AnalyserNode for a
+spectrum and sums two ranges of bins; there is no AnalyserNode on a
+phone and an FFT per frame inside an audio callback that is also
+encoding video is not affordable. The question is coarse — more energy
+where vowels live than where the click lives — so two biquads answer it
+for four multiply-accumulates per sample each.
+`bandpassCoefficients()` derives them in lib/audio/dsp.js and the test
+pushes real sine waves through: a 500 Hz vowel reads as voice, a 4 kHz
+click does not. The vowel band is wide (Q 0.35) so its skirt is shallow
+and 4 kHz still leaks through it at about a third — which does not
+matter, because the decision is a ratio, and the test asserts the ratio
+rather than an attenuation figure I would have picked myself.
+
+The click train is written into one static AudioTrack buffer rather than
+scheduled per click, because AudioTrack has no scheduler: the buffer IS
+the schedule, so a click's position in it is its time to the sample. A
+click played "about now" would put its own jitter into every reading.
+
+The frames reach the detector through LoudVocalChain, unprocessed and
+before the input trim. Two reasons: there is only one reliable
+microphone consumer on Android, and the measurement must be of what the
+microphone heard — an input trim the artist set for a show must not
+change how loud their answer appears.
+
+Guards: a run that cannot start resolves `{ok:false}` with a reason and
+says plainly that the chain is not running, rather than measuring
+silence and reporting twelve missing answers; and a run that overruns
+its own length is cancelled and reported as cancelled, because the
+offsets collected so far are not a measurement and applying them would
+correct from a run that did not finish.
+
+Rejected: an FFT on the phone (cost), a second microphone consumer for
+the measurement (Android does not reliably give one), timing with
+System.nanoTime() (the capture frame count is the clock the audio is
+actually on, so a dropped buffer shows as a gap rather than a silently
+wrong offset), and reimplementing the gates natively (the drift
+lib/audio/chain.js exists to prevent).

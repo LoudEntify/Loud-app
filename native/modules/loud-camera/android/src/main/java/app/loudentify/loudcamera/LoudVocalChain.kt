@@ -81,6 +81,21 @@ class LoudVocalChain : AudioProcessorInterface {
   @Volatile private var levelRms = 0f
   @Volatile private var reductionPeak = 0f
 
+  // ── The headphone delay check ────────────────────────────────
+  // When a calibration run is going, each frame is also offered to it.
+  // It sits here rather than tapping the microphone itself because this
+  // is already the one place on a phone where captured audio passes
+  // through JavaScript-configured code — a second capture path would be
+  // a second microphone consumer, which Android does not reliably give.
+  //
+  // The frame is offered UNPROCESSED, before the trim: the measurement
+  // is of what the microphone heard, and an input trim the artist set
+  // for a show must not change how loud their answer appears.
+  @Volatile private var calibration: LoudSyncCalibration? = null
+  private var calibrationBuffer = FloatArray(0)
+
+  fun setCalibration(c: LoudSyncCalibration?) { calibration = c }
+
   /** Everything the loop needs. Replaced wholesale, never edited in place, so a mid-frame change cannot tear. */
   data class Config(
     val inputGain: Float = 1f,
@@ -204,6 +219,16 @@ class LoudVocalChain : AudioProcessorInterface {
     var framePeak = 0f
     var sumSquares = 0f
     var frameReduction = 0f
+
+    // A calibration run wants this frame as it arrived. Copied out first
+    // because the loop below writes its results back into the same
+    // buffer, and the measurement must not see processed audio.
+    val cal = calibration
+    if (cal != null && cal.isRunning()) {
+      if (calibrationBuffer.size < total) calibrationBuffer = FloatArray(total)
+      for (i in 0 until total) calibrationBuffer[i] = pcm.get(i) / 32768f
+      cal.offer(calibrationBuffer, total)
+    }
 
     for (i in 0 until total) {
       val ch = if (channels > 1) i % channels else 0
