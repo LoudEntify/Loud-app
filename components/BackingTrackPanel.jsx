@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { formatClock } from '../lib/audio/tracks.js';
 import { loadBackingTrack } from '../lib/audioProcessing';
 import { shotFamilyColor } from '../lib/shotTypes';
 import { computeTrackHash } from '../lib/trackHash';
@@ -14,11 +15,12 @@ import SetListPanel from './SetListPanel';
 const WAVEFORM_POINTS = 180;
 const WAVEFORM_HEIGHT = 40;
 
-function formatTime(s) {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60).toString().padStart(2, '0');
-  return `${m}:${sec}`;
-}
+// formatClock lives in lib/audio/tracks.js, with the transport rules the
+// new web journey and the app will both read. This panel had its own
+// formatTime and CueEditorPanel had its own formatMs, and the two
+// disagreed about padding: a cue at 1:05.00 read as 1:5.00 in one of
+// them.
+const formatTime = formatClock;
 
 // Downsamples the decoded audio buffer into a fixed number of peak values
 // -- the raw sample data is already in memory (needed for playback
