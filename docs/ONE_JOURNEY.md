@@ -206,7 +206,49 @@ Each step ends with something testable rather than a half-migration.
 | 6 | Full pilot test: desktop artist, phone cameras, real viewers | Evidence |
 | 7 | Native audio chain, if chosen | Phone is self-sufficient |
 
-### Where this stands, 6 November
+### Where this stands, 7 November
+
+| # | State |
+|---|---|
+| 1 | Done (6 Nov). `lib/audio/chain.js` holds the parameters. |
+| 2 | **Not started, and now the only thing between us and a pilot test.** The new journey still imports NONE of the seven capability panels. |
+| 3 | Done (7 Nov). The pilot journey no longer routes, and — the actual cause — the product's own buttons no longer link to it. |
+| 4 | Partly. The Ready band is a verdict with one action, shared by both platforms, which was the specific thing that made the screen feel like circles. The four-band layout of section 6 is still to build. |
+| 5 | Done (6 Nov). `lib/kitCheck.js` makes the camera list devices. |
+| 6 | Blocked on step 2 and on the YouTube question in section 8. |
+| 7 | Done for Android (6–7 Nov): the vocal chain, the input meter and the headphone delay check all run natively. iOS has none of it. |
+
+Korey's four audio reports of 5 November are all answered: the chain, the
+store behind it, the signal indicator and the earphone calibrator.
+
+### What step 2 actually requires, stated before building it
+
+The remaining capability is **cueing and playing a backing track during a
+show**, which is `BackingTrackPanel.jsx` (700 lines) and
+`CueEditorPanel.jsx` (361). Korey asked for it twice — "the cue, upload
+track is not working" and "ensure that i can cue track on the app" — and
+uploading was fixed on 3 November (PR #45) while cueing was not, because
+cueing is a different thing: the file arriving is not the file playing.
+
+On the web the track is mixed into the published audio by Web Audio: the
+pilot's graph has a `backingTrack` source joining `outputBus`
+(lib/audio/chain.js documents it). On a phone there is no such graph. The
+track has to be mixed into the published microphone audio inside
+`LoudVocalChain` — the same insertion point, for the same reason — which
+means the chain gains a second input.
+
+So the sequence, each step ending in something testable:
+
+| | Step | Ends with |
+|---|---|---|
+| 2a | The cue and transport rules into `lib/audio/tracks.js`, web reads them | Web unchanged, one definition |
+| 2b | A track input mixed into `LoudVocalChain`'s output | The phone can publish a track |
+| 2c | The panels behind the new web artist screens, then the app | Both platforms cue a track |
+
+2b is the piece with no precedent in this repository, and it is where I
+expect to be wrong about scope first.
+
+### Where this stood, 6 November
 
 | # | State |
 |---|---|
