@@ -1004,6 +1004,7 @@ is the drift, three times over), and putting playback behind a shared
 interface (an HTMLAudioElement and a native player have nothing in
 common worth abstracting; the decisions do).
 
+
 ## 2026-11-07 — Step 2b: the backing track is decoded and mixed into what goes out
 
 The step I said I expected to be wrong about scope on. It came in close
