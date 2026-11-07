@@ -1,4 +1,7 @@
 import { Suspense } from 'react';
+import { notFound } from 'next/navigation';
+import { devHarnessAllowed } from '../../lib/paymentProvider';
+import { pilotReachable } from '../../lib/pilotJourney';
 import HomeDoors from '../../components/HomeDoors';
 
 export const metadata = {
@@ -14,7 +17,10 @@ export const metadata = {
 // /auth still renders that form and is where the artist door sends you,
 // so nothing was removed — it stopped being the first thing the audience
 // meets.
+// RETIRED (lib/pilotJourney.js): the pilot's front door. The product's
+// front door is /.
 export default function HomePage() {
+  if (!pilotReachable(devHarnessAllowed())) notFound();
   return (
     <Suspense fallback={null}>
       <HomeDoors />

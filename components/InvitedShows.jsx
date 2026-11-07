@@ -190,7 +190,8 @@ export default function InvitedShows({ accessToken }) {
                       GO LIVE
                     </Link>
                     <Link
-                      href="/kit-check"
+                      // The product's Kit Check, not the pilot's (lib/pilotJourney.js).
+                      href="/artist/kit-check"
                       style={{
                         padding: '9px 16px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
                         textDecoration: 'none', color: TEAL, border: `1px solid ${TEAL}`,

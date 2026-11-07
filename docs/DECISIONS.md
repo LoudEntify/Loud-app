@@ -791,3 +791,55 @@ second for a bar nobody looks at closely), a meter in the console as well
 (the console is for the show; this is a setup instrument), and keeping
 `enabled` alongside `configured` (two fields meaning nearly the same
 thing is how the next bug gets written).
+
+## 2026-11-07 — The pilot journey stops routing, and the product stops linking to it
+
+Korey, 5 Nov: "I can see that some pages on teh web app is showing some
+old pilot pages which should not be."
+
+Two faults, and the second is the one that mattered.
+
+The first: the pilot journey still routed. `/kit-check`
+(components/KitCheck.jsx), `/pilot` and `/pilot/live`
+(components/LiveDemo.jsx) all answered, and the middleware rewrote
+`/live?show=<id>` into `/pilot/live`, so an old share link landed in the
+old product with the address bar still reading `/live`.
+
+The second: **the product itself linked there.** `ScheduleShow.jsx`,
+`InvitedShows.jsx` and `Onboarding.jsx` each sent an artist to
+`/kit-check` — the pilot's Kit Check — rather than `/artist/kit-check`.
+An artist following the product's own buttons arrived in the previous
+product. That is why this kept happening to Korey without him typing an
+old URL, and closing the routes alone would have turned three working
+buttons into three 404s.
+
+So: the three links now point at the product, the three pilot pages
+refuse to render unless `devHarnessAllowed()` (the same server-side gate
+app/spike/controller already used, so the URL is a plain 404 and the
+page's code never reaches a browser), and `/live?show=<id>` REDIRECTS to
+`/show/<id>` — a redirect rather than a rewrite, so the address bar shows
+where the person actually is and the next link they copy is the real one.
+
+GATED, NOT DELETED, on purpose. docs/ONE_JOURNEY.md §7 retires the
+journey after its capability panels are lifted behind the new screens,
+because those panels are the only working version of cueing a backing
+track, the audio deck, the shot console, cue sheets and headphone
+calibration. Deleting the routes today would delete the specification
+with them, which is the mistake §3 records. There is a test asserting
+those seven components are still present.
+
+The test that would have caught the real fault sweeps every tracked page
+and component for a link to a retired path, rather than the files I
+happened to open — which is precisely how those three survived the
+rebuild.
+
+One existing test had to be narrowed rather than satisfied:
+coming-soon's "the gate is a rewrite" forbade any `redirect(` anywhere in
+middleware.js. Its intent is about the gate, so it now checks the gate's
+own branch. The gate is still a rewrite.
+
+Rejected: deleting the pilot pages and components now (loses the
+specification), leaving the routes open and only fixing the links (Korey
+would still find the pages, and so would anyone with an old link), and a
+rewrite for the old share link (the address bar would keep lying about
+where the person is).
