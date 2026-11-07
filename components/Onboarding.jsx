@@ -354,7 +354,8 @@ export default function Onboarding() {
             </ul>
             <Actions
               onSkip={() => advance('skipped')}
-              onNext={() => completeAndGo('/kit-check')}
+              // The product's Kit Check, not the pilot's (lib/pilotJourney.js).
+              onNext={() => completeAndGo('/artist/kit-check')}
               nextLabel="OPEN KIT CHECK"
               extra={<button type="button" onClick={() => advance('completed')} style={secondaryStyle}>FINISH SETUP</button>}
             />

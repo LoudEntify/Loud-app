@@ -73,8 +73,14 @@ test('a gated path and an exempt one answer the one question the middleware asks
 
 test('the gate is a rewrite, so shared links survive it', () => {
   const src = readFileSync(resolve(ROOT, 'middleware.js'), 'utf8');
-  assert.match(src, /NextResponse\.rewrite/, 'a rewrite keeps the address bar');
-  assert.ok(!/redirect\(/.test(src), 'a redirect would teach every shared link to point at /coming-soon');
+  // Scoped to the GATE's own branch rather than the whole file. The
+  // middleware also redirects an old pilot share link to /show/<id>
+  // (lib/pilotJourney.js), which is correct there and must not make this
+  // test fail — but the gate itself still has to be a rewrite, and that
+  // is what is checked.
+  const gateBranch = src.slice(src.indexOf('shouldGate('), src.indexOf('const m = url.pathname.match'));
+  assert.match(gateBranch, /NextResponse\.rewrite/, 'a rewrite keeps the address bar');
+  assert.ok(!/redirect\(/.test(gateBranch), 'a redirect would teach every shared link to point at /coming-soon');
   assert.match(src, /shouldGate/, 'and the decision comes from the module that can be tested on its own');
   assert.ok(GATE_EXEMPT.includes('/api'));
   const gate = readFileSync(resolve(ROOT, 'lib/siteGate.js'), 'utf8');

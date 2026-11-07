@@ -270,7 +270,8 @@ export default function ScheduleShow() {
           GO LIVE
         </Link>
         <Link
-          href="/kit-check"
+          // The product's Kit Check, not the pilot's (lib/pilotJourney.js).
+          href="/artist/kit-check"
           style={{
             flex: '1 1 200px',
             textAlign: 'center',

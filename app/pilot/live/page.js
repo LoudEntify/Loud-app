@@ -1,4 +1,7 @@
 import { Suspense } from 'react';
+import { notFound } from 'next/navigation';
+import { devHarnessAllowed } from '../../../lib/paymentProvider';
+import { pilotReachable } from '../../../lib/pilotJourney';
 import LiveDemo from '../../../components/LiveDemo';
 
 export const metadata = {
@@ -37,7 +40,16 @@ export const metadata = {
 // bearer and returns 403 to anyone not on the line-up, and every
 // operator route is behind verifyArtistAuth plus verifyShowOwner. The
 // gate was never what protected them.
+// RETIRED (lib/pilotJourney.js): the pilot's show screen. The product's
+// is /show/:id, and /live?show=<id> now goes there instead of here.
+//
+// The comment above is kept in full. It records why this route has no
+// RequireAuth — a signed-out viewer was redirected to an artist login
+// and could not reach the show, which on the night is the whole
+// audience — and that reasoning has to survive into whatever replaces
+// it, not be lost with the route.
 export default function LivePage() {
+  if (!pilotReachable(devHarnessAllowed())) notFound();
   return (
     <main>
       <Suspense fallback={null}>

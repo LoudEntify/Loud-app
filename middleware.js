@@ -3,13 +3,14 @@
 //
 // ── THE URL SHAPES (docs/USER_JOURNEY.md) ─────────────────────
 //   /@username        -> /u/username  (Next.js reserves @folders for slots)
-//   /live?show=<id>   -> /pilot/live?show=<id>  (the pilot's LiveKit show
-//                        screen, so links from the pilot still work)
+//   /live?show=<id>   -> /show/<id>  (a pilot share link, answered by the
+//                        show screen the product actually has)
 //
 // The gate that closes the public site lives in lib/siteGate.js —
 // separate so it can be run and tested without Next.js.
 import { NextResponse } from 'next/server';
 import { shouldGate, GATE_PAGE } from './lib/siteGate';
+import { showPathFor } from './lib/pilotJourney';
 
 export function middleware(request) {
   const url = request.nextUrl;
@@ -26,9 +27,17 @@ export function middleware(request) {
     const to = url.clone(); to.pathname = `/u/${m[1].toLowerCase()}`;
     return NextResponse.rewrite(to);
   }
-  if (url.pathname === '/live' && url.searchParams.get('show')) {
-    const to = url.clone(); to.pathname = '/pilot/live';
-    return NextResponse.rewrite(to);
+  // A pilot share link. It used to be rewritten into /pilot/live, which
+  // is how people with old links kept landing in the old product
+  // (lib/pilotJourney.js). It now goes to the show screen the product
+  // has — a REDIRECT rather than a rewrite, so the address bar shows
+  // where they actually are and the link they copy next is the real one.
+  const show = url.searchParams.get('show');
+  if (url.pathname === '/live' && show) {
+    const to = url.clone();
+    to.pathname = showPathFor(show);
+    to.searchParams.delete('show');
+    return NextResponse.redirect(to);
   }
   return NextResponse.next();
 }
