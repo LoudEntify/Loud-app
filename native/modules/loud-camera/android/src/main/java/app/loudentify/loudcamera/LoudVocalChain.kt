@@ -96,6 +96,22 @@ class LoudVocalChain : AudioProcessorInterface {
 
   fun setCalibration(c: LoudSyncCalibration?) { calibration = c }
 
+  // ── The backing track ────────────────────────────────────────
+  // Mixed in AFTER the crossfade and before the output gain, which is
+  // where outputBus sits in the graph lib/audio/chain.js draws. The
+  // track is therefore not compressed, filtered or reverbed by the
+  // artist's vocal chain — a mastered recording does not want a vocal
+  // compressor over it, and the pilot's graph does not give it one.
+  //
+  // It is here rather than in a media player because the track has to
+  // reach the BROADCAST. A player would reach the artist's ears and
+  // leave the stream with nothing but whatever the microphone heard of
+  // it (lib/audio/tracks.js: which is also why headphones are required).
+  @Volatile private var backingTrack: LoudBackingTrack? = null
+  private var trackBuffer = FloatArray(0)
+
+  fun setBackingTrack(t: LoudBackingTrack?) { backingTrack = t }
+
   /** Everything the loop needs. Replaced wholesale, never edited in place, so a mid-frame change cannot tear. */
   data class Config(
     val inputGain: Float = 1f,
@@ -133,6 +149,7 @@ class LoudVocalChain : AudioProcessorInterface {
   // Reverb lines. One set, fed from the mono sum: a phone microphone is
   // one capsule, and two independent tails on a mono source is twice the
   // cost for a difference nobody can hear.
+  private var voiceOut = FloatArray(0)
   private var combBuf: Array<FloatArray> = arrayOf()
   private var combIdx = IntArray(0)
   private var apBuf: Array<FloatArray> = arrayOf()
@@ -220,6 +237,10 @@ class LoudVocalChain : AudioProcessorInterface {
     var sumSquares = 0f
     var frameReduction = 0f
 
+    // The voice path's output, held for the frame so the track can be
+    // added once rather than per sample.
+    if (voiceOut.size < total) voiceOut = FloatArray(total)
+
     // A calibration run wants this frame as it arrived. Copied out first
     // because the loop below writes its results back into the same
     // buffer, and the measurement must not see processed audio.
@@ -272,7 +293,23 @@ class LoudVocalChain : AudioProcessorInterface {
       // is zero; neither is a branch.
       val out = (processed * c.processedGain + trimmed * c.bypassGain) * c.outputGain
 
-      pcm.put(i, (max(-1f, min(1f, out)) * 32767f).toInt().toShort())
+      // Held, not written: the track is added to the whole frame below,
+      // so one mix call covers it rather than one per sample.
+      voiceOut[i] = out
+    }
+
+    // ── The backing track joins here ───────────────────────────
+    val track = backingTrack
+    if (track != null && track.isLoaded()) {
+      if (trackBuffer.size < total) trackBuffer = FloatArray(total)
+      java.util.Arrays.fill(trackBuffer, 0, total, 0f)
+      if (track.mixInto(trackBuffer, total)) {
+        for (i in 0 until total) voiceOut[i] += trackBuffer[i]
+      }
+    }
+
+    for (i in 0 until total) {
+      pcm.put(i, (max(-1f, min(1f, voiceOut[i])) * 32767f).toInt().toShort())
     }
 
     // Published once per frame. The peaks hold until JS reads them, so a

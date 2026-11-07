@@ -139,3 +139,31 @@ export function syncCalibrationState() {
 export function cancelSyncCalibration() {
   return native ? native.cancelSyncCalibration() : Promise.resolve({ ok: true });
 }
+
+/**
+ * Decode a backing track so it can be mixed into the published audio.
+ *
+ * `path` is a local file. Decoding happens off both the main and the
+ * audio thread; the promise resolves with the file's own sample rate and
+ * duration, which JavaScript needs to compute the resample ratio
+ * (lib/audio/tracks.js resampleRatio). Getting that ratio wrong runs the
+ * track a few percent fast, which nobody hears over four bars and which
+ * puts every cue in the song out by the end of it.
+ */
+export function loadBackingTrack(path) {
+  return native ? native.loadBackingTrack(path) : Promise.resolve({ ok: false, error: 'no native module' });
+}
+
+/** The ratio, the gain and whether it is playing — from nativeTrackConfig() in lib/audio/tracks.js. Optionally seeks. */
+export function setBackingTrack(config) {
+  return native ? native.setBackingTrack(config) : Promise.resolve({ ok: false, error: 'no native module' });
+}
+
+/** { loaded, positionSeconds, durationSeconds } — the playhead, for a transport readout. */
+export function backingTrackState() {
+  return native ? native.backingTrackState() : Promise.resolve({ loaded: false, positionSeconds: 0, durationSeconds: 0 });
+}
+
+export function unloadBackingTrack() {
+  return native ? native.unloadBackingTrack() : Promise.resolve({ ok: true });
+}

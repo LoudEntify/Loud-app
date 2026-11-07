@@ -37,8 +37,14 @@ class LoudCameraModule : Module() {
   private var capturer: LoudCameraXCapturer? = null
   private var vocalChain: LoudVocalChain? = null
   private var syncCalibration: LoudSyncCalibration? = null
+  private var backingTrack: LoudBackingTrack? = null
   private var controller: LoudCaptureController? = null
   private val main = Handler(Looper.getMainLooper())
+  // Decoding a backing track is blocking and a five-minute song takes a
+  // moment. It never runs on the main thread and never on the audio
+  // thread: a decode on either is a stutter in a live show.
+  private val io: java.util.concurrent.ExecutorService =
+    java.util.concurrent.Executors.newSingleThreadExecutor()
   private var ticking = false
   private val tick = object : Runnable {
     override fun run() {
@@ -186,6 +192,56 @@ class LoudCameraModule : Module() {
 
     // The meter: input level and compressor action since the last read.
     // Cheap enough to poll — it reads four floats and clears two.
+    // ── The backing track ──────────────────────────────────────
+    // Decoded here and mixed into the published audio inside the chain,
+    // because the track has to reach the broadcast and a media player
+    // would only reach the artist's ears (lib/audio/tracks.js).
+    AsyncFunction("loadBackingTrack") { path: String, promise: Promise ->
+      // Decoding is blocking and a five-minute song takes a moment, so
+      // it runs off the main thread. The audio thread never decodes.
+      io.execute {
+        try {
+          val t = backingTrack ?: LoudBackingTrack().also { backingTrack = it }
+          val r = t.load(path)
+          if (r["ok"] == true) vocalChain?.setBackingTrack(t)
+          promise.resolve(r)
+        } catch (e: Throwable) {
+          promise.resolve(mapOf("ok" to false, "error" to (e.message ?: e.toString())))
+        }
+      }
+    }
+
+    AsyncFunction("setBackingTrack") { config: Map<String, Any?>, promise: Promise ->
+      val t = backingTrack
+      if (t == null) { promise.resolve(mapOf("ok" to false, "error" to "no track loaded")); return@AsyncFunction }
+      t.setConfig(
+        LoudBackingTrack.Config(
+          ratio = (config["ratio"] as? Number)?.toFloat() ?: 1f,
+          trackGain = (config["trackGain"] as? Number)?.toFloat() ?: 0.8f,
+          playing = config["playing"] as? Boolean ?: false,
+        )
+      )
+      (config["seekSeconds"] as? Number)?.let { t.seekSeconds(it.toDouble()) }
+      promise.resolve(mapOf("ok" to true, "positionSeconds" to t.positionSeconds()))
+    }
+
+    AsyncFunction("backingTrackState") { ->
+      val t = backingTrack
+      if (t == null) mapOf("loaded" to false, "positionSeconds" to 0.0, "durationSeconds" to 0.0)
+      else mapOf(
+        "loaded" to t.isLoaded(),
+        "positionSeconds" to t.positionSeconds(),
+        "durationSeconds" to t.durationSeconds(),
+      )
+    }
+
+    AsyncFunction("unloadBackingTrack") { ->
+      vocalChain?.setBackingTrack(null)
+      backingTrack?.unload()
+      backingTrack = null
+      mapOf("ok" to true)
+    }
+
     // ── The headphone delay check ──────────────────────────────
     // Every threshold and the verdict itself live in lib/audio/sync.js,
     // which the web's measurement also uses. These three just run it.
