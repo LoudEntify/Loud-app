@@ -1069,3 +1069,59 @@ Rejected: a media player (cannot reach the broadcast), streaming the
 decode as it plays (a seek would then decode on the audio thread), and
 resampling on the JavaScript side (the samples never cross the bridge,
 which is the point).
+
+## 2026-11-07 — The pilot gate was wrong, and finding out why found something worse
+
+Two things, and the second is the one that matters.
+
+**The gate, and a correction to my own first account of it.** PR #54 put
+the pilot journey behind `devHarnessAllowed()`, which is "dev payment
+provider AND not production". The payment provider has nothing to do
+with the pilot journey; I reused a check that was sitting there and
+looked right.
+
+I first wrote this up as though it had closed the pilot journey on
+staging. It had not, and Korey said why: Stripe is not set up, so there
+is no `STRIPE_SECRET_KEY`. Without one, `getPaymentProvider()` falls to
+the dev provider (derived from `SUPABASE_SERVICE_ROLE_KEY`, which any
+working deployment has), so `devHarnessAllowed()` is TRUE on staging and
+the pilot journey has been reachable there the whole time.
+
+So the accurate statement is narrower and still worth fixing: the gate
+would have closed the pilot journey on staging **the moment Stripe was
+set up**. That is a worse kind of trap than a live breakage, because
+nobody adding a payment key would connect it to the pilot pages
+disappearing — but it is a trap, not a fire, and the first version of
+this entry said fire. The record is what later sessions read, so it is
+corrected here rather than quietly.
+
+The gate is now "not production", which is the rule it always wanted,
+with a test asserting it does not read the payment provider.
+
+**What that mattered for, which is unchanged.**
+`components/artist/ConsoleScreen.jsx` — the new web console — takes the
+local camera with `getUserMedia`, composes a preview and draws it to a
+canvas. It never joins a room. Nothing in `components/artist/` imports
+`livekit-client`: every file in the folder was checked, not a sample.
+
+So `components/LiveDemo.jsx` is still the only web position an artist
+can perform from, and the gate would eventually have closed it.
+
+This also corrects docs/ONE_JOURNEY.md step 2, which described putting
+the capability panels behind the new web screens as a wiring job. It is
+not: before a panel can be useful there, the new console has to join the
+room and publish its camera and processed microphone — which the phone
+already does (native/src/ownCamera.js, PR #40) and the web has only in
+the pilot journey.
+
+There is now a test that FAILS as soon as anything in
+`components/artist/` publishes, with a message saying to move the
+performer test to the new console and retire the pilot journey. The
+signal is a failing test rather than a line in a document someone has to
+remember to re-read.
+
+Rejected: leaving the gate as devHarnessAllowed and adding a note to
+docs/NEEDS_KOREY.md asking Korey to check staging's Stripe key (the gate
+was wrong, and asking him to work around my mistake is not a fix), and
+un-gating the pilot journey entirely (it should be closed in production,
+which it now is).

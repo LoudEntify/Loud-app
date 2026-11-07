@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { devHarnessAllowed } from '../../lib/paymentProvider';
 import { pilotReachable } from '../../lib/pilotJourney';
 import HomeDoors from '../../components/HomeDoors';
 
@@ -20,7 +19,7 @@ export const metadata = {
 // RETIRED (lib/pilotJourney.js): the pilot's front door. The product's
 // front door is /.
 export default function HomePage() {
-  if (!pilotReachable(devHarnessAllowed())) notFound();
+  if (!pilotReachable(process.env.VERCEL_ENV === 'production')) notFound();
   return (
     <Suspense fallback={null}>
       <HomeDoors />

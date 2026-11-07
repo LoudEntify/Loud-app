@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { devHarnessAllowed } from '../../lib/paymentProvider';
 import { pilotReachable } from '../../lib/pilotJourney';
 import KitCheck from '../../components/KitCheck';
 import RequireAuth from '../../components/RequireAuth';
@@ -23,7 +22,7 @@ export const metadata = {
 // yet to be given (docs/ONE_JOURNEY.md §7). Decided on the server, so
 // the URL is a plain 404 and this page's code is never sent.
 export default function KitCheckPage() {
-  if (!pilotReachable(devHarnessAllowed())) notFound();
+  if (!pilotReachable(process.env.VERCEL_ENV === 'production')) notFound();
   return (
     <main>
       <Suspense fallback={null}>

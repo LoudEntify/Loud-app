@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import { devHarnessAllowed } from '../../../lib/paymentProvider';
 import { pilotReachable } from '../../../lib/pilotJourney';
 import LiveDemo from '../../../components/LiveDemo';
 
@@ -49,7 +48,7 @@ export const metadata = {
 // audience — and that reasoning has to survive into whatever replaces
 // it, not be lost with the route.
 export default function LivePage() {
-  if (!pilotReachable(devHarnessAllowed())) notFound();
+  if (!pilotReachable(process.env.VERCEL_ENV === 'production')) notFound();
   return (
     <main>
       <Suspense fallback={null}>

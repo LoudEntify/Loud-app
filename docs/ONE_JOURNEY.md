@@ -211,7 +211,7 @@ Each step ends with something testable rather than a half-migration.
 | # | State |
 |---|---|
 | 1 | Done (6 Nov). `lib/audio/chain.js` holds the parameters. |
-| 2 | **Not started, and now the only thing between us and a pilot test.** The new journey still imports NONE of the seven capability panels. |
+| 2 | **Not started, and larger than this document said.** See the correction below: the new web console does not publish at all, so the panels cannot simply be put behind it. |
 | 3 | Done (7 Nov). The pilot journey no longer routes, and — the actual cause — the product's own buttons no longer link to it. |
 | 4 | Partly. The Ready band is a verdict with one action, shared by both platforms, which was the specific thing that made the screen feel like circles. The four-band layout of section 6 is still to build. |
 | 5 | Done (6 Nov). `lib/kitCheck.js` makes the camera list devices. |
@@ -220,6 +220,43 @@ Each step ends with something testable rather than a half-migration.
 
 Korey's four audio reports of 5 November are all answered: the chain, the
 store behind it, the signal indicator and the earphone calibrator.
+
+### A correction to step 2, found on 7 November
+
+Step 2 was written as "put the capability panels behind the new web
+artist screens", as though it were a wiring job. It is not, and the
+reason is worse than a missing import.
+
+**The new web console never joins a room.** `components/artist/ConsoleScreen.jsx`
+takes the local camera with `getUserMedia`, composes a preview frame and
+draws it to a canvas. Nothing in `components/artist/` imports
+`livekit-client` at all — I checked every file in the folder. So an
+artist on the new web console is looking at themselves locally; nothing
+they do reaches a broadcast.
+
+Which means `components/LiveDemo.jsx`, the pilot's show screen, is still
+the only web position an artist can actually perform from.
+
+**And on 7 November I gated it.** PR #54 put the pilot journey behind
+`devHarnessAllowed()`, which is "dev payment provider AND not
+production". On a staging deployment that carries a Stripe key that is
+false, so the gate would have closed the pilot journey on STAGING — the
+only way to run a web performer test — in the same week as being asked
+for one. The gate is now "not production", which is the rule it always
+wanted, and there is a test asserting it does not read the payment
+provider.
+
+There is also now a test that FAILS once anything in
+`components/artist/` publishes, saying so and telling whoever reads it to
+move the performer test to the new console and retire the pilot journey.
+That test is the signal, rather than a note in a document someone has to
+remember to re-read.
+
+So step 2 on the web is bigger than stated: before the panels can go
+behind the new console, the new console has to join the room and publish
+its own camera and processed microphone — which is what
+`native/src/ownCamera.js` already does for the phone (PR #40) and what
+the web has only in the pilot journey.
 
 ### What step 2 actually requires, stated before building it
 
