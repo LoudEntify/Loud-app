@@ -48,7 +48,7 @@ test('the retired paths are named, and the product journey is not among them', (
   assert.equal(isPilotPath(null), false);
 });
 
-test('every pilot page refuses to render unless the dev harness is allowed', () => {
+test('every pilot page refuses to render in production, and renders everywhere else', () => {
   // Decided on the SERVER, before anything renders, so the URL is a
   // plain 404 and the page's code is never sent to a browser. Same gate
   // the spike controller already used, so there is one idea of "this is
@@ -56,16 +56,19 @@ test('every pilot page refuses to render unless the dev harness is allowed', () 
   for (const page of ['app/kit-check/page.js', 'app/pilot/page.js', 'app/pilot/live/page.js']) {
     const code = codeOf(read(page));
     assert.match(code, /notFound/, `${page} does not 404`);
-    assert.match(code, /devHarnessAllowed/, `${page} does not read the harness gate`);
     assert.match(
       code,
-      /if\s*\(!pilotReachable\(devHarnessAllowed\(\)\)\)\s*notFound\(\)/,
+      /if\s*\(!pilotReachable\(process\.env\.VERCEL_ENV === 'production'\)\)\s*notFound\(\)/,
       `${page} must refuse before it renders`,
     );
+    // NOT devHarnessAllowed: that is "dev payment provider AND not
+    // production", and a staging deployment carrying a Stripe key would
+    // have had the pilot journey closed on it — see below for why that
+    // would have been bad.
+    assert.ok(!/devHarnessAllowed/.test(code), `${page} must not gate on the payment provider`);
   }
-  assert.equal(pilotReachable(true), true);
-  assert.equal(pilotReachable(false), false);
-  assert.equal(pilotReachable(undefined), false, 'anything unset is closed');
+  assert.equal(pilotReachable(false), true, 'anywhere that is not production');
+  assert.equal(pilotReachable(true), false, 'and never production');
 });
 
 test('nothing in the product links to the pilot journey', () => {
@@ -101,6 +104,30 @@ test('an old pilot share link lands on the show the product has', () => {
   assert.ok(!/pathname = '\/pilot\/live'/.test(mw), 'and never into the pilot again');
   // The stale query is dropped, so /show/<id>?show=<id> cannot happen.
   assert.match(mw, /searchParams\.delete\('show'\)/);
+});
+
+test('the pilot journey is the only web position an artist can perform from, so staging keeps it', () => {
+  // The reason the gate is "not production" rather than anything
+  // narrower. components/artist/ConsoleScreen.jsx takes the local
+  // camera, composes a preview and never joins a room: nothing in
+  // components/artist/ imports livekit-client at all. So LiveDemo is
+  // still the only web performer position, and closing it on staging
+  // would remove the only way to run a web performer test.
+  //
+  // When the new console can publish, this test is the one to delete,
+  // and deleting it is the signal that the pilot journey can go.
+  const artist = execFileSync('git', ['ls-files', 'components/artist/*.jsx'], { cwd: ROOT, encoding: 'utf8' })
+    .split('\n').filter(Boolean);
+  assert.ok(artist.length > 0, 'the new journey has components');
+
+  const publishers = artist.filter((f) => /livekit-client|new Room\(/.test(codeOf(read(f))));
+  assert.deepEqual(
+    publishers,
+    [],
+    'the new web console now publishes — move the performer test to it and retire the pilot journey',
+  );
+
+  assert.match(read('components/LiveDemo.jsx'), /livekit-client/, 'and the pilot one still does');
 });
 
 test('the pilot components are still here, because they are still the specification', () => {
