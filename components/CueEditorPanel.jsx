@@ -19,18 +19,18 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from 'react';
+import { formatCueTime, NUDGE_STEPS_MS } from '../lib/audio/tracks.js';
 import { SHOT_TYPES, CUE_EDITOR_SHOT_KEYS, shotFamilyColor } from '../lib/shotTypes';
 import { SLOT_ROLES, FALLBACK_BEHAVIOURS, MOTION_SCALE_CEILING } from '../lib/cueSheetValidation';
 import { getSupabase } from '../lib/supabaseClient';
 
-const NUDGE_STEPS_MS = [-1000, -100, 100, 1000];
+// The nudge steps and the cue formatter are shared, because the app's
+// cue editor has to agree with this one about both.
+export { NUDGE_STEPS_MS };
 
-function formatMs(ms) {
-  const totalSeconds = ms / 1000;
-  const m = Math.floor(totalSeconds / 60);
-  const s = (totalSeconds % 60).toFixed(2);
-  return `${m}:${s.padStart(5, '0')}`;
-}
+// See lib/audio/tracks.js: one definition, and it pads. This one did
+// not, so 1:05.00 printed as 1:5.00.
+const formatMs = formatCueTime;
 
 const selectStyle = {
   background: '#1a1a19',

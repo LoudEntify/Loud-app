@@ -951,3 +951,55 @@ System.nanoTime() (the capture frame count is the clock the audio is
 actually on, so a dropped buffer shows as a gap rather than a silently
 wrong offset), and reimplementing the gates natively (the drift
 lib/audio/chain.js exists to prevent).
+
+## 2026-11-07 — Step 2a: the backing track's transport rules are shared first
+
+Korey asked for cueing twice — "the cue, upload track is not working"
+and "ensure that i can cue track on the app". Uploading was fixed on
+3 November (PR #45); cueing was not, because they are different things:
+the file arriving is not the file playing.
+
+The web can cue a track today (components/BackingTrackPanel.jsx, 700
+lines, performed through in the pilot). The phone cannot, and the new
+web journey does not import the panel. Both are about to be built, so
+the rules went into `lib/audio/tracks.js` BEFORE either platform gets
+them — because each of the last three audio features turned out to have
+two copies of its numbers by the time anyone looked.
+
+What is shared: the transport state machine, the identity rule, the
+balance, and the two time formatters. What is not: playback itself.
+
+Three rules worth stating because they are easy to get wrong in a way
+nobody notices until a show:
+
+1. **A loaded track arrives paused.** The pilot's own behaviour, and the
+   reason is stronger on a phone: the track will be mixed into the
+   PUBLISHED audio, so a track that began on load would go out.
+2. **Reaching the end is `ended`, not `paused`.** To a cue sheet those
+   differ: one has more cues coming and the other does not. Pressing
+   play on a finished track starts it from the beginning, which is what
+   an artist means by it.
+3. **The balance never silences the voice.** One slider, two gains, and
+   `voiceGain` is always 1. An artist pushing the balance toward the
+   track is asking for more track, not for their voice to disappear, and
+   on a live broadcast that distinction is the whole show.
+
+The identity rule refuses rather than warns, and refuses the UNKNOWN
+case too. A cue sheet is a list of times and times only mean anything
+against one recording: a different mix of the same song, one bar longer
+at the top, moves every cue in the set. No hash on either side is not
+evidence that the file matches.
+
+One real bug came out of the de-duplication. BackingTrackPanel had
+`formatTime` and CueEditorPanel had `formatMs`, and they disagreed about
+padding: a cue at 1:05.00 printed as 1:5.00 in the cue editor. There is
+now one of each and a test pins that case.
+
+Next: 2b, a track input mixed into LoudVocalChain's output, which is the
+step with no precedent in this repository and where I expect to be wrong
+about scope first.
+
+Rejected: building the phone's player first and sharing afterwards (that
+is the drift, three times over), and putting playback behind a shared
+interface (an HTMLAudioElement and a native player have nothing in
+common worth abstracting; the decisions do).
