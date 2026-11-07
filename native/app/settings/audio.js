@@ -48,6 +48,7 @@ import {
 } from '@loud/lib/audio/chain.js';
 import { applyVocalChain } from '../../src/vocalChain';
 import { useAudioMeter } from '../../src/audioMeter';
+import { runSyncCalibration, cancelSyncCalibration } from '../../src/syncCalibration';
 
 /** The controls grouped the way the board groups them, by what they do to a voice. */
 const GROUPS = [
@@ -76,6 +77,9 @@ export default function AudioSettings() {
   // whether or not effects are on, which is the state an artist checking
   // their microphone is usually in.
   const meter = useAudioMeter(settings !== null);
+  // The headphone delay check. `rep` counts the clicks as they play,
+  // which is the only thing that tells an artist it is listening.
+  const [sync, setSync] = useState({ phase: 'idle', rep: 0, of: 0, described: null, error: null });
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -111,6 +115,20 @@ export default function AudioSettings() {
     }
     setSettings(normaliseChain(r.data?.settings));
   }, [settings, accessToken]);
+
+  const startSync = useCallback(async () => {
+    setSync({ phase: 'running', rep: 0, of: 0, described: null, error: null });
+    const r = await runSyncCalibration({
+      onRep: (rep, of) => setSync((s2) => (s2.phase === 'running' ? { ...s2, rep: rep + 1, of } : s2)),
+    });
+    if (!r.ok) { setSync({ phase: 'idle', rep: 0, of: 0, described: null, error: r.error }); return; }
+    setSync({ phase: 'done', rep: 0, of: 0, described: r.described, error: null, result: r.result });
+  }, []);
+
+  const stopSync = useCallback(async () => {
+    await cancelSyncCalibration();
+    setSync({ phase: 'idle', rep: 0, of: 0, described: null, error: null });
+  }, []);
 
   const step = useCallback((key, direction) => {
     const c = controlFor(key);
@@ -290,11 +308,45 @@ export default function AudioSettings() {
 
           <Card style={{ gap: space.s }}>
             <Text style={text.rowTitle}>Headphone delay check</Text>
-            <Text style={text.supporting}>For Bluetooth earphones. Wired is best for singing.</Text>
-            <NotStored>
-              There is no delay check in this build. The advice above still
-              holds: wire your earphones in if you are singing to a track.
-            </NotStored>
+            <Text style={text.supporting}>
+              Put your earphones in, then answer each click out loud — &ldquo;bah&rdquo; —
+              right on the beat. It measures the whole round trip: the click
+              reaching your ears and your voice coming back.
+            </Text>
+
+            {sync.phase === 'running' ? (
+              <View style={{ gap: space.s }} testID="sync-running">
+                <Text style={text.rowTitle}>
+                  Answer each click{sync.of ? ` — ${sync.rep} of ${sync.of}` : ''}
+                </Text>
+                <Button kind="quiet" onPress={stopSync} testID="sync-stop">Stop</Button>
+              </View>
+            ) : (
+              <View style={{ gap: space.s }} testID="sync-idle">
+                {sync.described ? (
+                  <>
+                    <Text style={text.rowTitle}>{sync.described.line}</Text>
+                    {sync.described.action ? (
+                      <Text style={text.supporting}>{sync.described.action}.</Text>
+                    ) : null}
+                    {/* The floor the measurement cannot beat, said plainly,
+                        so nobody re-runs it expecting perfection. */}
+                    {sync.described.note ? (
+                      <Text style={text.supporting}>{sync.described.note}</Text>
+                    ) : null}
+                  </>
+                ) : null}
+                {sync.error ? (
+                  <Text style={text.supporting}>
+                    The check could not start: {sync.error}. It needs the camera
+                    running, so try it from kit check.
+                  </Text>
+                ) : null}
+                <Button kind="quiet" onPress={startSync} testID="sync-start">
+                  {sync.described ? 'Check again' : 'Start the check'}
+                </Button>
+              </View>
+            )}
           </Card>
         </View>
       </ScrollView>

@@ -36,6 +36,7 @@ import java.util.zip.GZIPOutputStream
 class LoudCameraModule : Module() {
   private var capturer: LoudCameraXCapturer? = null
   private var vocalChain: LoudVocalChain? = null
+  private var syncCalibration: LoudSyncCalibration? = null
   private var controller: LoudCaptureController? = null
   private val main = Handler(Looper.getMainLooper())
   private var ticking = false
@@ -185,6 +186,41 @@ class LoudCameraModule : Module() {
 
     // The meter: input level and compressor action since the last read.
     // Cheap enough to poll — it reads four floats and clears two.
+    // ── The headphone delay check ──────────────────────────────
+    // Every threshold and the verdict itself live in lib/audio/sync.js,
+    // which the web's measurement also uses. These three just run it.
+    AsyncFunction("startSyncCalibration") { config: Map<String, Any?>, promise: Promise ->
+      try {
+        val chain = vocalChain
+        if (chain == null) {
+          // Without the chain installed there is no captured audio to
+          // listen to, so this would measure silence and report twelve
+          // missing answers — which the shared gates would refuse, but
+          // slowly and confusingly. Say so instead.
+          promise.resolve(mapOf("ok" to false, "error" to "the audio chain is not running yet"))
+          return@AsyncFunction
+        }
+        val cal = syncCalibration ?: LoudSyncCalibration().also { syncCalibration = it }
+        cal.setConfig(syncConfig(config))
+        chain.setCalibration(cal)
+        promise.resolve(cal.start())
+      } catch (e: Throwable) {
+        promise.resolve(mapOf("ok" to false, "error" to (e.message ?: e.toString())))
+      }
+    }
+
+    AsyncFunction("syncCalibrationState") { ->
+      val cal = syncCalibration
+      if (cal == null) mapOf("running" to false, "rep" to -1, "results" to emptyList<Double?>())
+      else cal.state() + mapOf("results" to cal.results())
+    }
+
+    AsyncFunction("cancelSyncCalibration") { ->
+      syncCalibration?.cancel()
+      vocalChain?.setCalibration(null)
+      mapOf("ok" to true)
+    }
+
     AsyncFunction("vocalChainState") { ->
       val chain = vocalChain
       if (chain == null) mapOf("installed" to false, "configured" to false)
@@ -246,6 +282,40 @@ class LoudCameraModule : Module() {
  * pilot's preset at 48kHz, so a malformed map gives a working chain
  * rather than silence.
  */
+/**
+ * nativeSyncConfig() from lib/audio/sync.js, mapped. Computes nothing:
+ * every threshold and both sets of band-pass coefficients are derived
+ * there and proved in tests/audio-sync.test.mjs.
+ */
+private fun syncConfig(m: Map<String, Any?>): LoudSyncCalibration.Config {
+  fun f(key: String, fallback: Float): Float = (m[key] as? Number)?.toFloat() ?: fallback
+  fun i(key: String, fallback: Int): Int = (m[key] as? Number)?.toInt() ?: fallback
+  fun band(key: String): Map<*, *>? = m[key] as? Map<*, *>
+  fun bf(group: Map<*, *>?, key: String): Float = (group?.get(key) as? Number)?.toFloat() ?: 0f
+
+  val low = band("lowBand")
+  val high = band("highBand")
+  val d = LoudSyncCalibration.Config()
+  return LoudSyncCalibration.Config(
+    sampleRate = i("sampleRate", d.sampleRate),
+    repCount = i("repCount", d.repCount),
+    clickIntervalMs = f("clickIntervalMs", d.clickIntervalMs),
+    clickDurationMs = f("clickDurationMs", d.clickDurationMs),
+    clickFrequencyHz = f("clickFrequencyHz", d.clickFrequencyHz),
+    leadInMs = f("leadInMs", d.leadInMs),
+    lowB0 = bf(low, "b0"), lowB1 = bf(low, "b1"), lowB2 = bf(low, "b2"),
+    lowA1 = bf(low, "a1"), lowA2 = bf(low, "a2"),
+    highB0 = bf(high, "b0"), highB1 = bf(high, "b1"), highB2 = bf(high, "b2"),
+    highA1 = bf(high, "a1"), highA2 = bf(high, "a2"),
+    ratioMin = f("ratioMin", d.ratioMin),
+    sustainMs = f("sustainMs", d.sustainMs),
+    blankingMs = f("blankingMs", d.blankingMs),
+    marginDb = f("marginDb", d.marginDb),
+    minRms = f("minRms", d.minRms),
+    floorAlpha = f("floorAlpha", d.floorAlpha),
+  )
+}
+
 private fun vocalChainConfig(m: Map<String, Any?>): LoudVocalChain.Config {
   fun f(key: String, fallback: Float): Float = (m[key] as? Number)?.toFloat() ?: fallback
   fun nested(key: String): Map<*, *>? = m[key] as? Map<*, *>

@@ -115,3 +115,27 @@ export function setVocalChain(config) {
 export function vocalChainState() {
   return native ? native.vocalChainState() : Promise.resolve({ installed: false, configured: false });
 }
+
+/**
+ * Start a headphone delay run.
+ *
+ * `config` comes from nativeSyncConfig() in lib/audio/sync.js — the
+ * click train, both bands' filter coefficients and every gate. Nothing
+ * is computed on the native side.
+ *
+ * Resolves `{ ok: false, error }` rather than rejecting, for the same
+ * reason the vocal chain does: a check that will not start must never
+ * stop a show, and must never be mistaken for a measurement of zero.
+ */
+export function startSyncCalibration(config) {
+  return native ? native.startSyncCalibration(config) : Promise.resolve({ ok: false, error: 'no native module' });
+}
+
+/** { running, rep, repCount, results } — results is the per-rep offsets in ms, null where nothing was heard. */
+export function syncCalibrationState() {
+  return native ? native.syncCalibrationState() : Promise.resolve({ running: false, rep: -1, results: [] });
+}
+
+export function cancelSyncCalibration() {
+  return native ? native.cancelSyncCalibration() : Promise.resolve({ ok: true });
+}
