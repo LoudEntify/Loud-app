@@ -188,9 +188,12 @@ test('the Kotlin loop is a transcription, and can be read against its reference'
   // It implements the interface LiveKit actually calls.
   assert.match(kt, /AudioProcessorInterface/);
   assert.match(kt, /override fun processAudio/);
-  // A rate change invalidates every coefficient, so it stops rather
-  // than running yesterday's numbers.
-  assert.match(kt, /override fun resetAudioProcessing[\s\S]{0,400}enabled = false/);
+  // A rate change invalidates every coefficient, so the loop stops
+  // rather than running yesterday's numbers. `configured` means a config
+  // for THIS rate has arrived — it is not the effects switch, which is
+  // the crossfade, which is why the meter can read a level with effects
+  // off (lib/audio/meter.js).
+  assert.match(kt, /override fun resetAudioProcessing[\s\S]{0,400}configured = false/);
 
   const mod = readFileSync(resolve(ROOT, 'native/modules/loud-camera/android/src/main/java/app/loudentify/loudcamera/LoudCameraModule.kt'), 'utf8');
   assert.match(mod, /capturePostProcessor = it/, 'and is installed where LiveKit calls it');

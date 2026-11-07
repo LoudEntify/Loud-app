@@ -31,10 +31,12 @@ export const DEFAULT_RATE = 48000;
 export async function applyVocalChain(settings, sampleRate = DEFAULT_RATE) {
   const s = normaliseChain(settings);
   const config = nativeChainConfig(s, sampleRate);
-  // `effectsOn` is what the artist toggled; the crossfade gains inside
-  // `config` already express it, and the native side needs the flag
-  // too so it can skip the loop entirely when the chain is off.
-  const r = await LoudCamera.setVocalChain({ ...config, enabled: s.effectsOn });
+  // `effectsOn` needs no flag of its own: the crossfade gains inside
+  // `config` are what express it, and they are computed from it in
+  // chainSettings(). The native loop therefore runs whether effects are
+  // on or off — which is deliberate, because it is also what measures
+  // the input level for the meter.
+  const r = await LoudCamera.setVocalChain(config);
   return { ...r, settings: s };
 }
 
