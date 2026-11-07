@@ -1003,3 +1003,69 @@ Rejected: building the phone's player first and sharing afterwards (that
 is the drift, three times over), and putting playback behind a shared
 interface (an HTMLAudioElement and a native player have nothing in
 common worth abstracting; the decisions do).
+
+
+## 2026-11-07 — Step 2b: the backing track is decoded and mixed into what goes out
+
+The step I said I expected to be wrong about scope on. It came in close
+to the estimate, and the reason is that the hard part turned out to be a
+decision rather than the code.
+
+A media player was the obvious approach and is the wrong one. It would
+play the track to the artist's headphones and give us no access to its
+samples, so the track would be audible to the artist and ABSENT from the
+broadcast — or present in it only as whatever the microphone picked up of
+it. The track has to reach the stream, and on a phone the only place
+captured audio passes through code we configure is LoudVocalChain's
+capture post-processor. So the file is decoded to PCM
+(`LoudBackingTrack.kt`, MediaExtractor + MediaCodec, mixed to mono on the
+way in) and the chain reads samples from it per frame. That also makes
+the track sample-accurate against the published audio, which is what a
+cue sheet needs: cues are times, and they are only right if the track
+and the stream share a clock.
+
+It joins AFTER the vocal chain's crossfade and before the output gain,
+which is where `outputBus` sits in the graph lib/audio/chain.js draws. A
+mastered recording does not want a vocal compressor over it, and the
+pilot's graph does not give it one. There is a test asserting the order.
+
+Three things worth recording because each would have been a quiet bug:
+
+1. **Headphones are required, as a product rule.** Through the speaker
+   the microphone hears the track too, so it goes out twice a few
+   milliseconds apart — a comb filter on the whole show rather than a
+   quality niggle. Bluetooth is allowed and warned about, because it puts
+   the artist behind their own track, which is what the delay check
+   measures.
+2. **The resample ratio is the one number that must not be wrong.**
+   Capture is 48 kHz and a downloaded track is usually 44.1 kHz. Treating
+   one as the other runs the track 8.8% fast: four bars sound fine, so it
+   is discovered at the END of a song, 24 seconds early, with every cue
+   wrong. The ratio comes from lib/audio/tracks.js, is tested there, and
+   the Kotlin uses it as given — with a test asserting it does no rate
+   arithmetic of its own. The playhead is a Double for the same reason:
+   an integer playhead would quantise the ratio back to 1.
+3. **The native mixer owns the playhead**, because it is the thing
+   consuming samples. A transport counting elapsed time itself would
+   drift against the audio exactly as badly as a wrong ratio.
+
+Linear interpolation for the resampling, and that is a deliberate
+trade rather than the best available: a windowed sinc per sample inside
+an audio callback that is also running a vocal chain and encoding video
+is not affordable. It adds a little high-frequency softness to the
+track. The ratio matters enormously more than the interpolation.
+
+The whole track is decoded into memory — about 13 MB for five minutes at
+44.1 kHz — which removes every seek and every decode from the audio
+thread. Decoding runs on the module's own single-thread executor, never
+on the main thread and never on the audio thread.
+
+Still to do (2c): the panels behind the new web artist screens and the
+console UI on the app. This PR gives the phone the capability; nothing
+on screen uses it yet, and I am not taking down a notice until something
+does.
+
+Rejected: a media player (cannot reach the broadcast), streaming the
+decode as it plays (a seek would then decode on the audio thread), and
+resampling on the JavaScript side (the samples never cross the bridge,
+which is the point).

@@ -185,3 +185,127 @@ test('lib/audio/tracks.js names no platform', () => {
   }
   assert.ok(!/from\s+'/.test(src), 'it imports nothing');
 });
+
+// ── Mixing a track into what goes out (step 2b) ──────────────────
+
+const { TRACK_NEEDS_HEADPHONES, trackPlaybackAllowed, resampleRatio,
+        trackSamplesFor, driftMsOver, nativeTrackConfig } = await import('../lib/audio/tracks.js');
+
+test('cueing a track on a phone requires headphones, and that is a rule not a preference', () => {
+  assert.equal(TRACK_NEEDS_HEADPHONES, true);
+
+  // Through the speaker the microphone hears the track too, so it goes
+  // out twice a few milliseconds apart — a comb filter on the whole
+  // show, not a quality niggle.
+  const none = trackPlaybackAllowed({ headphones: null });
+  assert.equal(none.ok, false);
+  assert.match(none.reason, /goes out twice/);
+
+  const wired = trackPlaybackAllowed({ headphones: 'wired' });
+  assert.equal(wired.ok, true);
+  assert.equal(wired.warn, null);
+
+  // Bluetooth is allowed but warned about: it puts the artist behind
+  // their own track, which is what the delay check corrects.
+  const bt = trackPlaybackAllowed({ headphones: 'bluetooth' });
+  assert.equal(bt.ok, true);
+  assert.match(bt.warn, /behind your own track/);
+
+  assert.equal(trackPlaybackAllowed().ok, false, 'unknown is not permission');
+});
+
+test('the resample ratio is the thing that must not be wrong', () => {
+  // A phone captures at 48k; a downloaded track is usually 44.1k.
+  const ratio = resampleRatio(44100, 48000);
+  assert.ok(Math.abs(ratio - 0.91875) < 1e-9);
+  assert.equal(resampleRatio(48000, 48000), 1);
+  assert.ok(resampleRatio(96000, 48000) === 2);
+
+  // Nonsense is 1 rather than 0 or NaN: a ratio of 0 would freeze the
+  // track and a NaN would silence it, and both would look like a broken
+  // player rather than a bad number.
+  for (const bad of [[0, 48000], [44100, 0], [NaN, 48000], ['x', 'y'], [undefined, undefined]]) {
+    assert.equal(resampleRatio(...bad), 1);
+  }
+
+  // Why it matters, as a number rather than an argument. A 44.1k file
+  // played as if it were 48k is consumed 8.8% too fast, so a five-minute
+  // song finishes about 24 seconds early — and nobody hears four bars of
+  // it as wrong pitch, so it is found at the end of the song rather than
+  // the start.
+  assert.ok(Math.abs(driftMsOver(300, ratio) - 24375) < 50, 'about 24s over five minutes');
+  assert.ok(Math.abs((300 - 300 * ratio) - 24.4) < 0.1, 'and that is what 8.8% of five minutes is');
+  assert.equal(driftMsOver(300, 1), 0);
+
+  // And the per-frame consumption follows the ratio.
+  assert.equal(trackSamplesFor(480, 1), 480);
+  assert.equal(trackSamplesFor(480, 0.91875), 441);
+  assert.equal(trackSamplesFor(0, 0.91875), 0);
+  assert.equal(trackSamplesFor(-10, 1), 0, 'never negative');
+});
+
+test('the native mixer is handed the ratio and both gains, and computes neither', () => {
+  const t = setVolume(togglePlay(loaded(200)), 0.6);
+  const c = nativeTrackConfig({ transport: t, fileRate: 44100, captureRate: 48000 });
+
+  assert.equal(c.playing, true);
+  assert.equal(c.trackGain, 0.6);
+  assert.equal(c.voiceGain, 1, 'the voice is never attenuated by the balance');
+  assert.ok(Math.abs(c.ratio - 0.91875) < 1e-9);
+  assert.equal(c.captureRate, 48000);
+  assert.equal(c.fileRate, 44100);
+
+  // A paused transport says so, so the mixer adds silence rather than
+  // the native side deciding what paused means.
+  assert.equal(nativeTrackConfig({ transport: loaded(200), fileRate: 44100, captureRate: 48000 }).playing, false);
+  // And no transport at all is an empty one rather than a crash.
+  assert.equal(nativeTrackConfig({ fileRate: 44100, captureRate: 48000 }).playing, false);
+});
+
+test('the Kotlin mixer is handed the ratio and the gain, and works them out for nothing', () => {
+  const ROOT_KT = 'native/modules/loud-camera/android/src/main/java/app/loudentify/loudcamera';
+  const codeOf = (p) => readFileSync(resolve(ROOT, p), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+  const track = codeOf(`${ROOT_KT}/LoudBackingTrack.kt`);
+  // The ratio arrives in the config and is used as given. A rate
+  // conversion computed natively would be a second definition of the
+  // one number that must not be wrong.
+  assert.match(track, /val ratio: Float = 1f/);
+  assert.match(track, /val ratio = c\.ratio\.toDouble\(\)/);
+  assert.ok(!/44100|48000\s*\/|\/\s*48000/.test(track.replace(/sourceRate = 44100/, '')), 'no rate arithmetic of its own');
+
+  // Linear interpolation, and the playhead is fractional — an integer
+  // playhead would quantise the ratio back to 1 and the track would
+  // drift exactly as badly as a wrong ratio.
+  assert.match(track, /pcm\[idx\] \* \(1f - frac\) \+ pcm\[idx \+ 1\] \* frac/);
+  assert.match(track, /private var position = 0\.0/);
+
+  // Decoding never happens on the audio thread, and the decoder's own
+  // output rate wins over the container's.
+  assert.match(track, /INFO_OUTPUT_FORMAT_CHANGED/);
+  const mod = codeOf(`${ROOT_KT}/LoudCameraModule.kt`);
+  assert.match(mod, /io\.execute \{/, 'the decode runs on its own thread');
+  assert.match(mod, /newSingleThreadExecutor/);
+
+  // The track joins the signal AFTER the vocal chain's crossfade: a
+  // mastered recording does not want a vocal compressor over it, and
+  // the pilot's graph does not give it one.
+  const chain = codeOf(`${ROOT_KT}/LoudVocalChain.kt`);
+  const crossfade = chain.indexOf('processedGain + trimmed');
+  const mix = chain.indexOf('track.mixInto');
+  assert.ok(crossfade > 0 && mix > crossfade, 'the track is mixed after the crossfade, not through the chain');
+});
+
+test('the phone orchestration holds no rules of its own', () => {
+  const js = readFileSync(resolve(ROOT, 'native/src/backingTrack.js'), 'utf8');
+  assert.match(js, /nativeTrackConfig\(/);
+  assert.match(js, /trackIdentityOk\(/, 'the identity rule is the shared one');
+  assert.match(js, /trackPlaybackAllowed\(/, 'and so is the headphone rule');
+  // The native mixer owns the playhead, because it is the thing
+  // consuming samples. A transport counting time itself would drift
+  // against the audio exactly as a wrong resample ratio would.
+  assert.match(js, /reportPosition\(t, s\.positionSeconds\)/);
+  assert.ok(!/0\.91875|44100/.test(js), 'no rates written into the delivery layer');
+});
