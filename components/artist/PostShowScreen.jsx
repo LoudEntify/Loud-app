@@ -12,6 +12,12 @@ import { Close, Share, Play } from '../viewer/Icons';
 export default function PostShowScreen({ showId }) {
   const { session, accessToken, loading } = useSession();
   const [show, setShow] = useState(null); const [ins, setIns] = useState(null); const [rec, setRec] = useState(null); const [err, setErr] = useState(null);
+  // Why was the broadcast black? Read from what the RECORDER logged
+  // (lib/broadcastDiagnosis.js), so the artist is told which half of the
+  // system to stop suspecting instead of being asked to watch two
+  // screens at once while performing.
+  const [diag, setDiag] = useState(null);
+  const [diagOpen, setDiagOpen] = useState(false);
   useEffect(() => {
     if (!session) return;
     const sb = getSupabase();
@@ -25,6 +31,13 @@ export default function PostShowScreen({ showId }) {
       setShow(s); setIns(i || null); setRec(r?.[0] || null);
     })();
   }, [session, showId]);
+  // Fetched once the show is known, and only shown when the artist asks:
+  // after a show that worked, this is noise.
+  useEffect(() => {
+    if (!accessToken || !diagOpen || diag) return;
+    api(`/api/artist/shows/${showId}/diagnosis`, { accessToken })
+      .then((r) => setDiag(r.ok ? r.data?.diagnosis : { line: 'We could not read the logs for this show.', meaning: '', next: '' }));
+  }, [accessToken, diagOpen, diag, showId]);
   async function setVisibility(v) { if (!rec) return; await getSupabase().from('recordings').update({ visibility: v }).eq('id', rec.id); setRec({ ...rec, visibility: v }); }
   if (err === 'notfound') return <div className="v-screen"><ErrorState title="We couldn't find that show" retry={false} backHref="/profile" backLabel="Your profile" /></div>;
   if (loading || !show) return <div className="v-screen" role="status" aria-label="Loading"><Skeleton w={160} h={30} /><Skeleton h={120} /></div>;
@@ -48,6 +61,23 @@ export default function PostShowScreen({ showId }) {
       </div>
       <a className="v-btn v-btn-lg v-btn-teal" href={rec ? `/artist/clips/new?recording=${rec.id}` : '#'} aria-disabled={!rec}><Play />Make a clip</a>
       <button className="v-btn v-btn-lg v-btn-ghost-light" onClick={() => { const url = `${location.origin}/show/${showId}`; if (navigator.share) navigator.share({ url }).catch(() => {}); else navigator.clipboard?.writeText(url); }}><Share />Share your show</button>
+      {/* The black-broadcast question, answered from the recorder's own
+          logs rather than by asking the artist what they saw. */}
+      <div className="v-card-light v-col" style={{ padding: 14, gap: 8 }} data-testid="diagnosis-card">
+        {!diagOpen ? (
+          <button className="v-btn v-btn-ghost-light" onClick={() => setDiagOpen(true)} data-testid="diagnosis-open">
+            Something looked wrong on the stream
+          </button>
+        ) : !diag ? (
+          <span className="v-muted">Reading what the recorder saw…</span>
+        ) : (
+          <>
+            <span style={{ fontWeight: 700 }} data-testid="diagnosis-line">{diag.line}</span>
+            {diag.meaning ? <span className="v-muted" style={{ fontSize: 14 }}>{diag.meaning}</span> : null}
+            {diag.next ? <span className="v-muted" style={{ fontSize: 14 }}>{diag.next}</span> : null}
+          </>
+        )}
+      </div>
       <a className="v-link" style={{ alignSelf: 'center' }} href="/artist/insights">See insights</a>
     </div>
   );
