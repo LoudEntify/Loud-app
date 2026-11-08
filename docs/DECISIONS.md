@@ -1377,3 +1377,51 @@ wrong artefact (docs/ONE_JOURNEY.md §3, again).
 Rejected: publishing the raw microphone and processing in the compositor
 (the artist's monitoring would not match what goes out), and starting
 the camera when the console opens (a participant before the show).
+
+## 2026-11-08 — Step 2 on the web is done, and a claim in #65 was not true
+
+**The panels.** `AudioDeckPanel` is now behind the new web console, fed
+from the audio graph the publish hook hands to `lib/audioHost.js`. It
+brings `BackingTrackPanel` and `CueEditorPanel` with it, so one import
+closes three of the seven capability gaps: the vocal chain, the backing
+track with its cue sheet, and the voice/track balance.
+
+It is the pilot's own panel rather than a rebuild. It is the only
+working version of these capabilities, and rewriting it against the
+design boards is precisely the mistake docs/ONE_JOURNEY.md §3 records me
+making with the whole journey.
+
+Closed by default: the console's first job is the picture, and a deck
+open over it would bury the shot.
+
+**And a correction to #65, which merged yesterday evening.** Its
+description said the console shows a publishing status line with a retry
+button. That block was in the description and NOT in the diff.
+
+What happened: I anchored the edit on a piece of markup — `<div
+className="v-row" ... aria-label="Frame">` — that lives in
+`KitCheckScreen.jsx`, not `ConsoleScreen.jsx`. The Python replacement
+found no match and silently changed nothing. My own verification then
+grepped `useArtistPublish|publish-status|describePublishing`, counted
+three matches, and passed — because the IMPORT line satisfied the
+pattern. So three functions were imported and never called, and a merged
+PR described a feature that was not there.
+
+The publishing itself did work: the hook was wired and the console did
+join the room and publish. What was missing was the artist being told
+so, which on a screen whose whole job is knowing you are on air is not
+a cosmetic omission.
+
+Both blocks are in now, and `tests/publishing.test.mjs` has a test that
+would have caught it: every name imported from `lib/publishing` must be
+CALLED somewhere in the console's markup. An import is not a feature,
+and a grep that an import can satisfy is not a check.
+
+That is twice today that a check matched the shape of an
+implementation rather than a behaviour — the other being the 7 November
+test that searched for an import in components/artist/. The pattern to
+avoid is now explicit in both tests.
+
+Rejected: rebuilding the deck for the new UI (the §3 mistake), and
+opening it by default (it buries the shot).
+- 2026-11-08: The e2e suite went red on #66 and it was mine: the publish-status row and the sound deck went into the live console's own scrolling column, which pushed the End show button past the bottom of a 390x844 phone. The console's existing comment already stated the rule — "the composed frame shrinks so the controls below it always fit the phone (a hidden End show button is not acceptable)" — and the frame's width is calc()'d against a constant reserve, so new rows in that column are not free. Fix: the status row and a "Sound" chip share one 32px row, the reserve went 410→452 (470→512 for Versus) to pay for it, and the deck opens as a dialog sheet over the console (the FixSheet idiom) so a tall panel costs the column nothing. Rejected: scrolling the button into view in the test — the test was right. The button WAS hidden, and press-and-hold on an element below the fold is exactly what an artist ending a show would have hit. Also rejected: shrinking the frame by the full inline height (~90px), which would have cost the artist's own monitor 50px of width to show a panel that is better as a sheet anyway. Added a test asserting the deck renders inside a positioned dialog rather than in the console column, since a unit test can assert that structure even though it cannot measure layout.

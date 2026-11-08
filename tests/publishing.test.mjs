@@ -123,3 +123,48 @@ test('the web console now publishes, and publishes the PROCESSED microphone', ()
   assert.match(pub, /from '\.\/publishing'/);
   assert.ok(!/const (IDLE|LIVE|FAILED) = '/.test(pub), 'no second definition of the phases');
 });
+
+test('the console SHOWS the publishing status, not just computes it', () => {
+  // #65 imported describePublishing, canRetry and isPublishing and
+  // rendered none of them: the edit was anchored on markup that lives
+  // in KitCheckScreen.jsx, so the replacement silently did nothing, and
+  // the check I ran grepped a pattern the import itself satisfied.
+  //
+  // So this asserts the status is RENDERED, which is the thing a claim
+  // about it means. An import is not a feature.
+  const console_ = read('components/artist/ConsoleScreen.jsx');
+  assert.match(console_, /data-testid="publish-status"/);
+  assert.match(console_, /describePublishing\(publish\.phase, \{ error: publish\.error \}\)/);
+  assert.match(console_, /canRetry\(publish\.phase\)/);
+  assert.match(console_, /isPublishing\(publish\.phase\)/);
+  assert.match(console_, /onClick=\{publish\.retry\}/, 'and the retry actually retries');
+
+  // Every import from lib/publishing is used in the markup, so the next
+  // silently-dropped edit fails here rather than shipping.
+  const imported = console_.match(/import \{([^}]+)\} from '\.\.\/\.\.\/lib\/publishing'/);
+  assert.ok(imported, 'the console imports from lib/publishing');
+  for (const name of imported[1].split(',').map((n) => n.trim()).filter(Boolean)) {
+    const uses = (console_.match(new RegExp(`\\b${name}\\(`, 'g')) || []).length;
+    assert.ok(uses > 0, `${name} is imported and never called`);
+  }
+});
+
+test('the sound deck opens over the console, not inside its scrolling column', () => {
+  // The console's own comment: "the composed frame shrinks so the
+  // controls below it always fit the phone (a hidden End show button is
+  // not acceptable)". The frame's width is calc()'d against a constant
+  // reserve, so anything tall placed in that column pushes End show past
+  // the bottom of a 390x844 phone instead of shrinking the frame.
+  //
+  // The first version of this panel was inline in the column, and the
+  // e2e suite's press-and-hold then had nothing under the cursor: the
+  // button existed, below the fold, and the show never ended. So the
+  // deck belongs in a sheet over the console, like FixSheet.
+  const src = read('components/artist/ConsoleScreen.jsx');
+  const column = src.indexOf('data-testid="console"');
+  const deck = src.indexOf('<AudioDeckPanel');
+  const dialog = src.lastIndexOf('role="dialog"', deck);
+  assert.ok(column > 0 && deck > 0, 'the console column and the deck are both there');
+  assert.ok(dialog > column, 'the deck renders inside a dialog over the console, not in its column');
+  assert.match(src.slice(dialog, deck), /position: 'absolute'/, 'and that dialog is positioned over it');
+});

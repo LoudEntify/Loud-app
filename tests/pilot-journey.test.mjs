@@ -158,3 +158,32 @@ test('lib/pilotJourney.js knows no framework', () => {
   }
   assert.ok(!/from\s+'/.test(code), 'it imports nothing');
 });
+
+test('the capability panels are behind the new web console, and are the pilot\'s own', () => {
+  // ONE_JOURNEY step 2, finally done on the web: the new console had
+  // NONE of the seven capability panels, which is why an artist there
+  // could not cue a track, tune the chain or edit a cue sheet.
+  const consoleScreen = codeOf(read('components/artist/ConsoleScreen.jsx'));
+
+  // The pilot's panel, imported — not rewritten. It is the only working
+  // version of these capabilities, and rewriting it would be exactly
+  // the mistake docs/ONE_JOURNEY.md §3 records me making once already.
+  assert.match(consoleScreen, /import AudioDeckPanel from '\.\.\/AudioDeckPanel'/);
+
+  // Fed from the graph the publish hook hands to lib/audioHost.js, so
+  // the deck is a view of the same chain that is being broadcast rather
+  // than a second one built for the screen.
+  assert.match(consoleScreen, /nodes=\{publish\.nodes\}/);
+  assert.match(consoleScreen, /audioContext=\{publish\.audioContext\}/);
+
+  // Set-list assembly stays a Kit Check activity: in the live room this
+  // panel chooses what to play next, it does not rebuild the running
+  // order mid-performance.
+  assert.match(consoleScreen, /canEditSetList=\{false\}/);
+
+  // The deck brings the backing track and the cue editor with it, which
+  // is why one import closes three gaps.
+  const deck = codeOf(read('components/AudioDeckPanel.jsx'));
+  assert.match(deck, /BackingTrackPanel/);
+  assert.match(deck, /CueEditorPanel/);
+});

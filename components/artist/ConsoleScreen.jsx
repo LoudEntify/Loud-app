@@ -21,6 +21,7 @@ import { SHOW_PROMPTS } from '../../lib/showPrompts';
 import { Skeleton, ErrorState, OfflineBar, useOnline } from '../viewer/States';
 import { Eye, Warn, Check, Close, Send } from '../viewer/Icons';
 import { useArtistPublish } from '../../lib/artistPublish';
+import AudioDeckPanel from '../AudioDeckPanel';
 import { describePublishing, canRetry, isPublishing } from '../../lib/publishing';
 
 const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -69,6 +70,13 @@ export default function ConsoleScreen({ showId }) {
   // never joined a room. An artist here was watching themselves while
   // nothing reached a broadcast (docs/ONE_JOURNEY.md, 7 November).
   const publish = useArtistPublish({ showId, accessToken, enabled: Boolean(show?.actual_started_at) });
+  // The capability panels, which the pilot journey has had all along and
+  // the new console had none of (docs/ONE_JOURNEY.md step 2). They are
+  // views of the audio graph the publish hook hands to lib/audioHost.js:
+  // the vocal chain, the backing track with its cue sheet, the voice and
+  // track balance. Closed by default — the console's first job is the
+  // picture, and a deck open over it would bury the shot.
+  const [deckOpen, setDeckOpen] = useState(false);
 
   // Publishing starts when the show does, not when the screen opens: the
   // console is also where an artist waits for their slot, and a camera
@@ -233,13 +241,53 @@ export default function ConsoleScreen({ showId }) {
           <span className={`v-badge ${delivery === 'ok' ? 'v-badge-soon' : 'v-badge-live'}`} style={delivery === 'ok' ? { background: 'var(--teal)' } : undefined} data-testid="delivery-state">{delivery === 'ok' ? 'DELIVERING' : delivery === 'reconnecting' ? 'RECONNECTING' : delivery === 'failed' ? 'NOT DELIVERING' : String(delivery || '').toUpperCase()}</span>
           {!isVersus && <button className="v-chip v-chip-dark" style={{ height: 32, fontSize: 14 }}>Director: Auto</button>}
         </div>
-        {/* the composed frame shrinks so the controls below it always fit the phone (a hidden End show button is not acceptable) */}
-        <div style={{ position: 'relative', alignSelf: 'center', width: `min(100%, 304px, calc((100dvh - ${isVersus ? 470 : 410}px) * 9 / 16))`, minWidth: 140, aspectRatio: '9/16', flexShrink: 0 }}>
+        {/* the composed frame shrinks so the controls below it always fit the phone (a hidden End show button is not acceptable)
+            The reserve went 410→452 and 470→512 on 8 Nov when the publish-status row
+            (a 32px chip row plus the column's 10px gap) was added below the frame.
+            Anything new in this column has to be paid for here or End show falls off the phone. */}
+        <div style={{ position: 'relative', alignSelf: 'center', width: `min(100%, 304px, calc((100dvh - ${isVersus ? 512 : 452}px) * 9 / 16))`, minWidth: 140, aspectRatio: '9/16', flexShrink: 0 }}>
           <canvas ref={canvasRef} width={540} height={960} style={{ width: '100%', height: '100%', outline: '1px solid rgba(253,255,252,0.28)', display: 'block' }} role="img" aria-label="What is being broadcast" data-testid="composed-frame" />
           <video ref={videoRef} muted playsInline style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} />
           {delivery !== 'ok' && <span className="v-kicker" style={{ position: 'absolute', left: 8, bottom: 8, padding: '4px 8px', borderRadius: 999, background: 'rgba(231,29,54,0.85)', fontSize: 12 }}>{delivery === 'reconnecting' ? 'YouTube reconnecting · recording continues' : 'YouTube not delivering · recording continues'}</span>}
         </div>
         <div className="v-muted" style={{ fontSize: 14, textAlign: 'center' }}>Viewers see this about {tickData?.delaySeconds != null ? Math.round(tickData.delaySeconds) : '5'} seconds behind.</div>
+
+        {/* Whether the artist is actually IN the show — their camera and
+            processed microphone published, not just previewed. The
+            wording is shared with the phone (lib/publishing.js) so the
+            two positions cannot describe one situation differently.
+
+            This block was in #65's description and not in #65's diff: I
+            anchored the edit on markup from KitCheckScreen.jsx, the
+            replacement silently did nothing, and my own check grepped a
+            pattern that the IMPORT satisfied. Hence three imports used
+            nowhere, and a claim in a merged PR that was not true. */}
+        {/* One row, and the sound deck opens as a sheet rather than
+            inline, because of the line twelve lines above this one: the
+            frame shrinks so the controls below it always fit, and the
+            reserve it shrinks against is a constant in that calc().
+
+            The first version of this block put the status and a
+            full-width toggle in the column without touching that
+            constant, and the deck inline below them. Both pushed the End
+            show button past the bottom of a 390x844 phone — exactly what
+            that comment says is not acceptable — and the e2e suite's
+            press-and-hold then had nothing under the cursor. A sheet
+            costs the column nothing however tall the deck is. */}
+        <div className="v-row" style={{ gap: 8, alignItems: 'center' }} data-testid="publish-status" data-phase={publish.phase}>
+          {isPublishing(publish.phase) ? <Check size={16} /> : <Warn size={16} />}
+          <span className="v-muted" style={{ fontSize: 14, flex: 1 }}>
+            {describePublishing(publish.phase, { error: publish.error })}
+          </span>
+          {canRetry(publish.phase) ? (
+            <button className="v-chip v-chip-dark" style={{ height: 32, fontSize: 14 }} onClick={publish.retry} data-testid="publish-retry">
+              Try again
+            </button>
+          ) : null}
+          <button className="v-chip v-chip-dark" style={{ height: 32, fontSize: 14 }} onClick={() => setDeckOpen(true)} aria-expanded={deckOpen} data-testid="sound-toggle">
+            Sound
+          </button>
+        </div>
         {isVersus && (
           <div className="v-row" style={{ gap: 8 }} data-testid="versus-controls">
             <button className="v-col" aria-pressed={show.versus_view === 'conversation'} onClick={() => versus('conversation')} style={{ flex: 1, padding: 10, borderRadius: 16, background: show.versus_view === 'conversation' ? 'rgba(46,196,182,0.2)' : 'rgba(253,255,252,0.1)', border: `2px solid ${show.versus_view === 'conversation' ? 'var(--teal)' : 'transparent'}`, color: 'var(--porcelain)', alignItems: 'flex-start' }}><span style={{ fontSize: 17, fontWeight: 700 }}>Conversation</span><span className="v-muted" style={{ fontSize: 13 }}>Split screen</span></button>
@@ -276,6 +324,36 @@ export default function ConsoleScreen({ showId }) {
       {sheet === 'fix' && <FixSheet mics={mics} micId={micId} onMic={(id) => { setMicId(id); setSheet(null); }} elapsed={elapsed} live camHealthy={camHealthy} onRecheck={() => { setCamHealthy(true); setMicId((m) => m); setSheet(null); }} onClose={() => setSheet(null)} />}
       {(sheet === 'prompt' || sheet === 'vote') && <PromptSheet kind={sheet} isVersus={isVersus} names={{ a: show.artist?.display_name || 'A', b: show.artist_b?.display_name || 'B' }} onPush={pushPrompt} onClose={() => setSheet(null)} />}
       {sheet === 'look' && <LookSheet look={look} busy={lookBusy} onChange={saveLook} onClose={() => setSheet(null)} />}
+      {/* Sound: the vocal chain, the backing track and the cue sheet.
+          The pilot's own panel, not a rebuild — it is the only working
+          version of these capabilities, and rewriting it would be the
+          mistake docs/ONE_JOURNEY.md §3 records.
+
+          A sheet, and scrollable inside itself: the deck is tall, and
+          anything tall in the console's own column pushes End show off a
+          phone. Dark, over the dark console, unlike FixSheet — the deck's
+          own markup is the pilot's dark deck. */}
+      {deckOpen && (
+        <div role="dialog" aria-label="Sound, track and cues" style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', background: 'rgba(1,22,39,0.5)' }} onClick={() => setDeckOpen(false)}>
+          <section className="v-sheet-dark" onClick={(e) => e.stopPropagation()} data-testid="console-sound" style={{ maxHeight: '82dvh', overflowY: 'auto' }}>
+            <div className="v-sheet-handle" style={{ background: 'rgba(253,255,252,0.3)' }} />
+            <AudioDeckPanel
+              nodes={publish.nodes}
+              audioContext={publish.audioContext}
+              showEnded={Boolean(show?.actual_ended_at)}
+              showPhase="live"
+              artistAccessToken={accessToken}
+              artistEmail={session?.user?.email || null}
+              sessionTarget={{ showId, slot: data.slot || 'a' }}
+              // Assembling a set list is a Kit Check activity: in the
+              // live room this panel is for choosing what to play next,
+              // not for rebuilding the running order mid-performance.
+              canEditSetList={false}
+            />
+            <button className="v-btn v-btn-lg v-btn-ghost-dark" onClick={() => setDeckOpen(false)} data-testid="sound-close">Back to the show</button>
+          </section>
+        </div>
+      )}
       <canvas ref={lutCanvasRef} width={2} height={2} aria-hidden="true" style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
     </Shell>
   );
