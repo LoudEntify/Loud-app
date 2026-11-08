@@ -1,7 +1,10 @@
-// native/modules/loud-camera — local Expo module for the device-zoom spike.
-// Compiled by EAS (dev build) and, on this branch only, by the
-// android-spike workflow (.github/workflows/android-spike.yml), which is
-// how a Kotlin error is caught without spending an EAS build. CameraX is
+// native/modules/loud-camera — the local Expo module: the camera
+// capturer, the vocal chain, the input meter and the backing track.
+// Compiled by EAS (dev build) and by the `android` workflow
+// (.github/workflows/android.yml), which is how a Kotlin error is caught
+// without spending an EAS build — on pull requests as well as on staging
+// since 8 November, for the reason in the LiveKit dependency below.
+// CameraX is
 // pinned to the version expo-camera already pulls in so the app never
 // carries two copies.
 plugins {
@@ -38,4 +41,17 @@ dependencies {
   // The LiveKit fork of react-native-webrtc: its WebRTCModule is where a
   // custom capturer becomes a local track the JS side can publish.
   implementation project(':livekit_react-native-webrtc')
+  // @livekit/react-native, which is a DIFFERENT Gradle project from the
+  // webrtc fork above and the one that owns the audio classes:
+  // com.livekit.reactnative.LiveKitReactNative (whose
+  // audioProcessingController is where a capture post-processor is
+  // installed) and com.livekit.reactnative.audio.processing.
+  // AudioProcessorInterface (which LoudVocalChain implements).
+  //
+  // Missing since the vocal chain was written on 6 November, which took
+  // the APK build red and kept it red for five commits: ci.yml does not
+  // compile Kotlin — `expo export` only bundles JS — so the only job
+  // that would have caught this is .github/workflows/android.yml, and
+  // that one does not run on pull requests. Both halves are fixed here.
+  implementation project(':livekit_react-native')
 }
