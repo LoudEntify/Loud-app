@@ -1314,3 +1314,66 @@ Rejected: streaming the track from storage (no samples to mix), trusting
 the cache by filename (an interrupted download is a plausible file), and
 detecting headphones (there is no API for it on the capturer, and
 guessing would put a comb filter on a show).
+## 2026-11-08 — The web console publishes, and the 7 November blocker is gone
+
+`components/artist/ConsoleScreen.jsx` took the local camera, composed a
+preview and drew it to a canvas, and never joined a room. An artist on
+the new web console was watching themselves while nothing reached a
+broadcast. Found 7 November; fixed here.
+
+`lib/artistPublish.js` is the web half of what `native/src/ownCamera.js`
+does for the phone: the same route (/api/performer/join-show, which
+enforces the show window server-side), the same phases, the same
+sentences for a refusal.
+
+**The published microphone is the chain's output, not the raw stream.**
+`createPilotAudioTrack` builds the vocal chain and returns the track
+that comes out of it, so what viewers hear is what the artist tuned.
+The graph goes to `lib/audioHost.js` rather than being held in the hook,
+because the capability panels are views of that host and a graph owned
+by a component dies with it — the lesson that file's header records and
+that the phone had to relearn this morning (#63).
+
+Three orderings that are decisions rather than style:
+
+1. **Camera before chain.** A performer with sound and no picture is a
+   worse failure than one with a picture and no sound, and if the chain
+   cannot be built the camera is already out there.
+2. **A failed start closes everything it opened**, in reverse. A
+   half-joined room leaves a participant in the show with nothing to
+   publish, and the egress would compose a slot for it.
+3. **Publishing starts when the SHOW does, not when the screen opens.**
+   The console is also where an artist waits for their slot, and a
+   camera in the room before the show has begun is a participant the
+   egress would compose.
+
+Unlike the backing track, whose samples live outside every component on
+purpose, the camera stops when the console unmounts: a camera that
+outlived its screen would be a performer in a show with no way to see or
+stop themselves.
+
+`lib/publishing.js` holds the phases and the wording, shared, because
+the phone and the web now both answer "am I in the show?" and two copies
+is how they come to answer it differently. The one rule worth having as
+a function rather than a comment: **a warning is not a failure.** A
+frame-rate notice must not read as being off air, because an artist who
+thinks they are off air behaves very differently from one who knows they
+are on.
+
+**A weakness in my own test, found by this change.** The 7 November test
+asserted that nothing in `components/artist/` publishes, by searching
+for an `import livekit-client` there — and the console publishes through
+a hook in `lib/`, so the test would have kept passing while its premise
+became false. It now checks the capability. A test that searches for the
+shape of an implementation rather than the behaviour is a test that
+expires quietly.
+
+The phone still has its own `OWN_CAMERA_*` constants rather than reading
+lib/publishing.js. Migrating them is a change to a working performer
+position and belongs in its own PR; it is not a reminder in a test,
+because a test whose job is to remind someone of future work is the
+wrong artefact (docs/ONE_JOURNEY.md §3, again).
+
+Rejected: publishing the raw microphone and processing in the compositor
+(the artist's monitoring would not match what goes out), and starting
+the camera when the console opens (a participant before the show).
