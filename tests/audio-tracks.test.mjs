@@ -336,3 +336,62 @@ test('the console drives the shared transport rather than its own', () => {
   // words of the reason rather than as an instruction to obey.
   assert.match(console_, /goes out twice/);
 });
+
+test('the transport outlives the screen, which is the bug the web had already fixed', async () => {
+  // #58 and #62 held the transport in React state inside the hook. The
+  // samples live in the native module and survive any unmount, so
+  // closing the console left a track PLAYING into the broadcast while
+  // the screen's transport read "no track loaded" — and reopening it
+  // showed a stopped transport over audible audio.
+  //
+  // components/BackingTrackPanel.jsx had this exact bug and its header
+  // records the fix. I read that comment while lifting these rules into
+  // lib/audio/tracks.js and still put the phone's copy in a hook.
+  const host = await import('../native/src/backingTrackHost.js');
+  const { newTransport: fresh, loadTrack: load, togglePlay: play } = await import('../lib/audio/tracks.js');
+
+  host.resetBackingTrackHost();
+  // The host starts holding NO transport rather than its own idea of an
+  // empty one: it imports nothing, so there is exactly one definition
+  // of "no track loaded" and it lives in lib/audio/tracks.js.
+  assert.equal(host.getBackingTrackHost().transport, null);
+
+  // A "screen" loads and plays.
+  host.setTransport(load(fresh(), { trackId: 't1', durationS: 200 }));
+  host.setLoadedTrack({ trackId: 't1', fileRate: 44100 });
+  host.setTransport(play);
+  assert.equal(host.getBackingTrackHost().transport.state, 'playing');
+
+  // That "screen" goes away. Nothing unmounts the host, so a second
+  // screen sees the same playing track rather than an empty transport.
+  assert.equal(host.getBackingTrackHost().transport.state, 'playing');
+  assert.equal(host.getBackingTrackHost().trackId, 't1');
+  assert.equal(host.getBackingTrackHost().fileRate, 44100);
+
+  // Subscribers are told, and the version moves, so a view re-renders
+  // without deep-comparing — the same mechanism as lib/audioHost.js.
+  let told = 0;
+  const stop = host.subscribeBackingTrack(() => { told += 1; });
+  const before = host.getBackingTrackVersion();
+  host.setTransport((t) => play(t));
+  assert.equal(told, 1);
+  assert.ok(host.getBackingTrackVersion() > before);
+
+  // A thrown subscriber must never break audio.
+  const stopBad = host.subscribeBackingTrack(() => { throw new Error('bad view'); });
+  host.setTransport((t) => play(t));
+  stopBad(); stop();
+
+  host.resetBackingTrackHost();
+  assert.equal(host.getBackingTrackHost().transport, null, 'reset clears it, for sign-out');
+});
+
+test('the hook is a view of the host rather than an owner of the transport', () => {
+  const hook = readFileSync(resolve(ROOT, 'native/src/backingTrack.js'), 'utf8');
+  assert.match(hook, /useSyncExternalStore\(subscribeBackingTrack/, 'it subscribes');
+  assert.ok(
+    !/useState\(newTransport/.test(hook),
+    'and never holds the transport in component state',
+  );
+  assert.ok(!/useRef/.test(hook), 'nor the file rate in a ref that dies with the screen');
+});

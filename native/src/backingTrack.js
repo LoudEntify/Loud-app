@@ -9,7 +9,7 @@
 // and leave the stream with nothing but whatever the microphone picked
 // up of it — which is also why headphones are required before a track
 // may be cued at all (trackPlaybackAllowed).
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   newTransport, loadTrack, unloadTrack, togglePlay as toggleTransport, seekTo,
   reportPosition, setVolume as setTransportVolume, nativeTrackConfig,
@@ -17,24 +17,42 @@ import {
 } from '@loud/lib/audio/tracks.js';
 import * as LoudCamera from '../modules/loud-camera';
 import { DEFAULT_RATE } from './vocalChain';
+import {
+  subscribeBackingTrack, getBackingTrackHost, getBackingTrackVersion,
+  setTransport, setLoadedTrack,
+} from './backingTrackHost';
 
 /** How often to read the playhead back. A transport readout, not a meter. */
 export const POLL_MS = 250;
 
+/** One empty transport, shared by every view of an unloaded host. */
+const EMPTY = newTransport();
+
 /**
  * One backing track, driven by the shared transport.
  *
+ * A VIEW of ./backingTrackHost.js, not an owner of it. The samples live
+ * in the native module and survive any unmount, so a transport held in
+ * component state would leave a track playing into the broadcast while
+ * the screen that showed it had forgotten about it — the bug #58 and
+ * #62 shipped, which components/BackingTrackPanel.jsx had already fixed
+ * on the web and documented in its own header.
+ *
  * Every state change goes to the transport first and the native mixer
  * second, so what the screen shows and what the phone plays come from
- * the same object. The native side holds the samples; the transport
- * holds what is meant to be happening to them.
+ * the same object.
  */
 export function useBackingTrack({ captureRate = DEFAULT_RATE } = {}) {
-  const [transport, setTransport] = useState(newTransport);
-  const [fileRate, setFileRate] = useState(captureRate);
+  // Subscribed rather than copied: two screens open on the same track
+  // see one playhead, and a remount shows what is actually playing.
+  useSyncExternalStore(subscribeBackingTrack, getBackingTrackVersion, getBackingTrackVersion);
+  const host = getBackingTrackHost();
+  // The host holds no definition of "no track": it starts null and the
+  // empty transport comes from the shared module, so there is one of it.
+  const transport = host.transport || EMPTY;
+  const fileRate = host.fileRate ?? captureRate;
   const [error, setError] = useState(null);
   const [identity, setIdentity] = useState(null);
-  const rateRef = useRef(captureRate);
 
   // Push the transport at the mixer whenever either changes. The ratio
   // travels with it, because a file loaded at a different rate changes
@@ -42,9 +60,9 @@ export function useBackingTrack({ captureRate = DEFAULT_RATE } = {}) {
   useEffect(() => {
     if (transport.state === 'empty') return;
     LoudCamera.setBackingTrack(
-      nativeTrackConfig({ transport, fileRate: rateRef.current, captureRate }),
+      nativeTrackConfig({ transport, fileRate, captureRate }),
     ).catch(() => { /* reported through state; never interrupts a show */ });
-  }, [transport, captureRate]);
+  }, [transport, fileRate, captureRate]);
 
   // Read the playhead back while playing. The native mixer owns the
   // position — it is the thing consuming samples — so the transport
@@ -82,8 +100,7 @@ export function useBackingTrack({ captureRate = DEFAULT_RATE } = {}) {
     const r = await LoudCamera.loadBackingTrack(path);
     if (!r?.ok) { setError(r?.error || 'We could not read that track.'); return { ok: false }; }
 
-    rateRef.current = r.sampleRate || captureRate;
-    setFileRate(rateRef.current);
+    setLoadedTrack({ trackId, fileRate: r.sampleRate || captureRate });
     // Paused at the start, which is the shared rule: on a phone the
     // track is mixed into the published audio, so one that began on load
     // would go out.
@@ -94,6 +111,7 @@ export function useBackingTrack({ captureRate = DEFAULT_RATE } = {}) {
   const unload = useCallback(async () => {
     await LoudCamera.unloadBackingTrack();
     setTransport(unloadTrack);
+    setLoadedTrack({});
     setIdentity(null);
     setError(null);
   }, []);
@@ -105,12 +123,12 @@ export function useBackingTrack({ captureRate = DEFAULT_RATE } = {}) {
   // position: the native side holds the playhead, so telling it the
   // transport's new position is the only way it moves.
   const seek = useCallback(async (positionS) => {
-    setTransport((t) => seekTo(t, positionS));
+    const next = setTransport((t) => seekTo(t, positionS));
     await LoudCamera.setBackingTrack({
-      ...nativeTrackConfig({ transport: seekTo(transport, positionS), fileRate: rateRef.current, captureRate }),
+      ...nativeTrackConfig({ transport: next, fileRate: getBackingTrackHost().fileRate ?? captureRate, captureRate }),
       seekSeconds: positionS,
     }).catch(() => {});
-  }, [transport, captureRate]);
+  }, [captureRate]);
 
   return { transport, fileRate, error, identity, load, unload, togglePlay, setVolume, seek };
 }

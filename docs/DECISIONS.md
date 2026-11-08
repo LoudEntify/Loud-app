@@ -1223,3 +1223,45 @@ Rejected: putting the track controls in the Cuts sheet (cuts are a
 camera decision and a track is not), and auto-playing on load (the
 shared rule is paused-on-load, and on a phone the track is in the
 published audio).
+
+## 2026-11-08 — A bug I shipped in #58 and #62: the transport died with the screen
+
+Found while building the studio loader, in my own work from yesterday
+and this morning.
+
+`useBackingTrack` held the transport in React state. The SAMPLES live in
+the native module and survive anything, so closing the console left a
+track playing into the broadcast while the screen's transport reset to
+"no track loaded". Reopening the sheet would then show a stopped
+transport over audible audio, and pressing play would have set `playing`
+on a mixer that was already playing.
+
+`components/BackingTrackPanel.jsx` had exactly this bug and its header
+records the fix in plain words: "It used to hold it in `playerRef` and
+`stop()` it on unmount, so any layout change that remounted this panel
+stopped the track and reset the playhead to zero. The player now lives
+in lib/audioHost.js, outside every component lifecycle; everything below
+is a VIEW of it."
+
+I read that comment while lifting the transport rules into
+lib/audio/tracks.js, quoted the panel's own reasoning in the rules, and
+then put the phone's copy inside a hook anyway. Twice: #58 wrote it and
+#62 built a screen on it. The pattern was documented, in a file I had
+open, and I still shipped the thing it warns about.
+
+`native/src/backingTrackHost.js` is the fix, deliberately the same shape
+as the web's: one module-level object, a version counter, a listener
+set, and screens as views through `useSyncExternalStore`.
+
+One design point that came out of making it testable. The host imports
+NOTHING and starts with `transport: null`; the hook supplies the empty
+transport from the shared module. Two reasons, and the second is the one
+I would have missed: there is then no second definition of what "no
+track" means, and the store can be tested in plain Node, because the
+Metro alias for `@loud/lib` does not resolve outside a bundle. A store
+that cannot be tested is a poor place to have just moved a bug to.
+
+Rejected: a React context (the samples outlive every tree, so the state
+has to as well), and leaving it until the loader needed it (the bug was
+live in staging either way, and it is the kind that looks like the app
+misbehaving rather than like one wrong line).
