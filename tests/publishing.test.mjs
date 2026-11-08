@@ -148,3 +148,23 @@ test('the console SHOWS the publishing status, not just computes it', () => {
     assert.ok(uses > 0, `${name} is imported and never called`);
   }
 });
+
+test('the sound deck opens over the console, not inside its scrolling column', () => {
+  // The console's own comment: "the composed frame shrinks so the
+  // controls below it always fit the phone (a hidden End show button is
+  // not acceptable)". The frame's width is calc()'d against a constant
+  // reserve, so anything tall placed in that column pushes End show past
+  // the bottom of a 390x844 phone instead of shrinking the frame.
+  //
+  // The first version of this panel was inline in the column, and the
+  // e2e suite's press-and-hold then had nothing under the cursor: the
+  // button existed, below the fold, and the show never ended. So the
+  // deck belongs in a sheet over the console, like FixSheet.
+  const src = read('components/artist/ConsoleScreen.jsx');
+  const column = src.indexOf('data-testid="console"');
+  const deck = src.indexOf('<AudioDeckPanel');
+  const dialog = src.lastIndexOf('role="dialog"', deck);
+  assert.ok(column > 0 && deck > 0, 'the console column and the deck are both there');
+  assert.ok(dialog > column, 'the deck renders inside a dialog over the console, not in its column');
+  assert.match(src.slice(dialog, deck), /position: 'absolute'/, 'and that dialog is positioned over it');
+});
