@@ -28,6 +28,8 @@ import { pickFile, uploadFile } from '../../src/upload';
 import { api } from '../../src/api';
 import { supabase, useSession, AUTH_CONFIGURED } from '../../src/session';
 import { MAX_TOTAL_BYTES, megabytes } from '@loud/lib/mediaQuota.js';
+import { fetchTrack } from '../../src/trackLoader';
+import { useBackingTrack } from '../../src/backingTrack';
 
 const TABS = [
   { key: 'tracks', label: 'Backing tracks' },
@@ -48,6 +50,13 @@ export default function StudioLibrary() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
+  // Cueing a track for the show. The transport lives outside this screen
+  // (src/backingTrackHost.js), so a track cued here is the one the
+  // console finds, and leaving this screen does not unload it.
+  const backing = useBackingTrack();
+  const [cueing, setCueing] = useState(null);       // the track being prepared
+  const [cueProgress, setCueProgress] = useState(0);
+  const [cueError, setCueError] = useState(null);
   const phase = useLoadingPhase(lib === null && !failed);
 
   const load = useCallback(async () => {
@@ -95,6 +104,42 @@ export default function StudioLibrary() {
     setUploading(false); setProgress(0);
     if (!r.ok) { setUploadError(r.error); return; }
     await load();
+  }
+
+  /**
+   * Fetch a track and hand it to the mixer.
+   *
+   * `headphones` is the artist's own answer, not a sensor reading: the
+   * capturer reports no audio routes, and the rule that a track needs
+   * headphones is a real one (through the speaker the microphone hears
+   * the track too, so it goes out twice). Kit Check asks the same
+   * question the same way, for the same reason.
+   */
+  async function cueTrack(item, headphones) {
+    setCueError(null);
+    setCueProgress(0);
+    setCueing(item);
+    const got = await fetchTrack({
+      id: item.id,
+      rowHash: item.sha256,
+      accessToken,
+      onProgress: setCueProgress,
+    });
+    if (!got.ok) { setCueError(got.reason); setCueing(null); return; }
+
+    const loaded = await backing.load({
+      path: got.path,
+      trackId: item.id,
+      // Both hashes are the row's: fetchTrack has already proved the
+      // file on disk matches it, and re-hashing here would read a 30MB
+      // file a second time to learn the same thing.
+      rowHash: item.sha256,
+      fileHash: item.sha256,
+      headphones,
+    });
+    setCueing(null);
+    if (!loaded.ok) { setCueError(backing.error || 'That track did not load.'); return; }
+    setOptions(null);
   }
 
   async function remove(item) {
@@ -271,6 +316,37 @@ export default function StudioLibrary() {
                 ? 'Deleting a set list removes the running order. The tracks in it are kept.'
                 : 'This cannot be undone.'}
           </Text>
+          {/* Cue it for the show. Tracks only: a cue sheet or a set list
+              is not something the mixer can play. */}
+          {options.kind === 'tracks' ? (
+            <>
+              <Text style={text.rowTitle}>Use it in your show</Text>
+              <Text style={text.supporting}>
+                Your headphones have to be in. Through the speaker your microphone
+                hears the track too, so it would go out twice.
+              </Text>
+              {cueing ? (
+                <Text style={text.supporting} testID="cue-progress">
+                  Getting the track… {Math.round(cueProgress * 100)}%
+                </Text>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: space.sm }}>
+                  <Button kind="main" style={{ flex: 1 }} onPress={() => cueTrack(options, 'wired')} testID="cue-wired">
+                    Wired in
+                  </Button>
+                  <Button kind="quiet" style={{ flex: 1 }} onPress={() => cueTrack(options, 'bluetooth')} testID="cue-bluetooth">
+                    Bluetooth
+                  </Button>
+                </View>
+              )}
+              {cueError ? <Text style={text.supporting} testID="cue-error">{cueError}</Text> : null}
+              {backing.transport.trackId === options.id ? (
+                <Text style={text.supporting} testID="cue-ready">
+                  Ready in your show. The console's Track button plays it.
+                </Text>
+              ) : null}
+            </>
+          ) : null}
           <Button kind="destructive" onPress={() => remove(options)}>Delete</Button>
           <Button kind="quiet" onPress={() => setOptions(null)}>Keep it</Button>
         </Sheet>
