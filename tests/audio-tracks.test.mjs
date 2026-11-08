@@ -309,3 +309,30 @@ test('the phone orchestration holds no rules of its own', () => {
   assert.match(js, /reportPosition\(t, s\.positionSeconds\)/);
   assert.ok(!/0\.91875|44100/.test(js), 'no rates written into the delivery layer');
 });
+
+test('the console drives the shared transport rather than its own', () => {
+  const console_ = readFileSync(resolve(ROOT, 'native/app/artist/console/[id].js'), 'utf8');
+
+  // The hook, and the shared describing — so the phone and the website
+  // name the same four transport states identically.
+  assert.match(console_, /useBackingTrack\(\)/);
+  assert.match(console_, /describeTransport\(backing\.transport\)/);
+
+  // Play/pause goes through the transport, never straight at the mixer:
+  // the transport is what the screen and the native side agree on, and
+  // a screen poking the mixer would make them disagree.
+  assert.match(console_, /onPress=\{backing\.togglePlay\}/);
+  assert.ok(
+    !/setBackingTrack\(/.test(console_),
+    'the console must not configure the mixer directly',
+  );
+
+  // The playhead drawn is the transport's, which is read back FROM the
+  // mixer (native/src/backingTrack.js) rather than counted on screen.
+  assert.match(console_, /backing\.transport\.positionS/);
+  assert.match(console_, /backing\.transport\.durationS/);
+
+  // And the headphone rule is stated where an artist meets it, in the
+  // words of the reason rather than as an instruction to obey.
+  assert.match(console_, /goes out twice/);
+});

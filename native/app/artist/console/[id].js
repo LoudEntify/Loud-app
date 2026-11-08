@@ -26,6 +26,8 @@ import { api } from '../../../src/api';
 import { useSession } from '../../../src/session';
 import { useOwnCamera, OWN_CAMERA_LIVE } from '../../../src/ownCamera';
 import { LOOK_CHOICES } from '@loud/lib/direction.js';
+import { describeTransport, canDropCue, formatClock } from '@loud/lib/audio/tracks.js';
+import { useBackingTrack } from '../../../src/backingTrack';
 import { showOrientation } from '@loud/lib/orientation.js';
 import { CUTS, cutAvailability, resolveCut, onAirLabel, directorLabel, DEFAULT_CUT } from '@loud/lib/liveCuts.js';
 
@@ -52,7 +54,12 @@ export default function Console() {
   const [hideComments, setHideComments] = useState(false);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(null);      // 'live' | 'end' | 'look'
-  const [sheet, setSheet] = useState(null);    // 'cuts' | 'look' | 'prompt'
+  const [sheet, setSheet] = useState(null);    // 'cuts' | 'look' | 'prompt' | 'track'
+  // The backing track. The transport is shared with the web
+  // (@loud/lib/audio/tracks.js); the samples are mixed into the
+  // published audio inside the native vocal chain, which is why cueing
+  // one here reaches the broadcast rather than just the artist's ears.
+  const backing = useBackingTrack();
   const [promptText, setPromptText] = useState('');
   const [holdPct, setHoldPct] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -378,6 +385,7 @@ export default function Console() {
         <Action label="Prompt" onPress={() => setSheet('prompt')}><Icon.Chat size={24} color={color.porcelain} /></Action>
         <Action label="Vote" onPress={() => setSheet('prompt')}><Icon.Chart size={24} color={color.porcelain} /></Action>
         <Action label="Cuts" onPress={() => setSheet('cuts')} testID="cuts"><Icon.Camera size={24} color={color.porcelain} /></Action>
+        <Action label="Track" onPress={() => setSheet('track')} testID="track"><Icon.Note size={24} color={color.porcelain} /></Action>
         <Action label="Fix" emphasis onPress={() => router.push(`/artist/fix/${id}`)}><Icon.Wrench size={24} color={color.ink} /></Action>
       </View>
 
@@ -462,6 +470,72 @@ export default function Console() {
             <Button kind="quietDark" size="medium" style={{ flex: 1 }} onPress={() => { takeCut('auto'); setSheet(null); }}>Back to Auto</Button>
             <Button kind="main" size="medium" style={{ flex: 1 }} onPress={() => setSheet('look')}>Change the look</Button>
           </View>
+        </Sheet>
+      ) : null}
+
+      {/* ── The backing track ────────────────────────────────────────── */}
+      {sheet === 'track' ? (
+        <Sheet dark label="Backing track" onDismiss={() => setSheet(null)}>
+          <Text style={textOnDark.sectionHeading}>Backing track</Text>
+
+          {/* The transport line is the shared one, so the phone and the
+              website describe the same four states identically. */}
+          <Text style={textOnDark.rowTitle} testID="track-transport">
+            {describeTransport(backing.transport)}
+          </Text>
+
+          {backing.error ? (
+            <Text style={textOnDark.supporting} testID="track-error">{backing.error}</Text>
+          ) : null}
+
+          {backing.transport.state === 'empty' ? (
+            <Text style={textOnDark.supporting}>
+              Load a track from your studio first. Headphones have to be in: through
+              the speaker your microphone hears the track too, and it goes out twice.
+            </Text>
+          ) : (
+            <>
+              <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
+                <Button
+                  kind="quietDark"
+                  size="medium"
+                  style={{ flex: 1 }}
+                  onPress={backing.togglePlay}
+                  testID="track-play"
+                >
+                  {backing.transport.state === 'playing' ? 'Pause' : 'Play'}
+                </Button>
+                <Button
+                  kind="quietDark"
+                  size="medium"
+                  style={{ flex: 1 }}
+                  onPress={() => backing.seek(0)}
+                  testID="track-restart"
+                >
+                  Back to start
+                </Button>
+              </View>
+
+              {/* Where the playhead is, as a bar. Read back from the
+                  native mixer, which owns it because it is the thing
+                  consuming the samples. */}
+              <View style={{ height: 6, borderRadius: 999, backgroundColor: 'rgba(253,255,252,0.18)', overflow: 'hidden' }}>
+                <View
+                  style={{
+                    width: `${backing.transport.durationS > 0 ? Math.min(100, (backing.transport.positionS / backing.transport.durationS) * 100) : 0}%`,
+                    height: '100%',
+                    backgroundColor: color.teal,
+                  }}
+                />
+              </View>
+              <Text style={textOnDark.supporting} testID="track-clock">
+                {formatClock(backing.transport.positionS)} of {formatClock(backing.transport.durationS)}
+                {canDropCue(backing.transport) ? ' · a cue dropped now lands here' : ''}
+              </Text>
+            </>
+          )}
+
+          <Button kind="quietDark" size="medium" onPress={() => setSheet(null)}>Done</Button>
         </Sheet>
       ) : null}
 
