@@ -30,9 +30,18 @@
 // expo-crypto). Core primitives cannot be mispinned.
 //
 // ── WHAT IS STILL NOT HERE, AND SAYS SO ───────────────────────
-// The microphone picker (the capturer reports no audio inputs), the
-// live input meter, and the headphone delay check. Each is named where
-// it would be, as before — but these are now the only three.
+// The microphone picker: the capturer reports no audio inputs, so there
+// is no list to choose from, and the screen says that where the list
+// would be. It is the only one left.
+//
+// The live input meter and the headphone delay check are both here now,
+// and as of 8 November they work without a broadcast: they used to read
+// the vocal chain, which is LiveKit's capture post-processor and sees
+// frames only while a show is publishing, so on this screen the bar
+// never moved and the delay check refused with "the audio chain is not
+// running yet". native/.../LoudInputMeter.kt opens the microphone for
+// this screen instead, and MicOwner.kt is the rule that keeps the two
+// capture paths off each other — the broadcast always wins.
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { router } from 'expo-router';
@@ -262,10 +271,16 @@ export default function AudioSettings() {
               {meter.level.action ? (
                 <Text style={[text.supporting, { fontSize: 15 }]}>{meter.level.action}.</Text>
               ) : null}
-              {!meter.installed ? (
-                <Text style={[text.supporting, { fontSize: 15 }]}>
-                  The meter reads the microphone once a show or a kit check has
-                  started the camera. Nothing is being captured right now.
+              {/* This used to say the meter reads the microphone "once a
+                  show or a kit check has started the camera" — true of
+                  the build and useless to an artist standing here with
+                  no show running, which is everyone who opens this
+                  screen. The microphone is now opened for this screen
+                  (native/.../LoudInputMeter.kt). So the only thing left
+                  to say is when it could not be, and what to do. */}
+              {meter.blocked ? (
+                <Text style={[text.supporting, { fontSize: 15 }]} testID="audio-meter-blocked">
+                  {meter.blocked.action ? `${meter.blocked.line} ${meter.blocked.action}.` : meter.blocked.line}
                 </Text>
               ) : null}
             </View>
@@ -277,10 +292,16 @@ export default function AudioSettings() {
               <View style={{ gap: 6 }} testID="audio-reduction">
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.m }}>
                   <Text style={[text.rowTitle, { flex: 1 }]}>Compression</Text>
-                  <Text style={[text.supporting, { fontSize: 15 }]}>{meter.reduction.line}</Text>
+                  <Text style={[text.supporting, { fontSize: 15 }]}>
+                    {/* The compressor only runs in the broadcast path,
+                        so outside a show there is nothing to report and
+                        a bar at zero would read as a measurement that
+                        found nothing. */}
+                    {meter.source === 'broadcast' ? meter.reduction.line : 'Shows here while you are live.'}
+                  </Text>
                 </View>
                 <View style={{ height: 6, borderRadius: radius.pill, backgroundColor: 'rgba(1,22,39,0.12)', overflow: 'hidden' }}>
-                  <View style={{ width: `${meter.reduction.fraction * 100}%`, height: '100%', backgroundColor: color.orange }} />
+                  <View style={{ width: `${(meter.source === 'broadcast' ? meter.reduction.fraction : 0) * 100}%`, height: '100%', backgroundColor: color.orange }} />
                 </View>
               </View>
             ) : null}

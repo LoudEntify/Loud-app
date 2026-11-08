@@ -42,6 +42,8 @@ import { cameraTiles, defaultTile, tileDetail, readyState, FACING_LABEL } from '
 import { useRehearsalRoom, REHEARSAL_READY, REHEARSAL_JOINING } from '../../src/rehearsalRoom';
 import { camerasInRoom } from '../../src/ui';
 import { OPENING_CUTS } from '@loud/lib/direction.js';
+import { micCheck } from '@loud/lib/audio/meter.js';
+import { useAudioMeter } from '../../src/audioMeter';
 
 let KitVideoTrack = null;
 try { KitVideoTrack = require('@livekit/react-native').VideoTrack; } catch { /* Expo Go: no native LiveKit */ }
@@ -63,7 +65,13 @@ const PROBE_BYTES = 400 * 1024;
  * framing); `confirm` marks the ones a person answers rather than a sensor.
  */
 const ROWS = [
-  { key: 'mic_signal', item: 'mic_signal', title: 'Mic signal', icon: Icon.Mic, confirm: 'Confirm', confirmed: 'Real signal from your voice' },
+  // Measured, not confirmed. It used to say "Say a few words, then
+  // confirm" with a Confirm button, which asked the artist to vouch for
+  // their own microphone — the circles Korey reported, and docs/CLAUDE.md
+  // §5's "watch mic on the raw input" asks for a measurement anyway. The
+  // meter could not be read here until 8 November because it was built on
+  // the broadcast's capture path; now it can (native/.../LoudInputMeter.kt).
+  { key: 'mic_signal', item: 'mic_signal', title: 'Mic signal', icon: Icon.Mic },
   // ONE row for this handset's camera, where there were two.
   //
   // The two were "Main" and "Side", which were the back and front lenses
@@ -79,7 +87,7 @@ const ROWS = [
   { key: 'headphones', item: 'headphones', title: 'Headphones', confirm: 'Confirm', confirmed: 'Wired, no delay' },
 ];
 
-const START_OF = { mic_signal: 'Say a few words, then confirm', camera_frames: 'Holding frames, 0 of 2 minutes', connection: 'Measuring', charging: 'Checking the battery', dnd: 'Calls could interrupt your show', headphones: 'Wired is best for singing' };
+const START_OF = { mic_signal: 'Listening for your voice', camera_frames: 'Holding frames, 0 of 2 minutes', connection: 'Measuring', charging: 'Checking the battery', dnd: 'Calls could interrupt your show', headphones: 'Wired is best for singing' };
 const START_STATUS = { mic_signal: 'checking', camera_frames: 'checking', connection: 'checking', charging: 'checking', dnd: 'fix', headphones: 'skipped' };
 
 const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -265,6 +273,21 @@ export default function KitCheck() {
   }, [accessToken, setCheck]);
 
   useEffect(() => { if (accessToken) measureConnection(); }, [accessToken, measureConnection]);
+
+  // ── The microphone, watched rather than vouched for ──────────
+  // The row used to carry a Confirm button. The meter is readable here
+  // now that it does not depend on a broadcast being up
+  // (native/src/audioMeter.js), so the row reports what the microphone
+  // is actually doing, and the verdict is micCheck() — the same rule the
+  // browser's Kit Check uses, so one voice cannot pass on a laptop and
+  // fail on a phone.
+  const meter = useAudioMeter(profile?.role === 'artist');
+  const micPolls = useRef(0);
+  useEffect(() => {
+    if (meter.source === 'none') return;
+    micPolls.current += 1;
+    setCheck('mic_signal', micCheck({ level: meter.level, samples: micPolls.current, blocked: meter.blocked }));
+  }, [meter, setCheck]);
 
 
   /** Framing is the preview's own pill, not a row: it is ready once there is a picture. */

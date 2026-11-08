@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import {
   levelDb, meterFraction, describeLevel, describeReduction,
   LEVEL_BANDS, FLOOR_DB, CEILING_DB, REDUCTION_CEILING_DB, METER_POLL_MS,
+  meterSource, describeNoInput, micCheck,
 } from '../lib/audio/meter.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -138,4 +139,117 @@ test('lib/audio/meter.js names no platform', () => {
     assert.ok(!src.toLowerCase().includes(word.toLowerCase()), `lib/audio/meter.js names ${word}`);
   }
   assert.ok(!/from\s+'/.test(src), 'it imports nothing');
+});
+
+// ── The meter works when nothing is broadcasting (8 Nov) ─────
+// The whole indicator was built on LoudVocalChain, which is LiveKit's
+// capture post-processor: it sees frames only while a show is
+// publishing. So the two screens that show a meter — Settings → Audio
+// and Kit Check, neither of which broadcasts — had a bar that never
+// moved, and the headphone delay check refused with "the audio chain is
+// not running yet". These pin the arbitration that fixes it.
+
+test('which microphone to believe turns on frames arriving, not on the chain being installed', () => {
+  // The bug in one assertion: installed is not capturing. The
+  // post-processor stays attached for the life of the process once a
+  // show has run, so an installed chain with no frames was reported as
+  // the live source for the rest of the session.
+  assert.equal(meterSource({ installed: true, capturing: false }), 'microphone');
+  assert.equal(meterSource({ installed: true, capturing: true }), 'broadcast');
+  assert.equal(meterSource({ installed: false, capturing: false }), 'microphone');
+  assert.equal(meterSource(null), 'microphone');
+  assert.equal(meterSource(undefined), 'microphone');
+  // Nothing about a chain that claims to be capturing while not installed.
+  assert.equal(meterSource({ capturing: true }), 'microphone');
+});
+
+test('a microphone that cannot be read ends in a result or an action, never in a build fact', () => {
+  const show = describeNoInput('your show is using the microphone');
+  assert.equal(show.line, 'Your show is using the microphone.');
+  assert.equal(show.action, 'Check it from the console instead');
+
+  // The native side's own wording already names the step here, so a
+  // second one would say the same thing twice.
+  const perm = describeNoInput('the microphone could not be opened; check the app’s microphone permission');
+  assert.equal(perm.action, null);
+  assert.match(perm.line, /^The microphone could not be opened/);
+  assert.match(perm.line, /\.$/);
+
+  const nothing = describeNoInput(null);
+  assert.equal(nothing.line, 'No microphone reading yet.');
+  assert.equal(nothing.action, null);
+  assert.equal(describeNoInput('   ').line, 'No microphone reading yet.');
+});
+
+test('the Kit Check mic row is patient about silence and immediate about clipping', () => {
+  const at = (peak, rms) => describeLevel({ peak, rms });
+
+  // Nobody has sung yet. A screen that has just opened has not found a
+  // problem; it has not looked.
+  assert.equal(micCheck({ level: at(0.003, 0.001), samples: 1 }).status, 'checking');
+  assert.equal(micCheck({ level: at(0.003, 0.001), samples: 20 }).status, 'fix');
+
+  // Loud is worth saying at once: the artist is making the sound that
+  // clips right now and can hear what they changed.
+  const loud = micCheck({ level: at(0.99, 0.5), samples: 1 });
+  assert.equal(loud.status, 'fix');
+  assert.match(loud.detail, /Too loud/);
+
+  assert.equal(micCheck({ level: at(0.2, 0.1), samples: 1 }).status, 'ready');
+
+  // Blocked beats everything: there is no level to judge.
+  const blocked = micCheck({ level: at(0.2, 0.1), samples: 99, blocked: describeNoInput('your show is using the microphone') });
+  assert.equal(blocked.status, 'fix');
+  assert.match(blocked.detail, /console/);
+
+  // And with nothing at all, it is still listening rather than failing.
+  assert.equal(micCheck({}).status, 'checking');
+  assert.equal(micCheck().status, 'checking');
+});
+
+test('both Kit Checks ask micCheck rather than deciding for themselves', () => {
+  const web = readFileSync(resolve(ROOT, 'components/artist/KitCheckScreen.jsx'), 'utf8');
+  const phone = readFileSync(resolve(ROOT, 'native/app/artist/kit-check.js'), 'utf8');
+
+  for (const [name, src] of [['the browser', web], ['the phone', phone]]) {
+    assert.match(src, /micCheck\(/, `${name} calls micCheck`);
+    assert.ok(!/band === 'hot'/.test(src), `${name} judges the band itself`);
+  }
+
+  // The phone's row asked the artist to vouch for their own microphone.
+  // That is the circles Korey reported, and docs/CLAUDE.md §5 asks for a
+  // watch on the raw input rather than a signature.
+  const row = phone.match(/\{ key: 'mic_signal'[^}]*\}/);
+  assert.ok(row, "the phone has a mic_signal row");
+  assert.ok(!/confirm:/.test(row[0]), 'the mic row no longer has a Confirm button');
+});
+
+test('exactly one capture path may hold the microphone, and the broadcast wins', () => {
+  const codeOf = (p) => readFileSync(resolve(ROOT, p), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const base = 'native/modules/loud-camera/android/src/main/java/app/loudentify/loudcamera';
+
+  // The chain stamps every frame LiveKit hands it, BEFORE the early
+  // return: the stamp means "LiveKit is capturing", which is a different
+  // fact from this chain being configured to do anything.
+  const chain = codeOf(`${base}/LoudVocalChain.kt`);
+  const stamp = chain.indexOf('MicOwner.stampBroadcastFrame()');
+  const guard = chain.indexOf('if (!configured || numBands != 1) return');
+  assert.ok(stamp > 0 && guard > stamp, 'the frame is stamped before the configured guard');
+
+  // The standalone capture refuses to start while the broadcast holds
+  // the microphone, and checks again on every frame so a show starting
+  // behind a settings screen takes it back.
+  const meter = codeOf(`${base}/LoudInputMeter.kt`);
+  assert.equal((meter.match(/MicOwner\.broadcastHasMic\(\)/g) || []).length, 2, 'checked at start and in the loop');
+  assert.match(meter, /if \(MicOwner\.broadcastHasMic\(\)\) \{ stoppedBecause/, 'the loop stops itself');
+  // It publishes nowhere: there is no room, no track and no LiveKit here.
+  for (const word of ['Room', 'LiveKit', 'publish', 'localParticipant']) {
+    assert.ok(!meter.includes(word), `LoudInputMeter names ${word}`);
+  }
+
+  // And it reports a reason rather than throwing, because not being able
+  // to measure a microphone is a thing to say on screen.
+  assert.match(meter, /"reason" to/);
 });

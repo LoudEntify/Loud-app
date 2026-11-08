@@ -113,7 +113,39 @@ export function setVocalChain(config) {
  * draw them.
  */
 export function vocalChainState() {
-  return native ? native.vocalChainState() : Promise.resolve({ installed: false, configured: false });
+  return native ? native.vocalChainState() : Promise.resolve({ installed: false, configured: false, capturing: false });
+}
+
+/**
+ * The microphone when nothing is broadcasting.
+ *
+ * `vocalChainState` measures the audio that actually leaves, which is
+ * the right measurement during a show and no measurement at all outside
+ * one: the chain is LiveKit's capture post-processor, so it sees frames
+ * only while LiveKit is publishing. Settings → Audio and Kit Check are
+ * where an artist checks a microphone, and neither is broadcasting, so
+ * the meter read silence however loudly they sang.
+ *
+ * This is a capture of its own for those screens. It publishes nowhere.
+ * Exactly one of the two paths may hold the microphone — Android does
+ * not reliably give two consumers the same one — and the broadcast
+ * always wins: this refuses to start while a show holds the microphone
+ * and stops itself if a show takes it. So a screen asks for this one,
+ * and reads `capturing` on the chain to know which to believe.
+ *
+ * `{ ok, source, reason }` from start; `{ running, peak, rms, source,
+ * stoppedBecause }` from state, with peak cleared on read as above.
+ */
+export function startInputMeter() {
+  return native ? native.startInputMeter() : Promise.resolve({ ok: false, reason: 'no native module' });
+}
+
+export function stopInputMeter() {
+  return native ? native.stopInputMeter() : Promise.resolve({ ok: true });
+}
+
+export function inputMeterState() {
+  return native ? native.inputMeterState() : Promise.resolve({ running: false, peak: 0, rms: 0, source: 'none' });
 }
 
 /**
