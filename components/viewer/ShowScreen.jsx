@@ -27,6 +27,7 @@ import { followArtist, unfollowArtist } from '../../lib/follows';
 import { getSupabase } from '../../lib/supabaseClient';
 import { Skeleton, ErrorState, OfflineBar, useOnline } from './States';
 import { Back, Person, Eye, Token, Share, Bigger, Smaller, Flag, Emoji, Heart, Send, Bell, Check, Close, Play } from './Icons';
+import PreshowAudio from '../PreshowAudio';
 
 const EMOJI_STRIP = ['🔥', '❤️', '🎶', '👏', '😍', '🙌', '😂', '🥹'];
 
@@ -263,6 +264,19 @@ export default function ShowScreen({ showId, initialShow = null }) {
     <section aria-label="Countdown" className="v-card-dark v-row" style={{ padding: '0 16px', justifyContent: 'space-between', gap: 12 }} data-testid="countdown">
       <span className="v-col" style={{ gap: 2 }}><span className="v-kicker" style={{ color: 'var(--teal)' }}>Starts in</span><span style={{ fontSize: 36, fontWeight: 700, lineHeight: 1 }}>{countdown > 0 ? fmtCountdown(countdown) : 'Any moment'}</span></span>
       <span className="v-col" style={{ alignItems: 'flex-end', gap: 2, fontSize: 16 }}><span style={{ fontWeight: 700 }}>{fmtSlot(show.slated_at)}</span><span className="v-muted">Chat is open early</span></span>
+      {/* The pre-show loop, which the pilot had on arrival and the new
+          journey lost (docs/ONE_JOURNEY.md step 2: PreshowAudio was one of
+          the seven capability panels behind the old journey and used by
+          nothing in the new one).
+
+          It lives INSIDE the countdown card and renders nothing at all
+          when the track is missing, the codec will not decode, or
+          autoplay is refused — PreshowAudio's own three failure paths all
+          end in rendering nothing. So this cannot become a broken control
+          on the arrival screen, and it is in the card rather than over the
+          frame because docs/CLAUDE.md §6 is absolute: nothing may ever
+          overlay the player. */}
+      <PreshowAudio msToShowtime={countdown} />
     </section>
   ) : null;
 

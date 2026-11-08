@@ -206,17 +206,38 @@ Each step ends with something testable rather than a half-migration.
 | 6 | Full pilot test: desktop artist, phone cameras, real viewers | Evidence |
 | 7 | Native audio chain, if chosen | Phone is self-sufficient |
 
-### Where this stands, 7 November
+### Where this stands, 8 November
 
 | # | State |
 |---|---|
 | 1 | Done (6 Nov). `lib/audio/chain.js` holds the parameters. |
-| 2 | **Not started, and larger than this document said.** See the correction below: the new web console does not publish at all, so the panels cannot simply be put behind it. |
-| 3 | Done (7 Nov). The pilot journey no longer routes, and — the actual cause — the product's own buttons no longer link to it. |
-| 4 | Partly. The Ready band is a verdict with one action, shared by both platforms, which was the specific thing that made the screen feel like circles. The four-band layout of section 6 is still to build. |
+| 2 | **Five of seven panels done (8 Nov).** The new console publishes (`lib/artistPublish.js`, #65) and the audio deck sits behind it (#66), which brings `BackingTrackPanel`, `CueEditorPanel` and `CalibrateSyncPanel` with it — they are nested inside `AudioDeckPanel` and fed the same graph. `PreshowAudio` is now on the viewer's countdown card (#69). `DirectorShotPanel` and `VideoDeckPanel` remain; see the audit below for what they need, which is not wiring. |
+| 3 | Routes closed (7 Nov); the components cannot be deleted until step 2 finishes. The pilot journey no longer routes, and — the actual cause — the product's own buttons no longer link to it. |
+| 4 | Partly. The Ready band is a verdict with one action, shared by both platforms, which was the specific thing that made the screen feel like circles. The mic row is measured rather than self-confirmed on both (8 Nov). The four-band layout of section 6 is still to build. |
 | 5 | Done (6 Nov). `lib/kitCheck.js` makes the camera list devices. |
 | 6 | Blocked on step 2 and on the YouTube question in section 8. |
-| 7 | Done for Android (6–7 Nov): the vocal chain, the input meter and the headphone delay check all run natively. iOS has none of it. |
+| 7 | Written for Android (6–7 Nov) and **compiled for the first time on 8 Nov**: the vocal chain, the input meter and the headphone delay check. The APK build had been red since the chain was written — `native/modules/loud-camera` never declared `:livekit_react-native` — and nothing in a pull request compiles Kotlin, so it passed every check for two days (#68, which also makes the Android build run on pull requests). Compiled is not working: that is the device checklist. iOS has none of it. |
+
+### What the last two panels actually need, 8 November
+
+Neither is a wiring job, and both need the same thing, so they are one
+piece of work rather than two:
+
+- `DirectorShotPanel` (464 lines) takes `onCommand`, `mode`,
+  `onModeChange`, `availableRoles`, `tracks` and the b-roll library.
+- `VideoDeckPanel` (73 lines) takes `candidates`, `activeIdentity` and
+  `onPick`.
+
+Every one of those is state that `RoomInner` inside
+`components/LiveDemo.jsx` owns: which camera is active per slot, the shot
+command queue, the director's mode and the b-roll clips. The new console
+owns none of it — its "Director: Auto" chip is dead markup today, and an
+artist on the web cannot take a manual cut.
+
+`components/BroadcastStage.jsx` already composes all three panels as
+pages and is the pilot's own wrapper, so the work is to give the new
+console that state, not to re-lay-out the panels. Until then step 3
+cannot delete `LiveDemo.jsx`, because the state lives in it.
 
 Korey's four audio reports of 5 November are all answered: the chain, the
 store behind it, the signal indicator and the earphone calibrator.
