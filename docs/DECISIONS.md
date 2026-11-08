@@ -1377,3 +1377,50 @@ wrong artefact (docs/ONE_JOURNEY.md §3, again).
 Rejected: publishing the raw microphone and processing in the compositor
 (the artist's monitoring would not match what goes out), and starting
 the camera when the console opens (a participant before the show).
+
+## 2026-11-08 — Step 2 on the web is done, and a claim in #65 was not true
+
+**The panels.** `AudioDeckPanel` is now behind the new web console, fed
+from the audio graph the publish hook hands to `lib/audioHost.js`. It
+brings `BackingTrackPanel` and `CueEditorPanel` with it, so one import
+closes three of the seven capability gaps: the vocal chain, the backing
+track with its cue sheet, and the voice/track balance.
+
+It is the pilot's own panel rather than a rebuild. It is the only
+working version of these capabilities, and rewriting it against the
+design boards is precisely the mistake docs/ONE_JOURNEY.md §3 records me
+making with the whole journey.
+
+Closed by default: the console's first job is the picture, and a deck
+open over it would bury the shot.
+
+**And a correction to #65, which merged yesterday evening.** Its
+description said the console shows a publishing status line with a retry
+button. That block was in the description and NOT in the diff.
+
+What happened: I anchored the edit on a piece of markup — `<div
+className="v-row" ... aria-label="Frame">` — that lives in
+`KitCheckScreen.jsx`, not `ConsoleScreen.jsx`. The Python replacement
+found no match and silently changed nothing. My own verification then
+grepped `useArtistPublish|publish-status|describePublishing`, counted
+three matches, and passed — because the IMPORT line satisfied the
+pattern. So three functions were imported and never called, and a merged
+PR described a feature that was not there.
+
+The publishing itself did work: the hook was wired and the console did
+join the room and publish. What was missing was the artist being told
+so, which on a screen whose whole job is knowing you are on air is not
+a cosmetic omission.
+
+Both blocks are in now, and `tests/publishing.test.mjs` has a test that
+would have caught it: every name imported from `lib/publishing` must be
+CALLED somewhere in the console's markup. An import is not a feature,
+and a grep that an import can satisfy is not a check.
+
+That is twice today that a check matched the shape of an
+implementation rather than a behaviour — the other being the 7 November
+test that searched for an import in components/artist/. The pattern to
+avoid is now explicit in both tests.
+
+Rejected: rebuilding the deck for the new UI (the §3 mistake), and
+opening it by default (it buries the shot).

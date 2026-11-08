@@ -21,6 +21,7 @@ import { SHOW_PROMPTS } from '../../lib/showPrompts';
 import { Skeleton, ErrorState, OfflineBar, useOnline } from '../viewer/States';
 import { Eye, Warn, Check, Close, Send } from '../viewer/Icons';
 import { useArtistPublish } from '../../lib/artistPublish';
+import AudioDeckPanel from '../AudioDeckPanel';
 import { describePublishing, canRetry, isPublishing } from '../../lib/publishing';
 
 const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -69,6 +70,13 @@ export default function ConsoleScreen({ showId }) {
   // never joined a room. An artist here was watching themselves while
   // nothing reached a broadcast (docs/ONE_JOURNEY.md, 7 November).
   const publish = useArtistPublish({ showId, accessToken, enabled: Boolean(show?.actual_started_at) });
+  // The capability panels, which the pilot journey has had all along and
+  // the new console had none of (docs/ONE_JOURNEY.md step 2). They are
+  // views of the audio graph the publish hook hands to lib/audioHost.js:
+  // the vocal chain, the backing track with its cue sheet, the voice and
+  // track balance. Closed by default — the console's first job is the
+  // picture, and a deck open over it would bury the shot.
+  const [deckOpen, setDeckOpen] = useState(false);
 
   // Publishing starts when the show does, not when the screen opens: the
   // console is also where an artist waits for their slot, and a camera
@@ -240,6 +248,59 @@ export default function ConsoleScreen({ showId }) {
           {delivery !== 'ok' && <span className="v-kicker" style={{ position: 'absolute', left: 8, bottom: 8, padding: '4px 8px', borderRadius: 999, background: 'rgba(231,29,54,0.85)', fontSize: 12 }}>{delivery === 'reconnecting' ? 'YouTube reconnecting · recording continues' : 'YouTube not delivering · recording continues'}</span>}
         </div>
         <div className="v-muted" style={{ fontSize: 14, textAlign: 'center' }}>Viewers see this about {tickData?.delaySeconds != null ? Math.round(tickData.delaySeconds) : '5'} seconds behind.</div>
+
+        {/* Whether the artist is actually IN the show — their camera and
+            processed microphone published, not just previewed. The
+            wording is shared with the phone (lib/publishing.js) so the
+            two positions cannot describe one situation differently.
+
+            This block was in #65's description and not in #65's diff: I
+            anchored the edit on markup from KitCheckScreen.jsx, the
+            replacement silently did nothing, and my own check grepped a
+            pattern that the IMPORT satisfied. Hence three imports used
+            nowhere, and a claim in a merged PR that was not true. */}
+        <div className="v-row" style={{ gap: 8, alignItems: 'center' }} data-testid="publish-status" data-phase={publish.phase}>
+          {isPublishing(publish.phase) ? <Check size={16} /> : <Warn size={16} />}
+          <span className="v-muted" style={{ fontSize: 14, flex: 1 }}>
+            {describePublishing(publish.phase, { error: publish.error })}
+          </span>
+          {canRetry(publish.phase) ? (
+            <button className="v-chip v-chip-dark" style={{ height: 32, fontSize: 14 }} onClick={publish.retry} data-testid="publish-retry">
+              Try again
+            </button>
+          ) : null}
+        </div>
+
+        {/* Sound: the vocal chain, the backing track and the cue sheet.
+            The pilot's own panel, not a rebuild — it is the only working
+            version of these capabilities, and rewriting it would be the
+            mistake docs/ONE_JOURNEY.md §3 records. Closed by default,
+            because the console's first job is the picture. */}
+        <div className="v-col" style={{ gap: 8 }} data-testid="console-sound">
+          <button
+            className="v-btn v-btn-ghost-dark"
+            onClick={() => setDeckOpen((o) => !o)}
+            aria-expanded={deckOpen}
+            data-testid="sound-toggle"
+          >
+            {deckOpen ? 'Hide sound' : 'Sound, track and cues'}
+          </button>
+          {deckOpen ? (
+            <AudioDeckPanel
+              nodes={publish.nodes}
+              audioContext={publish.audioContext}
+              showEnded={Boolean(show?.actual_ended_at)}
+              showPhase="live"
+              artistAccessToken={accessToken}
+              artistEmail={session?.user?.email || null}
+              sessionTarget={{ showId, slot: data.slot || 'a' }}
+              // Assembling a set list is a Kit Check activity: in the
+              // live room this panel is for choosing what to play next,
+              // not for rebuilding the running order mid-performance.
+              canEditSetList={false}
+            />
+          ) : null}
+        </div>
         {isVersus && (
           <div className="v-row" style={{ gap: 8 }} data-testid="versus-controls">
             <button className="v-col" aria-pressed={show.versus_view === 'conversation'} onClick={() => versus('conversation')} style={{ flex: 1, padding: 10, borderRadius: 16, background: show.versus_view === 'conversation' ? 'rgba(46,196,182,0.2)' : 'rgba(253,255,252,0.1)', border: `2px solid ${show.versus_view === 'conversation' ? 'var(--teal)' : 'transparent'}`, color: 'var(--porcelain)', alignItems: 'flex-start' }}><span style={{ fontSize: 17, fontWeight: 700 }}>Conversation</span><span className="v-muted" style={{ fontSize: 13 }}>Split screen</span></button>
