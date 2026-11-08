@@ -1125,3 +1125,61 @@ docs/NEEDS_KOREY.md asking Korey to check staging's Stripe key (the gate
 was wrong, and asking him to work around my mistake is not a fix), and
 un-gating the pilot journey entirely (it should be closed in production,
 which it now is).
+
+## 2026-11-08 — The broadcast diagnoses itself, instead of me asking Korey again
+
+Since 2 November the broadcast has reached YouTube as audio over a black
+frame. I built the console's full-screen stage to split the question —
+picture on the console and black on YouTube means the compositor, black
+on both means the room — and then asked Korey that question five times
+across six days, including at the end of five separate reports.
+
+That was wrong twice over. docs/CLAUDE.md §1 says to instrument before
+fixing and never to build on an unconfirmed hypothesis; and Korey is one
+person who cannot watch his own phone and a YouTube page at the same
+moment while performing. Asking him to be the instrument was asking for
+the one thing the situation makes impossible, and I kept asking while
+shipping fifteen other PRs around it.
+
+**The answer was already being recorded.** components/EgressPage.jsx —
+the headless browser LiveKit loads to compose the picture — has logged
+`egress_track_pool_changed` with its subscribed track count since the
+recorder-side telemetry went in. That number settles it:
+
+| What the logs say | What it means |
+|---|---|
+| no events at all | the show never went live, or logging never arrived. Says nothing about the cameras. |
+| performer events, no egress events | the recorder never ran. The compositor was never asked for a picture: EGRESS_MODE or the template URL, not the kit. |
+| egress events, pool always 0 | the recorder ran and the room had no video. The cameras are not publishing into the room it joined. |
+| pool reached 1 or more | the recorder had pictures to compose. Black after that is the compositor, the RTMP push, or YouTube's ingest. |
+
+`lib/broadcastDiagnosis.js` turns the rows into that verdict, as a pure
+function so it can be tested against synthetic rows — which is the only
+way to be sure the sentence is right, because the situation is not
+reproducible on demand. `/api/artist/shows/[id]/diagnosis` reads it,
+artist-only and scoped to their own shows (health_events.show_id holds
+the ROOM NAME, and a room name is a guessable string, so without the
+ownership check the route would hand out a stranger's show diagnostics).
+Both post-show screens show it behind one button: "Something looked
+wrong on the stream". After a show that worked, it is noise.
+
+Two details in the wording that are deliberate. The empty-room verdict
+pre-empts the obvious objection — "but my phone was showing a picture" —
+by saying that a phone's own camera, locally, is not the same as
+publishing into the room, because that is exactly the contradiction an
+artist would otherwise raise and stop reading. And a malformed track
+count is ignored rather than read as zero, so a logging bug cannot
+accuse the room.
+
+Why I could not just read it myself: the Supabase connection in this
+session reaches one project, and its tables (no audio_settings, no
+direction_settings, no audit log) say it is the PILOT project, which
+docs/CLAUDE.md §2 forbids touching. Staging's credentials are not in this
+environment. So the only honest route was to make the app able to answer
+the question, which is what this is.
+
+Rejected: asking a sixth time; a debug page behind a dev flag (Korey
+would have to find it, on the device he was performing from); and
+inferring the answer from the egress result alone (a failed RTMP push and
+an empty room produce the same empty recording, which is the ambiguity
+that has made this take six days).

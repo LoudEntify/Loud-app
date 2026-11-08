@@ -36,6 +36,12 @@ export default function PostShow() {
   const [recording, setRecording] = useState(null);
   const [visibility, setVisibility] = useState('public');
   const [failed, setFailed] = useState(false);
+  // Why was the broadcast black? Answered from what the RECORDER logged
+  // (@loud/lib/broadcastDiagnosis.js), so an artist is told which half
+  // of the system to stop suspecting rather than being asked to watch
+  // their phone and a YouTube page at the same moment while performing.
+  const [diagnosis, setDiagnosis] = useState(null);
+  const [diagnosisOpen, setDiagnosisOpen] = useState(false);
   const phase = useLoadingPhase(insights === null && !failed);
 
   const load = useCallback(async () => {
@@ -48,6 +54,18 @@ export default function PostShow() {
     const { data } = await supabase().from('recordings').select('id, title, duration_ms, visibility').eq('show_id', id).maybeSingle();
     if (data) { setRecording(data); setVisibility(data.visibility || 'public'); }
   }, [accessToken, id]);
+
+  // Only on request: after a show that worked, this is noise.
+  const openDiagnosis = useCallback(async () => {
+    setDiagnosisOpen(true);
+    if (diagnosis) return;
+    const r = await api(`/api/artist/shows/${id}/diagnosis`, { accessToken });
+    setDiagnosis(r.ok ? r.data?.diagnosis : {
+      line: 'We could not read the logs for this show.',
+      meaning: 'That is a fault in reading them, not a finding about your kit.',
+      next: '',
+    });
+  }, [accessToken, id, diagnosis]);
 
   useEffect(() => { if (!loading) load(); }, [loading, load]);
 
@@ -121,6 +139,24 @@ export default function PostShow() {
             <Text style={text.supporting}>Your recording is still being written. It appears on your profile when it is ready.</Text>
           </Card>
         )}
+
+        {/* The black-broadcast question, answered from the recorder's
+            own logs rather than from what anyone was watching. */}
+        <Card style={{ gap: space.s }} testID="post-show-diagnosis">
+          {!diagnosisOpen ? (
+            <Button kind="quiet" size="medium" onPress={openDiagnosis} testID="diagnosis-open">
+              Something looked wrong on the stream
+            </Button>
+          ) : !diagnosis ? (
+            <Text style={text.supporting}>Reading what the recorder saw…</Text>
+          ) : (
+            <>
+              <Text style={text.rowTitle} testID="diagnosis-line">{diagnosis.line}</Text>
+              {diagnosis.meaning ? <Text style={text.supporting}>{diagnosis.meaning}</Text> : null}
+              {diagnosis.next ? <Text style={text.supporting}>{diagnosis.next}</Text> : null}
+            </>
+          )}
+        </Card>
 
         <Button kind="main" onPress={() => router.push('/profile')} icon={<Icon.Film size={20} color={color.ink} />}>Make a clip</Button>
         <Button kind="quiet" size="medium" onPress={() => router.replace('/profile')}>Back to your profile</Button>
