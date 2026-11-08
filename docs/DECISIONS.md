@@ -1183,3 +1183,43 @@ would have to find it, on the device he was performing from); and
 inferring the answer from the egress result alone (a failed RTMP push and
 an empty room produce the same empty recording, which is the ambiguity
 that has made this take six days).
+
+## 2026-11-08 — Step 2c, the phone half: the console can cue a track
+
+The capability landed on 7 November (#58) with nothing on screen using
+it, and I said at the time that the notice would stay up until something
+did. This is that.
+
+A Track action beside Cuts on the live console, opening a sheet with the
+transport: play, pause, back to start, and the playhead as a bar. The
+sheet shows the shared `describeTransport` line, so the phone and the
+website name the same four states in the same words rather than each
+inventing its own labels for "ready", "playing", "finished" and "no
+track".
+
+Three things the screen deliberately does not do:
+
+1. **It never configures the mixer.** Every control goes through the
+   shared transport and `native/src/backingTrack.js` pushes that at the
+   mixer. A screen reaching past the transport is how the screen and the
+   audio come to disagree about what is playing, which during a show is
+   the worst moment to find out.
+2. **It does not count time.** The playhead drawn is the one read back
+   from the native mixer, because the mixer is the thing consuming
+   samples. A screen counting elapsed milliseconds would drift against
+   the audio exactly as a wrong resample ratio would.
+3. **It gives the headphone rule as its reason**, not as an instruction:
+   "through the speaker your microphone hears the track too, and it goes
+   out twice". An artist who is told why will not take the headphones out
+   mid-show; an artist who is told to wear them might.
+
+What is still missing on the phone, and says nothing about it yet
+because nothing is built: loading the track from the studio. The console
+can drive a loaded track and the loader is the studio screen's job,
+which is next. The web half of 2c is still blocked behind the new web
+console publishing at all (see 7 November).
+
+Rejected: putting the track controls in the Cuts sheet (cuts are a
+camera decision and a track is not), and auto-playing on load (the
+shared rule is paused-on-load, and on a phone the track is in the
+published audio).
