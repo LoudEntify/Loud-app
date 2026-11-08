@@ -282,6 +282,16 @@ So the sequence, each step ending in something testable:
 | 2b | A track input mixed into `LoudVocalChain`'s output | The phone can publish a track |
 | 2c | The panels behind the new web artist screens, then the app | Both platforms cue a track |
 
+**2c on the phone is done (8 Nov).** Cue a track in Studio library, play
+it from the console's Track button, and it is mixed into what goes out.
+The phone is now a position an artist can perform from end to end:
+camera, microphone, vocal chain, input meter, headphone delay check,
+and a backing track in the broadcast.
+
+**2c on the web is still blocked**, and not on the panels: the new web
+console never joins a room (7 Nov). That has to be built before a panel
+behind it would do anything.
+
 2b is the piece with no precedent in this repository, and it is where I
 expect to be wrong about scope first.
 

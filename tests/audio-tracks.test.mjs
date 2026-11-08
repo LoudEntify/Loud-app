@@ -395,3 +395,48 @@ test('the hook is a view of the host rather than an owner of the transport', () 
   );
   assert.ok(!/useRef/.test(hook), 'nor the file rate in a ref that dies with the screen');
 });
+
+test('the loader verifies the bytes it fetched, and refuses rather than plays', () => {
+  const loader = readFileSync(resolve(ROOT, 'native/src/trackLoader.js'), 'utf8');
+
+  // The identity check is the point of this module, not a flourish: a
+  // cue sheet is a list of times against one recording.
+  assert.match(loader, /trackIdentityOk\(\{ rowHash, fileHash/);
+  assert.match(loader, /describeIdentity\(ident\)/, 'and a refusal carries its sentence');
+
+  // A cached file is re-verified rather than trusted, so a half-written
+  // file from an interrupted download is never played as the track.
+  assert.match(loader, /if \(existing\?\.exists\)/);
+  assert.match(loader, /sha256OfFile\(path\)/, 'the cached file is hashed too');
+
+  // Downloaded to a .part and moved only once whole, which is what makes
+  // the cache trustworthy in the first place.
+  assert.match(loader, /\$\{path\}\.part/);
+  assert.match(loader, /moveAsync\(\{ from: partial, to: path \}\)/);
+
+  // Every failure path deletes the partial file. A failed cue must not
+  // leave something behind that the next cue mistakes for the track.
+  const deletes = loader.match(/deleteAsync\(partial/g) || [];
+  assert.ok(deletes.length >= 2, 'the partial is cleaned up on refusal and on error');
+});
+
+test('the studio asks about headphones rather than guessing, and only for tracks', () => {
+  const studio = readFileSync(resolve(ROOT, 'native/app/settings/studio.js'), 'utf8');
+
+  // The capturer reports no audio routes, so this is the artist's own
+  // answer — the same way Kit Check asks it, for the same reason.
+  assert.match(studio, /cueTrack\(options, 'wired'\)/);
+  assert.match(studio, /cueTrack\(options, 'bluetooth'\)/);
+  assert.ok(!/headphones: *(true|'unknown')/.test(studio), 'never assumed');
+
+  // The reason is given, not the rule.
+  assert.match(studio, /go out twice/);
+
+  // A cue sheet or a set list is not something the mixer can play.
+  assert.match(studio, /options\.kind === 'tracks' \? \(/);
+
+  // And the transport it reads is the host's, so leaving this screen
+  // does not unload the track the console is about to play.
+  assert.match(studio, /useBackingTrack\(\)/);
+  assert.match(studio, /backing\.transport\.trackId === options\.id/);
+});
