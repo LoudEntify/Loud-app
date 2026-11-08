@@ -1,23 +1,12 @@
-import { Suspense } from 'react';
-import HomeDoors from '../components/HomeDoors';
+
+import LandingHome from "../components/LandingHome";
 
 export const metadata = {
-  title: 'Loudentify',
-  description: 'Live music, live directed.',
+  title: "Loudentify | Your Stage. Your Audience. Your Show.",
+  description:
+    "Create multi-camera live music performances using the phones you already own. Join Loudentify early access.",
 };
 
-// The front door. Two ways in — see components/HomeDoors.jsx for why the
-// viewer door is not a login.
-//
-// This replaced an auth-first landing that showed a login form to
-// everybody, including an audience that will never hold an account.
-// /auth still renders that form and is where the artist door sends you,
-// so nothing was removed — it stopped being the first thing the audience
-// meets.
 export default function HomePage() {
-  return (
-    <Suspense fallback={null}>
-      <HomeDoors />
-    </Suspense>
-  );
+  return <LandingHome />;
 }
