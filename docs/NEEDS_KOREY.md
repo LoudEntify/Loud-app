@@ -346,6 +346,29 @@ The website lives in the same app, on the session branch. On the Vercel preview 
 
 ## Turn the real broadcast on (this is what makes a picture appear)
 
+**Probably already done — check before working through this. (8 Nov.)**
+You reported audio reaching YouTube on 5 November, and the stand-in
+compositor pushes nothing at all to YouTube, so the real one must be
+running. If that is right, nothing in this section is outstanding and
+re-checking these variables will not help the black picture.
+
+**How to tell, now, without checking any settings.** Open the show's
+post-show screen (app or website) and tap **"Something looked wrong on
+the stream"**. It reads what the recorder itself logged and answers in
+one sentence:
+
+- *"The recorder never ran"* — then this section IS still outstanding,
+  and step 2 below is the reason.
+- *"The recorder ran, and the room was empty of video"* — this section is
+  done. The fault is that the cameras were not publishing into the room
+  the recorder joined, which is ours to fix, not yours.
+- *"The recorder saw N cameras"* — this section is done and the room was
+  fine. The fault is after that: the composing, the push to YouTube, or
+  YouTube's own ingest. Also ours.
+
+Either way the next move is mine, not yours. The rest of this section is
+kept for the case where the first answer comes back.
+
 Until this is done, a show goes live, a YouTube broadcast is created and
 transitioned, and **no video is sent**: the compositor in use writes the
 director's decisions to a log file and counts frames it never pushes.
