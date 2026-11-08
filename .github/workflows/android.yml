@@ -23,6 +23,17 @@ name: android
 on:
   push:
     branches: [staging]
+  # Pull requests too, since 8 November. The APK build was red on staging
+  # for five commits and nothing said so: ci.yml's `expo export` bundles
+  # JavaScript and never compiles Kotlin, so a missing Gradle dependency
+  # in native/modules/loud-camera passed every check a PR runs. The one
+  # job that compiles it did not run until after the merge, where only a
+  # person looking at the Actions tab would see it — and the person it
+  # matters to is waiting for an APK to put on a phone.
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
