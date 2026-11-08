@@ -34,12 +34,11 @@ const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
 
 const styles = {
   page: {
-    minHeight: '100dvh',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: '24px 16px',
-    background: `radial-gradient(1200px 600px at 20% -10%, rgba(46,196,182,0.25), transparent 60%), radial-gradient(1000px 500px at 110% 10%, rgba(231,29,54,0.18), transparent 55%), ${INK}`,
+    background: 'transparent',
     color: PORCELAIN,
   },
   card: {
@@ -210,7 +209,7 @@ export default function Waitlist() {
   const isArtist = role === 'artist';
 
   return (
-    <main style={styles.page}>
+    <section id="early-access" aria-label="Early access registration" style={styles.page}>
       <div style={styles.card}>
         <div style={styles.logoWrap}>
           <Logo />
@@ -402,7 +401,7 @@ export default function Waitlist() {
           </>
         )}
       </div>
-    </main>
+    </section>
   );
 }
 
