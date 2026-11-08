@@ -222,6 +222,13 @@ class LoudVocalChain : AudioProcessorInterface {
   }
 
   override fun processAudio(numBands: Int, numFrames: Int, buffer: ByteBuffer) {
+    // Stamped before anything else, including the early return below:
+    // this records that LIVEKIT IS CAPTURING, which is a different fact
+    // from whether this chain is configured to do anything with the
+    // audio. LoudInputMeter reads it to keep off the microphone while a
+    // broadcast holds it (MicOwner).
+    MicOwner.stampBroadcastFrame()
+
     val c = cfg
     if (!configured || numBands != 1) return
 

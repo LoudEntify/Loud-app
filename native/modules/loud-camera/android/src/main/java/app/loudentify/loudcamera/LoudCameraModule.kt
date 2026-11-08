@@ -38,6 +38,10 @@ class LoudCameraModule : Module() {
   private var vocalChain: LoudVocalChain? = null
   private var syncCalibration: LoudSyncCalibration? = null
   private var backingTrack: LoudBackingTrack? = null
+  // The standalone microphone capture, for the screens where nothing is
+  // broadcasting. Only one of this and the chain may hold the microphone
+  // at a time; MicOwner is that rule.
+  private var inputMeter: LoudInputMeter? = null
   private var controller: LoudCaptureController? = null
   private val main = Handler(Looper.getMainLooper())
   // Decoding a backing track is blocking and a five-minute song takes a
@@ -247,18 +251,32 @@ class LoudCameraModule : Module() {
     // which the web's measurement also uses. These three just run it.
     AsyncFunction("startSyncCalibration") { config: Map<String, Any?>, promise: Promise ->
       try {
-        val chain = vocalChain
-        if (chain == null) {
-          // Without the chain installed there is no captured audio to
-          // listen to, so this would measure silence and report twelve
-          // missing answers — which the shared gates would refuse, but
-          // slowly and confusingly. Say so instead.
-          promise.resolve(mapOf("ok" to false, "error" to "the audio chain is not running yet"))
-          return@AsyncFunction
-        }
+        // Whichever path holds the microphone feeds the detector.
+        //
+        // This used to refuse with "the audio chain is not running yet"
+        // whenever no broadcast was up — which is every time an artist
+        // runs the check, since they run it in Settings and in Kit
+        // Check. The message was also a statement about the build, and
+        // docs/ONE_JOURNEY.md §6 says a row ends in a result or an
+        // action, never in one of those.
         val cal = syncCalibration ?: LoudSyncCalibration().also { syncCalibration = it }
         cal.setConfig(syncConfig(config))
-        chain.setCalibration(cal)
+        val chain = vocalChain
+        if (MicOwner.broadcastHasMic() && chain != null) {
+          // A show is running: measure in the real path, which is also
+          // the one whose delay the artist is actually hearing.
+          inputMeter?.setCalibration(null)
+          chain.setCalibration(cal)
+        } else {
+          val meter = inputMeter ?: LoudInputMeter().also { inputMeter = it }
+          val started = if (meter.isRunning()) mapOf("ok" to true) else meter.start()
+          if (started["ok"] != true) {
+            promise.resolve(mapOf("ok" to false, "error" to (started["reason"] ?: "the microphone is not available")))
+            return@AsyncFunction
+          }
+          vocalChain?.setCalibration(null)
+          meter.setCalibration(cal)
+        }
         promise.resolve(cal.start())
       } catch (e: Throwable) {
         promise.resolve(mapOf("ok" to false, "error" to (e.message ?: e.toString())))
@@ -274,13 +292,37 @@ class LoudCameraModule : Module() {
     AsyncFunction("cancelSyncCalibration") { ->
       syncCalibration?.cancel()
       vocalChain?.setCalibration(null)
+      inputMeter?.setCalibration(null)
       mapOf("ok" to true)
     }
 
     AsyncFunction("vocalChainState") { ->
       val chain = vocalChain
-      if (chain == null) mapOf("installed" to false, "configured" to false)
-      else mapOf("installed" to true) + chain.meter()
+      // `installed` says the post-processor is attached, which it stays
+      // for the life of the process once one show has run. Whether
+      // frames are ARRIVING is a different fact, and it is the one a
+      // meter needs: without it the meter read "installed" and showed
+      // silence for the rest of the session.
+      if (chain == null) mapOf("installed" to false, "configured" to false, "capturing" to false)
+      else mapOf("installed" to true, "capturing" to MicOwner.broadcastHasMic()) + chain.meter()
+    }
+
+    // ── The microphone when nothing is broadcasting ────────────
+    // Settings → Audio and Kit Check, where an artist checks their
+    // microphone and no show is running. LoudInputMeter's header has the
+    // whole reason; MicOwner is the rule that keeps the two capture
+    // paths off each other.
+    AsyncFunction("startInputMeter") { ->
+      val meter = inputMeter ?: LoudInputMeter().also { inputMeter = it }
+      meter.start()
+    }
+
+    AsyncFunction("stopInputMeter") { ->
+      inputMeter?.stop() ?: mapOf("ok" to true)
+    }
+
+    AsyncFunction("inputMeterState") { ->
+      inputMeter?.meter() ?: mapOf("running" to false, "peak" to 0f, "rms" to 0f, "source" to "none")
     }
 
     // Orientation (docs/DECISIONS.md 2026-10-14): portrait | landscape,

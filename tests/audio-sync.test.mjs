@@ -373,10 +373,33 @@ test('the Kotlin detector is a transcription, and can be read against its refere
 
   // A run that cannot start resolves rather than throws, and is never
   // mistaken for a measurement of zero.
-  const mod = readFileSync(resolve(ROOT, 'native/modules/loud-camera/android/src/main/java/app/loudentify/loudcamera/LoudCameraModule.kt'), 'utf8');
+  //
+  // Read as CODE, with comments stripped. The previous version of this
+  // assertion looked for the words "the audio chain is not running yet"
+  // anywhere in the file; when that refusal was replaced on 8 November
+  // the words survived in the comment explaining why, and the test went
+  // on passing about behaviour that no longer existed. That is the
+  // fourth time a test here has asserted against prose.
+  const mod = readFileSync(resolve(ROOT, 'native/modules/loud-camera/android/src/main/java/app/loudentify/loudcamera/LoudCameraModule.kt'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   assert.match(mod, /startSyncCalibration/);
-  assert.match(mod, /the audio chain is not running yet/, 'and says so when there is nothing to listen to');
   assert.match(mod, /syncConfig\(config\)/, 'the config is mapped, not invented');
+
+  // The check no longer needs a broadcast. It listens on whichever path
+  // holds the microphone: the chain while a show is up, and the
+  // standalone capture otherwise — which is where an artist actually
+  // runs it, in Settings and in Kit Check.
+  const broadcast = mod.indexOf('MicOwner.broadcastHasMic()');
+  const chainSink = mod.indexOf('chain.setCalibration(cal)');
+  const meterSink = mod.indexOf('meter.setCalibration(cal)');
+  assert.ok(broadcast > 0 && chainSink > broadcast, 'a running show feeds the detector from the real path');
+  assert.ok(meterSink > broadcast, 'and otherwise the standalone capture does');
+  // Only ever one of them, so two sources cannot both be offering frames.
+  assert.match(mod, /inputMeter\?\.setCalibration\(null\)/);
+  assert.match(mod, /vocalChain\?\.setCalibration\(null\)/);
+  // And a microphone it cannot open is still reported rather than thrown.
+  assert.match(mod, /started\["ok"\] != true/);
 });
 
 test('the orchestration asks the shared module for the verdict', () => {

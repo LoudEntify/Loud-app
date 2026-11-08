@@ -87,6 +87,14 @@ Protected-path changes under `docs/CLAUDE.md` §2 (money, identity, permissions/
   7. Press and hold End show: does the post-show page show the recording and let you set Public/Unlisted/Private?
   8. Versus (needs two performer accounts): invite the second, accept from its inbox, both open the console at slot time, tap Perform on the second: does the first get "Hand over the stage"? Accept: does the viewer's picture switch?
 
+- [ ] **Device checklist: the microphone outside a show** (8 Nov, Android phone, the one piece of this nothing in CI can check — Kotlin is not compiled there and a microphone needs a microphone):
+  1. Open the app with no show running. **Settings → Audio.** Speak. Does the Input level bar move, and does the line beside it change as you go from quiet to loud? Before today it stayed at silence no matter how loud you sang, and the screen said the meter only reads once a show has started the camera.
+  2. Same screen, tap **Check headphone delay** with earphones in. Does it play twelve clicks and give you a number? Before today it refused with "the audio chain is not running yet".
+  3. Deny the microphone permission (Android settings → the app → Permissions), reopen Settings → Audio: does it say what is wrong and what to do about it, rather than showing a dead bar?
+  4. **Kit Check**, still with no show running. Does the "Mic signal" row go green on its own when you speak, with no Confirm button to press? Does it say "Too loud" if you shout into the phone?
+  5. **The one that matters most: start a real show.** With the console live, is the picture and sound normal? Then, while still live, open Settings → Audio from the other phone or by backgrounding — the broadcast must keep the microphone. Does the show's audio carry on uninterrupted? If the show ever goes silent at this step, say so and stop: that is the failure this is guarding against, and it is worse than the bug it fixes.
+  6. Leave the show. Back in Settings → Audio, does the meter start reading again within a second or two?
+
 ## Phase 4 (native apps) — every step that needs your Apple or Google account
 
 The app is in `native/` (Expo). Cloud builds happen on Expo's EAS service; nothing is built on your laptop.

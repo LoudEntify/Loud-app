@@ -19,7 +19,7 @@ import { Back, Check, Warn, Clock } from '../viewer/Icons';
 import { describeRig, rigSummary } from '../../lib/rig.js';
 import { isLivePairing } from '../../lib/pairingLiveness.js';
 import { cameraTiles, tileDetail, readyState } from '../../lib/kitCheck.js';
-import { describeLevel } from '../../lib/audio/meter.js';
+import { describeLevel, micCheck } from '../../lib/audio/meter.js';
 
 const HOLD_MS = Number(process.env.NEXT_PUBLIC_KITCHECK_HOLD_MS || 120000); // two minutes; tests shorten it
 const CROPS = [['conversation', 'Conversation'], ['performing', 'Performing'], ['corner', 'Corner']];
@@ -70,10 +70,11 @@ export default function KitCheckScreen({ showId = null }) {
             // an artist clips on their loudest syllable and an average
             // that looks healthy hides it.
             const verdict = describeLevel({ peak, rms });
-            if (verdict.ok) setCheck('mic_signal', { status: 'ready', detail: verdict.line, level: rms });
-            else if (verdict.band === 'hot' || verdict.band === 'clipping') setCheck('mic_signal', { status: 'fix', detail: `${verdict.line} ${verdict.action}.`, level: rms });
-            else if (samples > 8) setCheck('mic_signal', { status: 'fix', detail: `${verdict.line} ${verdict.action}.`, level: rms });
-            else setCheck('mic_signal', { status: 'checking', detail: 'Say a few words', level: rms });
+            // The row's status and wording are micCheck()'s, not this
+            // screen's: the phone's Kit Check asks the same question and
+            // used to answer it with a Confirm button, so one voice could
+            // pass here and be vouched for there. Both read this now.
+            setCheck('mic_signal', { ...micCheck({ level: verdict, samples }), level: rms });
           }, 500);
           s.__micInterval = iv;
         } else setCheck('mic_signal', { status: 'fix', detail: 'No microphone found' });
