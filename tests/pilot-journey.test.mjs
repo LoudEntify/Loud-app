@@ -106,28 +106,31 @@ test('an old pilot share link lands on the show the product has', () => {
   assert.match(mw, /searchParams\.delete\('show'\)/);
 });
 
-test('the pilot journey is the only web position an artist can perform from, so staging keeps it', () => {
-  // The reason the gate is "not production" rather than anything
-  // narrower. components/artist/ConsoleScreen.jsx takes the local
-  // camera, composes a preview and never joins a room: nothing in
-  // components/artist/ imports livekit-client at all. So LiveDemo is
-  // still the only web performer position, and closing it on staging
-  // would remove the only way to run a web performer test.
+test('the new web console publishes, so the pilot journey is no longer the only performer position', () => {
+  // Written on 7 November as "nothing in components/artist/ publishes",
+  // with a message telling whoever read it to move the performer test
+  // to the new console. On 8 November the console does publish
+  // (lib/artistPublish.js), so the claim is inverted here rather than
+  // left reading as it did.
   //
-  // When the new console can publish, this test is the one to delete,
-  // and deleting it is the signal that the pilot journey can go.
-  const artist = execFileSync('git', ['ls-files', 'components/artist/*.jsx'], { cwd: ROOT, encoding: 'utf8' })
-    .split('\n').filter(Boolean);
-  assert.ok(artist.length > 0, 'the new journey has components');
+  // It also showed up a weakness in the original: it searched for an
+  // `import livekit-client` in components/artist/, and the console
+  // publishes through a hook in lib/ — so the test would have kept
+  // passing while its premise became false. It now checks the
+  // CAPABILITY, which is what anyone reading it cares about.
+  const consoleScreen = codeOf(read('components/artist/ConsoleScreen.jsx'));
+  assert.match(consoleScreen, /useArtistPublish\(/, 'the console joins the room and publishes');
 
-  const publishers = artist.filter((f) => /livekit-client|new Room\(/.test(codeOf(read(f))));
-  assert.deepEqual(
-    publishers,
-    [],
-    'the new web console now publishes — move the performer test to it and retire the pilot journey',
-  );
+  const publisher = codeOf(read('lib/artistPublish.js'));
+  assert.match(publisher, /from 'livekit-client'/);
+  assert.match(publisher, /publishTrack\(handle\.processedTrack/, 'with the processed microphone');
 
-  assert.match(read('components/LiveDemo.jsx'), /livekit-client/, 'and the pilot one still does');
+  // The pilot journey stays REACHABLE on staging all the same, and the
+  // reason has changed: not because it is the only way to perform, but
+  // because its capability panels — the audio deck, the cue editor, the
+  // shot console — are still not behind the new console. ONE_JOURNEY
+  // step 2c retires it when they are.
+  assert.match(read('components/LiveDemo.jsx'), /livekit-client/);
 });
 
 test('the pilot components are still here, because they are still the specification', () => {

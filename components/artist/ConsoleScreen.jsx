@@ -20,6 +20,8 @@ import { track } from '../../lib/telemetry';
 import { SHOW_PROMPTS } from '../../lib/showPrompts';
 import { Skeleton, ErrorState, OfflineBar, useOnline } from '../viewer/States';
 import { Eye, Warn, Check, Close, Send } from '../viewer/Icons';
+import { useArtistPublish } from '../../lib/artistPublish';
+import { describePublishing, canRetry, isPublishing } from '../../lib/publishing';
 
 const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -59,6 +61,23 @@ export default function ConsoleScreen({ showId }) {
   useEffect(() => { if (!loading && !session) router.replace('/signup?trigger=perform'); }, [loading, session, router]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
+  // The artist's camera and processed microphone, IN the show.
+  //
+  // Until 8 November this screen only did the self-view below: it took
+  // the local camera, composed a preview and drew it to a canvas, and
+  // never joined a room. An artist here was watching themselves while
+  // nothing reached a broadcast (docs/ONE_JOURNEY.md, 7 November).
+  const publish = useArtistPublish({ showId, accessToken, enabled: Boolean(show?.actual_started_at) });
+
+  // Publishing starts when the show does, not when the screen opens: the
+  // console is also where an artist waits for their slot, and a camera
+  // in the room before the show has begun is a participant the egress
+  // would compose.
+  useEffect(() => {
+    if (show?.actual_started_at && publish.phase === 'idle') publish.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show?.actual_started_at, publish.phase]);
 
   // own camera + mic (the self-view and the frame that is composed)
   useEffect(() => {
