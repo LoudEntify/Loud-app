@@ -55,6 +55,9 @@ import {
   roleOfTrack,
   sourceKey,
 } from '../lib/trackSources';
+// The slot and role rules, shared with the new web console so the two
+// screens cannot disagree about which cameras an artist may cut to.
+import { tracksForSlot as slotTracks, availableRoles as rolesAvailable } from '../lib/shotDirection';
 import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
 import { createCueDirector } from '../lib/cueDirector';
@@ -4354,15 +4357,17 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // cannot exist on a normal show load.
   const [simDropped, setSimDropped] = useState(() => new Set());
 
-  const tracksForSlot = useCallback((letter) =>
-    tracks.filter((t) => {
-      if (!belongsToSlot(t, letter) || t.publication?.isMuted) return false;
-      // Debug-only, and dead code on any normal load: STALE_DEBUG_ENABLED
-      // is false unless ?stale=1 / ?debug=1 is in the URL.
-      if (STALE_DEBUG_ENABLED && simDropped.size && simDropped.has(sourceKey(t))) return false;
-      return true;
-    }),
-    [tracks, simDropped]);
+  // The slot rule itself is lib/shotDirection.js now, so this screen and
+  // the new console cannot disagree about whether a camera is available
+  // (docs/ONE_JOURNEY.md step 2 — the panels are moving behind the new
+  // console and they need these rules; two copies is how two screens
+  // drift). What stays here is only the debug filter, which is dead code
+  // on any normal load.
+  const tracksForSlot = useCallback((letter) => {
+    const live = slotTracks(tracks, letter);
+    if (!STALE_DEBUG_ENABLED || !simDropped.size) return live;
+    return live.filter((t) => !simDropped.has(sourceKey(t)));
+  }, [tracks, simDropped]);
 
   const eligibleForSlot = useCallback((letter) =>
     filterEligible(tracksForSlot(letter), ineligibleTracks),
@@ -4548,16 +4553,10 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   // appears here exactly when a clip is on air, which is what enables the
   // B-ROLL CLIP shot -- and roleOfTrack is what stops that same clip
   // also being reported as 'main'.
-  const availableRoles = (slot, trackList = tracks) => {
-    const roles = new Set();
-    trackList.forEach((t) => {
-      if (t.publication?.isMuted) return;
-      if (!belongsToSlot(t, slot)) return;
-      const r = roleOfTrack(t);
-      if (r) roles.add(r);
-    });
-    return [...roles];
-  };
+  // Also lib/shotDirection.js, for the same reason as tracksForSlot
+  // above: the shot console is about to read this rule from the new
+  // console too, and it has to be the same rule.
+  const availableRoles = (slot, trackList = tracks) => rolesAvailable(trackList, slot);
 
   // Rewired per the shot-integration spec: a direct feed pick (from
   // VideoDeckPanel's own picker, untouched -- this is just the callback it
