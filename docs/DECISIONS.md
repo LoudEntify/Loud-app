@@ -1266,6 +1266,54 @@ has to as well), and leaving it until the loader needed it (the bug was
 live in staging either way, and it is the kind that looks like the app
 misbehaving rather than like one wrong line).
 
+## 2026-11-08 — Step 2c on the phone is done: a track can be cued and played
+
+The last piece of the phone being a position an artist can perform
+from. #58 gave the mixer the samples, #62 gave the console the
+transport, #63 moved the transport out of the component that was losing
+it, and this puts a track into the mixer.
+
+`native/src/trackLoader.js` fetches an uploaded track to a cache file,
+because the native mixer decodes a local file — a streaming player hands
+over no samples, which is the whole reason the track is decoded rather
+than played (LoudBackingTrack.kt).
+
+**The identity check is the point of the module, not a flourish.** The
+downloaded bytes are hashed and compared with the row's hash, because a
+cue sheet is a list of times and times only mean anything against one
+recording. Three details follow from taking that seriously:
+
+- a CACHED file is re-verified rather than trusted, so a half-written
+  file from an interrupted download is never played as the track;
+- the download lands on a `.part` name and is moved into place only once
+  it is whole, which is what makes the cache trustworthy at all;
+- every failure path deletes the partial, so a refused cue leaves
+  nothing behind for the next one to mistake for the track.
+
+**Headphones are the artist's own answer, not a sensor reading.** The
+capturer reports no audio routes — the audio settings screen has said so
+since it was written — so the sheet asks "Wired in" or "Bluetooth" and
+passes that to `trackPlaybackAllowed`. Kit Check asks the same question
+the same way and its header explains why: a check that invents a pass is
+worse than one that admits a person did the looking. The sheet gives the
+reason rather than the rule: through the speaker the microphone hears
+the track too, so it would go out twice.
+
+One small economy worth recording so it does not read as a mistake
+later: after `fetchTrack` has proved the file on disk matches the row,
+`cueTrack` passes the row's hash as both hashes to `backing.load`.
+Re-hashing would read a 30MB file a second time to learn what was just
+established.
+
+What this does not do: the web half, which is blocked behind the new web
+console joining a room at all (7 November), and cue sheets on the phone
+— the transport can drop a cue at the playhead, and nothing yet edits
+one there.
+
+Rejected: streaming the track from storage (no samples to mix), trusting
+the cache by filename (an interrupted download is a plausible file), and
+detecting headphones (there is no API for it on the capturer, and
+guessing would put a comb filter on a show).
 ## 2026-11-08 — The web console publishes, and the 7 November blocker is gone
 
 `components/artist/ConsoleScreen.jsx` took the local camera, composed a
