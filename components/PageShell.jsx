@@ -2,7 +2,7 @@
 
 import Sidebar from './Sidebar';
 import OnboardingNudge from './OnboardingNudge';
-import './reactions.css';
+import '../styles/reactions.css';
 
 // Desktop-first shell: sidebar left, page content fills the rest of the
 // viewport. hideSidebar is driven by a page's own fullscreen/maximize
