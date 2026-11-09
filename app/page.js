@@ -1,7 +1,7 @@
 
 import Link from "next/link";
 import Logo from "../components/Logo";
-import styles from "./streaming-home.module.css";
+import styles from "../styles/streaming-home.module.css";
 import PerformanceHero from "../components/PerformanceHero";
 import AutoScrollRow from "../components/AutoScrollRow";
 

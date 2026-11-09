@@ -1,99 +1,117 @@
-
 import { Suspense } from "react";
 import Link from "next/link";
 import Auth from "../../components/Auth";
-import styles from "./auth-page.module.css";
+import styles from "../../styles/auth-page.module.css";
 
 export const metadata = {
   title: "Sign In | Loudentify",
-  description:
-    "Sign in or create your Loudentify account. Your music. Your stage. Your experience.",
+  description: "Sign in or create your Loudentify account.",
 };
 
 export default function AuthPage() {
   return (
     <main className={styles.page}>
-      <section className={styles.visualPanel}>
-        <div className={styles.visualOverlay} />
+      {/* Background */}
+      <div className={styles.background} aria-hidden="true">
+        <div className={styles.overlay} />
+        <div className={styles.glow} />
+      </div>
 
-        <Link href="/" className={styles.brand}>
-          <span className={styles.brandIcon}>L</span>
+      {/* Header */}
+      <header className={styles.header}>
+        <Link href="/" className={styles.logo}>
+          <span className={styles.logoMark}>L</span>
           <span>LOUDENTIFY</span>
         </Link>
 
-        <div className={styles.visualContent}>
-          <div className={styles.eyebrow}>
-            <span className={styles.pulse} />
-            THE FUTURE OF LIVE MUSIC
+        <Link href="/" className={styles.back}>
+          ← Back to discover
+        </Link>
+      </header>
+
+      {/* Main content */}
+      <div className={styles.layout}>
+        <section className={styles.story}>
+          <div className={styles.liveLabel}>
+            <span className={styles.liveDot} />
+            YOUR MUSIC STARTS HERE
           </div>
 
           <h1>
-            YOUR MUSIC.
+            STEP INTO
             <br />
-            YOUR STAGE.
-            <br />
-            <span>YOUR WORLD.</span>
+            THE <span>SHOW.</span>
           </h1>
 
           <p>
-            Discover unforgettable performances, connect
-            with artists and experience live music from
-            every angle.
+            Discover performances picked for your taste,
+            follow the artists you love and experience live
+            music from every angle.
           </p>
 
-          <div className={styles.featureTags}>
-            <span>LIVE EXPERIENCES</span>
-            <span>MULTI-CAMERA</span>
-            <span>ARTIST-LED</span>
-          </div>
-        </div>
-
-        <div className={styles.visualFooter}>
-          <span>LIVE MUSIC, REIMAGINED.</span>
-          <span>© 2026 LOUDENTIFY</span>
-        </div>
-      </section>
-
-      <section className={styles.formPanel}>
-        <div className={styles.mobileBrand}>
-          <Link href="/">
-            <span className={styles.brandIcon}>L</span>
-            <span>LOUDENTIFY</span>
-          </Link>
-        </div>
-
-        <div className={styles.formContainer}>
-          <div className={styles.formIntro}>
-            <div className={styles.welcomeLabel}>
-              YOUR FRONT ROW SEAT AWAITS
+          <div className={styles.stats}>
+            <div>
+              <strong>LIVE</strong>
+              <span>Performances</span>
             </div>
 
-            <h2>Welcome to Loudentify.</h2>
+            <div>
+              <strong>360°</strong>
+              <span>Experience</span>
+            </div>
 
-            <p>
-              Sign in or create an account to continue
-              your Loudentify experience.
-            </p>
+            <div>
+              <strong>YOU</strong>
+              <span>In control</span>
+            </div>
           </div>
+        </section>
 
-          <div className={styles.authWrapper}>
-            <Suspense
-              fallback={
-                <div className={styles.loading}>
-                  Loading your account...
-                </div>
-              }
-            >
-              <Auth />
-            </Suspense>
-          </div>
+        <section className={styles.authArea}>
+          <div className={styles.authCard}>
+            <div className={styles.mobileLogo}>
+              <span className={styles.logoMark}>L</span>
+              <span>LOUDENTIFY</span>
+            </div>
 
-          <div className={styles.formFooter}>
-            <Link href="/">← Back to Discover</Link>
-            <span>SECURE ACCOUNT ACCESS</span>
+            <div className={styles.cardHeader}>
+              <span className={styles.eyebrow}>
+                WELCOME TO LOUDENTIFY
+              </span>
+
+              <h2>Your front row seat awaits.</h2>
+
+              <p>
+                Sign in to continue, or create your
+                Loudentify account.
+              </p>
+            </div>
+
+            <div className={styles.authComponent}>
+              <Suspense
+                fallback={
+                  <div className={styles.loading}>
+                    <span />
+                    Loading...
+                  </div>
+                }
+              >
+                <Auth />
+              </Suspense>
+            </div>
+
+            <div className={styles.secure}>
+              <span>●</span>
+              SECURE ACCOUNT ACCESS
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
+
+      <footer className={styles.footer}>
+        <span>© 2026 LOUDENTIFY</span>
+        <span>LIVE MUSIC, REIMAGINED.</span>
+      </footer>
     </main>
   );
 }

@@ -121,7 +121,8 @@ export default function Waitlist() {
   const [email, setEmail] = useState('');
   const [city, setCity] = useState('');
   const [genre, setGenre] = useState('');
-  const [consent, setConsent] = useState(false);
+const [ageConfirmed, setAgeConfirmed] = useState(false);
+const [consent, setConsent] = useState(false);
   const [company, setCompany] = useState(''); // honeypot
   const [status, setStatus] = useState('idle'); // idle | submitting | done | error
   const [error, setError] = useState('');
@@ -174,7 +175,15 @@ export default function Waitlist() {
     if (!isValidEmail(email)) return setError('Please enter a valid email address.');
     if (role === 'artist' && !city.trim()) return setError('Please enter your city.');
     if (role === 'artist' && !genre) return setError('Please choose a genre.');
-    if (!consent) return setError('Please tick the consent box to continue.');
+    if (!ageConfirmed) {
+  return setError('Please confirm that you are 18 or over.');
+}
+
+if (!consent) {
+  return setError(
+    'Please agree to the use of your details for Loudentify early access and launch.'
+  );
+}
 
     setStatus('submitting');
     try {
@@ -381,6 +390,57 @@ export default function Waitlist() {
                 </p>
               )}
 
+                <div className={styles.privacyNotice}>
+  <div className={styles.privacyNoticeHeader}>
+    <span className={styles.privacyIcon}>i</span>
+    <span>HOW WE USE YOUR INFORMATION</span>
+  </div>
+
+  <p>
+    <strong>Who collects this, and why.</strong> Loudentify is a
+    pre-launch project currently run by Oluwakorede Alashe and its
+    founding team. A UK company is being set up, and this notice will
+    be updated when it is.
+  </p>
+
+  <p>
+    We collect your name and email, and your city and genre if you
+    give them, for one purpose only: to contact you about Loudentify
+    early access and launch.
+  </p>
+
+  <p>
+    We rely on your consent, which you give by ticking the boxes
+    below, and you can withdraw it at any time by unsubscribing or by
+    emailing{" "}
+    <a href="mailto:build@loudentify.app">
+      build@loudentify.app
+    </a>.
+  </p>
+
+  <p>
+    We never sell or share your details, and the waitlist count shown
+    is an anonymous total that never identifies you.
+  </p>
+
+  <p>
+    We keep your details only until launch or until you ask us to
+    remove them, then delete them. You can ask for a copy of your data
+    or its deletion at any time, and you can complain to the UK
+    Information Commissioner&apos;s Office at{" "}
+    <a
+      href="https://ico.org.uk/"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      ico.org.uk
+    </a>.
+  </p>
+
+  <a href="/privacy" className={styles.privacyLink}>
+    Read our full Privacy Notice →
+  </a>
+</div>
               <button type="submit" disabled={status === 'submitting'} style={styles.submit}>
                 {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
               </button>
