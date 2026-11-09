@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import styles from "./PerformanceHero.module.css";
+import styles from "../styles/PerformanceHero.module.css";
 
 // DEMO DATA.
 // Replace these entries with published shows from your backend.

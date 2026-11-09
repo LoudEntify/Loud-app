@@ -6,7 +6,8 @@ import { signUp, signIn, getSession, getProfile, validateUsername, isUsernameAva
 import { countryOptions } from '../lib/countries';
 import GenreSelect from './GenreSelect';
 import { setAccountType } from '../lib/mockAccount';
-import './reactions.css';
+import styles from '../styles/Auth.module.css';
+import '../styles/reactions.css';
 import Logo from './Logo';
 
 const INK = '#011627';
@@ -104,7 +105,7 @@ export default function Auth() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-
+  const [showPassword, setShowPassword] = useState(false);
   // Gated as well as hidden. The tab is the only way to reach signup
   // today, but a flag that only hides a button leaves the form one stray
   // setMode away from rendering.
@@ -239,149 +240,270 @@ export default function Auth() {
     }
   }
 
-  return (
-    <div style={{ minHeight: '100vh', width: '100%', background: PORCELAIN, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24, boxSizing: 'border-box' }}>
-      <div style={{ width: '100%', maxWidth: 380 }}>
-
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ display: 'flex', justifyContent: 'center' }}><Logo surface="light" height={36} /></div>
-          <span style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.4)' }}>LIVE MUSIC PLATFORM</span>
-        </div>
-
-        {SELF_SIGNUP_ENABLED ? (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'login' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'login' ? TEAL : 'rgba(1,22,39,0.5)' }}
-            >
-              LOG IN
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              style={{ flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', background: mode === 'signup' ? 'rgba(46,196,182,0.12)' : 'transparent', color: mode === 'signup' ? TEAL : 'rgba(1,22,39,0.5)' }}
-            >
-              SIGN UP
-            </button>
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: TEAL, background: 'rgba(46,196,182,0.12)' }}>
-            ARTIST LOG IN
-          </div>
-        )}
-
-        {isSignup && (
-          <>
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <div
-                onClick={() => setRole('fan')}
-                style={{ flex: 1, textAlign: 'center', padding: '14px 0', cursor: 'pointer', border: role === 'fan' ? '1px solid rgba(46,196,182,0.6)' : 'none', borderRadius: 999 }}
-              >
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: role === 'fan' ? TEAL : 'rgba(1,22,39,0.6)' }}>I&apos;M A FAN</span>
-              </div>
-              <div
-                onClick={() => setRole('artist')}
-                style={{ flex: 1, textAlign: 'center', padding: '14px 0', cursor: 'pointer', border: role === 'artist' ? '1px solid rgba(46,196,182,0.6)' : 'none', borderRadius: 999 }}
-              >
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: role === 'artist' ? TEAL : 'rgba(1,22,39,0.6)' }}>I&apos;M AN ARTIST</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
-              <div>
-                <div style={labelStyle}>FULL NAME</div>
-                <input
-                  placeholder="Your full name"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div>
-                {/* One column, two labels. Artists think in stage names,
-                    fans think in usernames -- but a single namespace is
-                    what stops the two colliding once handles are public. */}
-                <div style={labelStyle}>{role === 'artist' ? 'STAGE NAME' : 'USERNAME'}</div>
-                <input
-                  placeholder={role === 'artist' ? 'How you appear on stage' : 'Pick a handle'}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
-                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
-                  {username ? `loudentify.com/@${normaliseUsername(username)}` : 'Lowercase letters, numbers and underscores.'}
-                </div>
-              </div>
-
-              <div>
-                <div style={labelStyle}>DATE OF BIRTH</div>
-                <input
-                  type="date"
-                  value={dateOfBirth}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                />
-                <div style={{ fontSize: 10, color: 'rgba(1,22,39,0.4)', marginTop: 4 }}>
-                  Loudentify is {MIN_AGE}+.
-                </div>
-              </div>
-
-              <div>
-                <div style={labelStyle}>COUNTRY</div>
-                <select
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
-                >
-                  <option value="">Select a country</option>
-                  {countryOptions().map((c) => (
-                    <option key={c.code} value={c.code}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div style={labelStyle}>GENRES <span style={{ fontWeight: 400, letterSpacing: 0 }}>(optional)</span></div>
-                <GenreSelect value={genres} onChange={setGenres} />
-              </div>
-            </div>
-          </>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={inputStyle}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
-
-        {error && <div style={{ marginTop: 10, fontSize: 12, color: '#e71d36' }}>{error}</div>}
-        {notice && <div style={{ marginTop: 10, fontSize: 12, color: TEAL }}>{notice}</div>}
+ return (
+  <div className={styles.auth}>
+    {SELF_SIGNUP_ENABLED ? (
+      <div className={styles.modeTabs}>
+        <button
+          type="button"
+          onClick={() => setMode('login')}
+          className={`${styles.modeButton} ${
+            mode === 'login' ? styles.modeButtonActive : ''
+          }`}
+        >
+          LOG IN
+        </button>
 
         <button
           type="button"
-          onClick={continueAction}
-          disabled={submitting}
-          style={{ marginTop: 18, width: '100%', display: 'block', textAlign: 'center', padding: '14px 0', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: PORCELAIN, background: 'linear-gradient(90deg,#2ec4b6,#ff9f1c)', opacity: submitting ? 0.6 : 1, border: 'none', cursor: submitting ? 'default' : 'pointer' }}
+          onClick={() => setMode('signup')}
+          className={`${styles.modeButton} ${
+            mode === 'signup' ? styles.modeButtonActive : ''
+          }`}
         >
-          {submitting ? 'PLEASE WAIT...' : isSignup ? 'CREATE ACCOUNT' : 'LOG IN'}
+          CREATE ACCOUNT
         </button>
+      </div>
+    ) : (
+      <div
+        className={`${styles.modeTabs} ${styles.modeTabsSingle}`}
+      >
+        <div
+          className={`${styles.modeButton} ${styles.modeButtonActive} ${styles.loginLabel}`}
+        >
+          ARTIST LOG IN
+        </div>
+      </div>
+    )}
 
+    {isSignup && (
+      <>
+        <div className={styles.roles}>
+          <button
+            type="button"
+            onClick={() => setRole('fan')}
+            className={`${styles.roleButton} ${
+              role === 'fan' ? styles.roleActive : ''
+            }`}
+          >
+            I'M A FAN
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRole('artist')}
+            className={`${styles.roleButton} ${
+              role === 'artist' ? styles.roleActive : ''
+            }`}
+          >
+            I'M AN ARTIST
+          </button>
+        </div>
+
+        <div className={styles.signupFields}>
+          <div className={styles.field}>
+            <label className={styles.label}>
+              FULL NAME
+            </label>
+
+            <input
+              className={styles.input}
+              placeholder="Your full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              autoComplete="name"
+            />
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>
+              {role === 'artist'
+                ? 'STAGE NAME'
+                : 'USERNAME'}
+            </label>
+
+            <input
+              className={styles.input}
+              placeholder={
+                role === 'artist'
+                  ? 'How you appear on stage'
+                  : 'Pick a handle'
+              }
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="username"
+            />
+
+            <p className={styles.helper}>
+              {username
+                ? `loudentify.com/@${normaliseUsername(
+                    username
+                  )}`
+                : 'Lowercase letters, numbers and underscores.'}
+            </p>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>
+              DATE OF BIRTH
+            </label>
+
+            <input
+              className={styles.input}
+              type="date"
+              value={dateOfBirth}
+              onChange={(e) =>
+                setDateOfBirth(e.target.value)
+              }
+            />
+
+            <p className={styles.helper}>
+              Loudentify is {MIN_AGE}+.
+            </p>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>
+              COUNTRY
+            </label>
+
+            <select
+              className={styles.select}
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+            >
+              <option value="">
+                Select your country
+              </option>
+
+              {countryOptions().map((c) => (
+                <option
+                  key={c.code}
+                  value={c.code}
+                >
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>
+              GENRES{' '}
+              <span className={styles.optional}>
+                (optional)
+              </span>
+            </label>
+
+            <GenreSelect
+              value={genres}
+              onChange={setGenres}
+            />
+          </div>
+        </div>
+      </>
+    )}
+
+    <div className={styles.credentials}>
+      <div className={styles.field}>
+        <label
+          className={styles.label}
+          htmlFor="loudentify-email"
+        >
+          EMAIL ADDRESS
+        </label>
+
+        <input
+          id="loudentify-email"
+          className={styles.input}
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+        />
+      </div>
+
+      <div className={styles.field}>
+        <label
+          className={styles.label}
+          htmlFor="loudentify-password"
+        >
+          PASSWORD
+        </label>
+
+        <div className={styles.passwordWrap}>
+          <input
+            id="loudentify-password"
+            className={styles.input}
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
+            autoComplete={
+              isSignup
+                ? 'new-password'
+                : 'current-password'
+            }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !submitting) {
+                continueAction();
+              }
+            }}
+          />
+
+          <button
+            type="button"
+            className={styles.showPassword}
+            onClick={() =>
+              setShowPassword((current) => !current)
+            }
+            aria-label={
+              showPassword
+                ? 'Hide password'
+                : 'Show password'
+            }
+          >
+            {showPassword ? 'HIDE' : 'SHOW'}
+          </button>
+        </div>
       </div>
     </div>
-  );
+
+    {error && (
+      <div
+        className={styles.error}
+        role="alert"
+      >
+        {error}
+      </div>
+    )}
+
+    {notice && (
+      <div
+        className={styles.notice}
+        role="status"
+      >
+        {notice}
+      </div>
+    )}
+
+    <button
+      type="button"
+      onClick={continueAction}
+      disabled={submitting}
+      className={styles.submit}
+    >
+      {submitting
+        ? 'SIGNING YOU IN...'
+        : isSignup
+          ? 'CREATE ACCOUNT'
+          : 'ENTER LOUDENTIFY →'}
+    </button>
+  </div>
+);
 }
