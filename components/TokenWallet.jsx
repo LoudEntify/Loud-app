@@ -12,7 +12,7 @@ import {
   formatMinor,
   payoutMinorFor,
 } from '../lib/tokens';
-import './reactions.css';
+import '../styles/reactions.css';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';

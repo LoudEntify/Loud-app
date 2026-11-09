@@ -85,7 +85,7 @@ import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpc
 import { REACTIONS_COST_TOKENS, chargeReaction, logReaction } from '../lib/reactions';
 import { SPEND_ACTIONS } from '../lib/tokens';
 import { forgetPerformerSession, recallPerformerSession, rememberPerformerSession } from '../lib/sessionResume';
-import './reactions.css';
+import '../styles/reactions.css';
 
 // THE ROOM IS THE SHOW'S ROOM. There is no default.
 //

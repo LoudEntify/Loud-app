@@ -48,7 +48,7 @@ import { useSearchParams } from 'next/navigation';
 import { LiveKitRoom, RoomAudioRenderer, useTracks, useDataChannel, useRoomContext } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
-import './reactions.css';
+import '../styles/reactions.css';
 import VersusSplit from './VersusSplit';
 import { useMicState } from '../lib/micState';
 import SpotlightStage from './SpotlightStage';
