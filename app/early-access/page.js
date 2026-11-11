@@ -1,6 +1,7 @@
-
 import { Suspense } from "react";
 import Waitlist from "../../components/Waitlist";
+import Navbar from "../../components/Navbar";
+import Footer from "../../components/Footer";
 
 export const metadata = {
   title: "Early Access | Loudentify",
@@ -10,8 +11,28 @@ export const metadata = {
 
 export default function EarlyAccessPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <Waitlist />
-    </Suspense>
+    <>
+      <Navbar />
+
+      <Suspense
+        fallback={
+          <main
+            style={{
+              minHeight: "100vh",
+              display: "grid",
+              placeItems: "center",
+              background: "#011627",
+              color: "#fdfffc",
+            }}
+          >
+            Loading Loudentify...
+          </main>
+        }
+      >
+        <Waitlist />
+      </Suspense>
+
+      <Footer />
+    </>
   );
 }

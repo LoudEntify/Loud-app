@@ -4,6 +4,9 @@ import Logo from "../components/Logo";
 import styles from "../styles/streaming-home.module.css";
 import PerformanceHero from "../components/PerformanceHero";
 import AutoScrollRow from "../components/AutoScrollRow";
+// import ContentCard from "../components/ContentCard";
+import Footer from "../components/Footer";
+import Navbar from "../components/Navbar";
 
 export const metadata = {
   title: "Loudentify | Live Music, Reimagined",
@@ -96,30 +99,30 @@ function ArrowIcon() {
   return <span aria-hidden="true">↗</span>;
 }
 
-function Navbar() {
-  return (
-    <header className={styles.navbar}>
-      <div className={styles.navInner}>
-        <Link href="/" className={styles.logo} aria-label="Loudentify homepage">
-          <Logo surface="dark" height={36} />
-        </Link>
+// function Navbar() {
+//   return (
+//     <header className={styles.navbar}>
+//       <div className={styles.navInner}>
+//         <Link href="/" className={styles.logo} aria-label="Loudentify homepage">
+//           <Logo surface="dark" height={36} />
+//         </Link>
 
-        <nav className={styles.navLinks} aria-label="Main navigation">
-          <a href="#discover">Discover</a>
-          <a href="#experience">The Experience</a>
-          <a href="#artists">For Artists</a>
-        </nav>
+//         <nav className={styles.navLinks} aria-label="Main navigation">
+//           <a href="#discover">Discover</a>
+//           <a href="#experience">The Experience</a>
+//           <a href="#artists">For Artists</a>
+//         </nav>
 
-        <div className={styles.navActions}>
-          <Link href="/auth" className={styles.signIn}>Sign In</Link>
-          <Link href="/early-access" className={styles.joinButton}>
-            Join Early Access
-          </Link>
-        </div>
-      </div>
-    </header>
-  );
-}
+//         <div className={styles.navActions}>
+//           <Link href="/auth" className={styles.signIn}>Sign In</Link>
+//           <Link href="/early-access" className={styles.joinButton}>
+//             Join Early Access
+//           </Link>
+//         </div>
+//       </div>
+//     </header>
+//   );
+// }
 
 function Hero() {
   return (
@@ -377,27 +380,27 @@ function BottomCTA() {
   );
 }
 
-function Footer() {
-  return (
-    <footer className={styles.footer}>
-      <div>
-        <Logo surface="dark" height={36} />
-        <p>Live music, reimagined.</p>
-      </div>
+// function Footer() {
+//   return (
+//     <footer className={styles.footer}>
+//       <div>
+//         <Logo surface="dark" height={36} />
+//         <p>Live music, reimagined.</p>
+//       </div>
 
-      <div className={styles.footerLinks}>
-        <a href="#discover">Discover</a>
-        <a href="#experience">Experience</a>
-        <Link href="/privacy">Privacy</Link>
-        <Link href="/auth">Sign In</Link>
-      </div>
+//       <div className={styles.footerLinks}>
+//         <a href="#discover">Discover</a>
+//         <a href="#experience">Experience</a>
+//         <Link href="/privacy">Privacy</Link>
+//         <Link href="/auth">Sign In</Link>
+//       </div>
 
-      <div className={styles.copyright}>
-        © 2026 Loudentify. All rights reserved.
-      </div>
-    </footer>
-  );
-}
+//       <div className={styles.copyright}>
+//         © 2026 Loudentify. All rights reserved.
+//       </div>
+//     </footer>
+//   );
+// }
 
 export default function HomePage() {
   return (
