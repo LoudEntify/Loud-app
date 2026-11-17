@@ -1,21 +1,6 @@
-import { Suspense } from 'react';
-import MyProfileRedirect from '../../components/MyProfileRedirect';
-import PageShell from '../../components/PageShell';
+import AccountDashboard from '../../components/AccountDashboard';
 
-export const metadata = {
-  title: 'Your profile · Loudentify',
-  description: 'Your Loudentify profile and console',
-};
+export const metadata = { title: 'Your Dashboard | Loudentify', description: 'Your Loudentify dashboard.' };
 
-// /dashboard is retained ONLY so existing links and bookmarks do not
-// 404. The console moved onto the artist's own profile; this resolves
-// there. Nothing renders a "dashboard" as its own destination now.
-export default function DashboardPage() {
-  return (
-    <PageShell active="profile">
-      <Suspense fallback={null}>
-        <MyProfileRedirect />
-      </Suspense>
-    </PageShell>
-  );
-}
+// Resolve the destination from the authenticated profile, never a URL role hint.
+export default function DashboardPage() { return <AccountDashboard />; }

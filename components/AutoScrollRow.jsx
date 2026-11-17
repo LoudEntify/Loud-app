@@ -118,7 +118,7 @@ export default function AutoScrollRow({
 
       <div
         aria-hidden="true"
-        inert=""
+        inert={true}
         style={{
           display: "flex",
           gap: "16px",

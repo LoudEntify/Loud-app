@@ -73,7 +73,7 @@ const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transp
 // list multi-select (lib/genres.js, components/GenreSelect.jsx), and this
 // compact signup form never had room for that picker. Every account
 // starts with genres: [] and picks them later via Settings.
-export default function Auth() {
+export default function Auth({ accountRole = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Where to land after a successful auth. Defaults per role, but a
@@ -93,7 +93,7 @@ export default function Auth() {
   // back rather than rebuilding a flow and re-testing it.
   const SELF_SIGNUP_ENABLED = false;
   const [mode, setMode] = useState('login');
-  const [role, setRole] = useState('fan');
+  const [role, setRole] = useState(accountRole || 'fan');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -112,8 +112,8 @@ export default function Auth() {
   const isSignup = SELF_SIGNUP_ENABLED && mode === 'signup';
 
   function destinationFor(dbRole) {
-    if (nextParam && nextParam.startsWith('/')) return nextParam;
-    return dbRole === 'artist' ? '/dashboard' : '/discover';
+    if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.includes('\\')) return nextParam;
+    return dbRole === 'artist' ? '/dashboard/artist' : '/dashboard/fan';
   }
 
   // A brand-new account goes to the walkthrough; everyone else goes where
@@ -130,7 +130,7 @@ export default function Auth() {
   // watch it should land on the show, not on a setup screen. The nudge
   // catches them afterwards.
   function signupDestinationFor(dbRole) {
-    if (nextParam && nextParam.startsWith('/')) return nextParam;
+    if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.includes('\\')) return nextParam;
     return '/welcome';
   }
 
@@ -141,8 +141,12 @@ export default function Auth() {
     (async () => {
       const session = await getSession();
       if (cancelled || !session?.user) return;
-      const { profile } = await getProfile(session.user.id);
+      const { profile, error: profileError } = await getProfile(session.user.id);
       if (cancelled) return;
+      if (profileError || !['artist', 'viewer'].includes(profile?.role)) {
+        setError('We couldn’t load your account profile. Please try again or contact build@loudentify.app.');
+        return;
+      }
       router.replace(destinationFor(profile?.role));
     })();
     return () => { cancelled = true; };
@@ -232,6 +236,10 @@ export default function Auth() {
           return;
         }
         const dbRole = result.profile?.role;
+        if (!['artist', 'viewer'].includes(dbRole)) {
+          setError('Your account profile is not ready. Please contact build@loudentify.app.');
+          return;
+        }
         setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
         router.push(destinationFor(dbRole));
       }
@@ -271,7 +279,7 @@ export default function Auth() {
         <div
           className={`${styles.modeButton} ${styles.modeButtonActive} ${styles.loginLabel}`}
         >
-          ARTIST LOG IN
+          {accountRole === 'artist' ? 'ARTIST SIGN IN' : accountRole === 'fan' ? 'FAN SIGN IN' : 'ACCOUNT SIGN IN'}
         </div>
       </div>
     )}

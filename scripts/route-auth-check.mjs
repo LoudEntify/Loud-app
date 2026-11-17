@@ -72,6 +72,22 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  'waitlist/route.js': {
+    status: 'settled',
+    reason:
+      'Public pre-launch waitlist capture: joining does not create an account and must not ' +
+      'require an existing session. POST validates role, personal details and explicit consent, ' +
+      'rate-limits requests and applies honeypot/timing checks. Only the server service-role ' +
+      'client writes to waitlist_signups, which has RLS enabled with no browser policies. ' +
+      'Responses contain no signup details and duplicate email/role pairs receive the same success.',
+  },
+  'waitlist/count/route.js': {
+    status: 'settled',
+    reason:
+      'Public landing-page counter, rate-limited and read-only. The server service-role query ' +
+      'returns only the aggregate number of artist waitlist signups, never personal details. ' +
+      'An account is not required to view the landing page or join the waitlist.',
+  },
   'build-info/route.js': {
     status: 'settled',
     reason:

@@ -15,7 +15,7 @@ const INK = '#011627';
 //
 // The post-login return path rides in ?next= so a shared show link
 // survives the detour through the auth page.
-export default function RequireAuth({ children }) {
+export default function RequireAuth({ children, signInPath = '/auth' }) {
   const router = useRouter();
   const pathname = usePathname();
   const [state, setState] = useState('checking'); // checking | authed | anon
@@ -52,8 +52,8 @@ export default function RequireAuth({ children }) {
     // Suspense-boundary requirement on every gated route.
     const search = typeof window !== 'undefined' ? window.location.search : '';
     const next = encodeURIComponent(`${pathname || '/live'}${search}`);
-    router.replace(`/auth?next=${next}`);
-  }, [state, pathname, router]);
+    router.replace(`${signInPath}?next=${next}`);
+  }, [state, pathname, router, signInPath]);
 
   if (state === 'authed') return children;
 

@@ -115,7 +115,7 @@ export async function POST(request) {
       // 23505 = unique violation = already on the list for this role.
       // Treated as success: idempotent, and it never reveals to a prober
       // whether a given email is already registered.
-      if (error.code === '23505') return NextResponse.json({ ok: true, already: true });
+      if (error.code === '23505') return NextResponse.json({ ok: true });
       console.warn('[waitlist] insert failed:', error);
       return NextResponse.json({ ok: false, error: 'Something went wrong. Please try again.' }, { status: 500 });
     }
