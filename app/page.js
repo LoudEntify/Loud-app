@@ -98,113 +98,10 @@ function ArrowIcon() {
   return <span aria-hidden="true">↗</span>;
 }
 
-// function Navbar() {
-//   return (
-//     <header className={styles.navbar}>
-//       <div className={styles.navInner}>
-//         <Link href="/" className={styles.logo} aria-label="Loudentify homepage">
-//           <Logo surface="dark" height={36} />
-//         </Link>
-
-//         <nav className={styles.navLinks} aria-label="Main navigation">
-//           <a href="#discover">Discover</a>
-//           <a href="#experience">The Experience</a>
-//           <a href="#artists">For Artists</a>
-//         </nav>
-
-//         <div className={styles.navActions}>
-//           <Link href="/auth" className={styles.signIn}>Sign In</Link>
-//           <Link href="/early-access" className={styles.joinButton}>
-//             Join Early Access
-//           </Link>
-//         </div>
-//       </div>
-//     </header>
-//   );
-// }
-
-function Hero() {
-  return (
-    <section className={styles.hero}>
-      <div className={styles.heroArtwork} aria-hidden="true">
-        <div className={styles.heroLightLeft} />
-        <div className={styles.heroLightRight} />
-        <div className={styles.heroBeam} />
-        <div className={styles.heroPerson}>
-          <div className={styles.personHead} />
-          <div className={styles.personBody} />
-          <div className={styles.personArm} />
-          <div className={styles.personMic} />
-        </div>
-        <div className={styles.heroCrowd} />
-      </div>
-
-      <div className={styles.heroContent}>
-        <div className={styles.heroBadge}>
-          <span className={styles.pulse} />
-          THE FUTURE OF LIVE MUSIC
-        </div>
-
-        <div className={styles.heroMeta}>
-          LOUDENTIFY ORIGINAL EXPERIENCE
-        </div>
-
-        <h1>
-          THE STAGE
-          <br />
-          IS <span>EVERYWHERE.</span>
-        </h1>
-
-        <p className={styles.heroDescription}>
-          Real artists. Real performances. Real connection.
-          Experience live music in a whole new way — from
-          intimate sessions to unforgettable multi-camera shows.
-        </p>
-
-        <div className={styles.heroButtons}>
-          <Link href="/early-access" className={styles.primaryButton}>
-            <PlayIcon />
-            Get Early Access
-          </Link>
-
-          <a href="#experience" className={styles.secondaryButton}>
-            Explore Loudentify
-          </a>
-        </div>
-
-        <div className={styles.heroFootnote}>
-          <span className={styles.dot} />
-          YOUR FRONT ROW SEAT IS COMING
-        </div>
-      </div>
-
-      <div className={styles.heroBottom}>
-        <span>LIVE MUSIC, REIMAGINED</span>
-        <span>SCROLL TO EXPLORE ↓</span>
-      </div>
-    </section>
-  );
-}
-
 function Artwork({ item }) {
   return (
     <div className={`${styles.artwork} ${styles[item.theme]}`}>
-      <div className={styles.artGlow} />
-      <div className={styles.artCircle} />
-      <div className={styles.artLines} />
-
-      <div className={styles.artSymbol} aria-hidden="true">
-        {item.art === "mic" && "♫"}
-        {item.art === "stage" && "✦"}
-        {item.art === "sound" && "◉"}
-        {item.art === "night" && "☾"}
-        {item.art === "afro" && "♪"}
-        {item.art === "soul" && "♡"}
-        {item.art === "hiphop" && "✳"}
-        {item.art === "jazz" && "♬"}
-        {item.art === "gospel" && "✧"}
-      </div>
-
+      <div className={styles.artPhoto} aria-hidden="true" />
       <div className={styles.artTitle}>{item.title}</div>
     </div>
   );
@@ -239,6 +136,7 @@ function ContentRow({ collection, index = 0 }) {
     <section className={styles.contentSection}>
       <div className={styles.sectionTop}>
         <div>
+          <span className={styles.overline}>{index === 0 ? '01 / THE EXPERIENCES' : '02 / YOUR SOUNDTRACK'}</span>
           <h2>{collection.title}</h2>
           <p>{collection.subtitle}</p>
         </div>
@@ -273,13 +171,13 @@ function Experience() {
     <section id="experience" className={styles.experience}>
       <div className={styles.experienceVisual}>
         <div className={styles.playerTop}>
-          <span><span className={styles.pulse} /> LIVE STUDIO PREVIEW</span>
+          <span><span className={styles.pulse} /> MULTI-CAMERA CONCEPT</span>
           <span>CAM 01</span>
         </div>
 
         <div className={styles.playerStage}>
           <div className={styles.playerGlow} />
-          <div className={styles.playerCircle}>♫</div>
+
           <div className={styles.playerCenter}>
             <span>THE LOUDENTIFY EXPERIENCE</span>
             <h3>Every angle.<br />Every moment.</h3>
@@ -352,7 +250,7 @@ function ArtistBanner() {
         </Link>
       </div>
       <div className={styles.artistDecor} aria-hidden="true">
-        <div className={styles.artistRecord}>L</div>
+        <div className={styles.artistRecord}><span>THE ARTIST’S PERSPECTIVE</span><strong>Made by you.<br /><em>Felt by everyone.</em></strong><span>INDEPENDENT SOUND. SHARED ENERGY.</span></div>
       </div>
     </section>
   );
@@ -379,34 +277,12 @@ function BottomCTA() {
   );
 }
 
-// function Footer() {
-//   return (
-//     <footer className={styles.footer}>
-//       <div>
-//         <Logo surface="dark" height={36} />
-//         <p>Live music, reimagined.</p>
-//       </div>
-
-//       <div className={styles.footerLinks}>
-//         <a href="#discover">Discover</a>
-//         <a href="#experience">Experience</a>
-//         <Link href="/privacy">Privacy</Link>
-//         <Link href="/auth">Sign In</Link>
-//       </div>
-
-//       <div className={styles.copyright}>
-//         © 2026 Loudentify. All rights reserved.
-//       </div>
-//     </footer>
-//   );
-// }
-
 export default function HomePage() {
   return (
     <main className={styles.page}>
       <Navbar />
       <PerformanceHero preferredGenres={["Afrobeats", "R&B"]} />
-      <MobileAppPreview />
+      <div className={styles.manifesto} aria-label="The Loudentify experience"><span>INDEPENDENT ARTISTS</span><i aria-hidden="true">✦</i><span>EVERY ANGLE</span><i aria-hidden="true">✦</i><span>REAL CONNECTION</span><i aria-hidden="true">✦</i><span>ONE SHARED MOMENT</span></div>
 
       <div id="discover" className={styles.discover}>
         {collections.map((collection, index) => (
@@ -420,6 +296,7 @@ export default function HomePage() {
 
       <Experience />
       <ArtistBanner />
+      <MobileAppPreview />
       <BottomCTA />
       <Footer />
     </main>

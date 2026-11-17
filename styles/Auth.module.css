@@ -1,303 +1,42 @@
-.auth {
-  width: 100%;
-  color: #f8fafc;
-}
-
-.modeTabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.modeTabsSingle {
-  grid-template-columns: 1fr;
-}
-
-.modeButton {
-  min-height: 42px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #7f8b98;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  transition:
-    color 0.2s ease,
-    background 0.2s ease;
-}
-
-.modeButton:hover {
-  color: #fff;
-}
-
-.modeButtonActive {
-  color: #041516;
-  background: #2ec4b6;
-}
-
-.loginLabel {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.loginLabel::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: #2ec4b6;
-  box-shadow: 0 0 10px rgba(46, 196, 182, 0.8);
-}
-
-/* ROLE */
-
-.roles {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-  margin-bottom: 22px;
-}
-
-.roleButton {
-  min-height: 47px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  color: #8995a1;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  transition: 0.2s ease;
-}
-
-.roleButton:hover {
-  border-color: rgba(46, 196, 182, 0.45);
-  color: #fff;
-}
-
-.roleActive {
-  border-color: rgba(46, 196, 182, 0.7);
-  background: rgba(46, 196, 182, 0.09);
-  color: #2ec4b6;
-}
-
-/* FIELDS */
-
-.signupFields,
-.credentials {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.credentials {
-  margin-top: 4px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.label {
-  color: #aeb8c2;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-}
-
-.optional {
-  color: #667482;
-  font-weight: 500;
-  letter-spacing: normal;
-}
-
-.input,
-.select {
-  width: 100%;
-  min-height: 51px;
-  box-sizing: border-box;
-  padding: 0 15px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 8px;
-  outline: none;
-  background: rgba(13, 19, 27, 0.85);
-  color: #f8fafc;
-  font: inherit;
-  font-size: 13px;
-  transition:
-    border-color 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.input::placeholder {
-  color: #65717d;
-}
-
-.input:hover,
-.select:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.input:focus,
-.select:focus {
-  border-color: #2ec4b6;
-  background: rgba(17, 25, 35, 0.96);
-  box-shadow: 0 0 0 3px rgba(46, 196, 182, 0.1);
-}
-
-.select {
-  appearance: none;
-  cursor: pointer;
-
-  background-image:
-    linear-gradient(45deg, transparent 50%, #7d8995 50%),
-    linear-gradient(135deg, #7d8995 50%, transparent 50%);
-
-  background-position:
-    calc(100% - 18px) 22px,
-    calc(100% - 13px) 22px;
-
-  background-size: 5px 5px;
-  background-repeat: no-repeat;
-}
-
-.select option {
-  background: #111821;
-  color: #fff;
-}
-
-.helper {
-  margin: 0;
-  color: #687582;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-/* PASSWORD */
-
-.passwordWrap {
-  position: relative;
-}
-
-.passwordWrap .input {
-  padding-right: 55px;
-}
-
-.showPassword {
-  position: absolute;
-  top: 50%;
-  right: 14px;
-  transform: translateY(-50%);
-  border: 0;
-  background: transparent;
-  color: #8995a1;
-  cursor: pointer;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
-.showPassword:hover {
-  color: #2ec4b6;
-}
-
-/* ERROR / NOTICE */
-
-.error,
-.notice {
-  margin-top: 15px;
-  padding: 11px 12px;
-  border-radius: 7px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.error {
-  border: 1px solid rgba(231, 29, 54, 0.25);
-  background: rgba(231, 29, 54, 0.08);
-  color: #ff8796;
-}
-
-.notice {
-  border: 1px solid rgba(46, 196, 182, 0.25);
-  background: rgba(46, 196, 182, 0.08);
-  color: #70ddd2;
-}
-
-/* CTA */
-
-.submit {
-  position: relative;
-  width: 100%;
-  min-height: 52px;
-  margin-top: 20px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 8px;
-  background: #2ec4b6;
-  color: #041516;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  transition:
-    transform 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.submit:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: #57ded1;
-  box-shadow: 0 10px 30px rgba(46, 196, 182, 0.15);
-}
-
-.submit:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.submit:disabled {
-  cursor: wait;
-  opacity: 0.6;
-}
-
-.signupFields {
-  margin-bottom: 16px;
-}
-
-@media (max-width: 480px) {
-  .input,
-  .select,
-  .submit {
-    min-height: 50px;
-  }
-
-  .roles {
-    gap: 7px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .auth *,
-  .auth *::before,
-  .auth *::after {
-    transition: none !important;
-  }
-}
+.auth { width: 100%; color: #fdfffc; }
+.fieldset { margin: 0; padding: 0; border: none; min-width: 0; }
+.roles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 26px; }
+.roleButton { text-align: left; padding: 15px; border: 1px solid #ffffff20; border-radius: 8px; background: #ffffff03; color: #a5b6c4; cursor: pointer; font-family: inherit; transition: border-color .2s, background .2s; }
+.roleButton > span { display: block; color: #88d9cc; font-size: 20px; margin-bottom: 12px; }
+.roleButton strong { display: block; font-size: 12px; font-weight: 600; }
+.roleButton small { display: block; font-size: 9px; color: #8fa5b4; margin-top: 6px; }
+.roleActive { border-color: #7ee4d475; background: #2ec4b610; color: #b9f4e7; }
+.roleButton:hover { border-color: #7ee4d4; }
+.signupFields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px 13px; margin-bottom: 18px; }
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.label { font-size: 8px; font-weight: 600; color: #c2d1db; letter-spacing: .12em; }
+.input, .select { display: block; width: 100%; height: 48px; padding: 0 13px; border: 1px solid #ffffff25; border-radius: 6px; background: #ffffff04; color: #fdfffc; font-family: inherit; font-size: 12px; outline: none; box-sizing: border-box; transition: border-color .2s, box-shadow .2s; color-scheme: dark; }
+.input::placeholder { color: #7c92a3; }
+.input:focus, .select:focus { border-color: #7ee4d4; box-shadow: 0 0 0 3px #2ec4b612; }
+.select { cursor: pointer; }
+.select option { background: #101b25; }
+.helper { font-size: 9px; color: #93a8b7; line-height: 1.6; margin: 0; }
+.credentials { display: flex; flex-direction: column; gap: 18px; }
+.passwordWrap { position: relative; }
+.passwordWrap .input { padding-right: 65px; }
+.showPassword { position: absolute; right: 13px; top: 50%; transform: translateY(-50%); padding: 7px 0; border: none; background: none; color: #9ce9d9; font-size: 8px; letter-spacing: .06em; cursor: pointer; }
+.loginContext { display: flex; gap: 8px; align-items: center; font-size: 8px; letter-spacing: .13em; color: #99b0be; margin-bottom: 20px; }
+.loginContext > span { color: #7ee4d4; font-size: 6px; }
+.privacy { color: #9eb2bf; font-size: 10px; line-height: 1.8; margin: 20px 0 0; }
+.privacy a, .switchMode a { color: #9ce9d9; text-decoration: none; }
+.error { border: 1px solid #ff83942a; background: #ff839408; border-radius: 7px; padding: 12px; color: #ff9cac; font-size: 12px; line-height: 1.7; margin-top: 20px; }
+.submit, .submitLink { display: flex; align-items: center; justify-content: center; min-height: 50px; width: 100%; background: #2ec4b6; border: none; border-radius: 6px; padding: 14px 20px; color: #06171c !important; font-family: inherit; font-weight: 700; font-size: 12px; cursor: pointer; margin-top: 24px; text-decoration: none; transition: background .2s, transform .2s; }
+.submit:hover:not(:disabled), .submitLink:hover { background: #7ee4d4; transform: translateY(-1px); }
+.submit:disabled { opacity: .5; cursor: wait; }
+.fieldset:disabled .roleButton { cursor: wait; }
+.switchMode { color: #9eb2bf; font-size: 11px; text-align: center; margin: 20px 0 0; line-height: 1.7; }
+.switchMode a { margin-left: 4px; }
+.confirmation { padding: 10px 0; }
+.confirmationIcon { display: grid; place-items: center; width: 52px; height: 52px; background: #2ec4b615; border: 1px solid #7ee4d440; border-radius: 50%; color: #7ee4d4; font-size: 22px; }
+.confirmation h3 { font-size: 27px; letter-spacing: -.04em; }
+.confirmation p { color: #a5b6c4; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.auth button:focus-visible, .auth a:focus-visible, .confirmation a:focus-visible { outline: 2px solid #7ee4d4; outline-offset: 4px; }
+@media (max-width: 400px) { .signupFields { grid-template-columns: 1fr; } .roleButton { padding: 12px; } }
+@media (prefers-reduced-motion: reduce) { .auth *, .confirmation * { transition: none !important; } }
+.forgotLink { display: flex; align-items: center; justify-content: center; width: fit-content; min-height: 40px; margin: 14px 0 0 auto; padding: 10px 15px; border: 1px solid #7ee4d435; border-radius: 7px; background: #2ec4b609; color: #9ce9d9 !important; font-size: 11px; font-weight: 500; text-decoration: none; transition: background .2s, border-color .2s; }
+.forgotLink:hover { background: #2ec4b619; border-color: #7ee4d480; }
