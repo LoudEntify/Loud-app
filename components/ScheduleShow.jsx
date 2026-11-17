@@ -53,6 +53,7 @@ export default function ScheduleShow() {
   // leaving that column empty would quietly break both of them.
   const [artistName, setArtistName] = useState('');
   const [shows, setShows] = useState(null);
+  const [schedulingAvailable, setSchedulingAvailable] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -82,7 +83,14 @@ export default function ScheduleShow() {
       .select('*')
       .eq('artist_id', userId)
       .order('slated_at', { ascending: true });
-    if (err) { setShows([]); return; }
+    if (err) {
+      setShows([]);
+      const missing = ['PGRST205', '42P01'].includes(err.code) || /could not find the table|relation .*shows.* does not exist|schema cache/i.test(err.message || '');
+      setSchedulingAvailable(!missing);
+      if (!missing) setError('Could not load your show schedule. Try again shortly.');
+      return;
+    }
+    setSchedulingAvailable(true);
     setShows(data || []);
     // Lazy reminder generation -- see lib/scheduling.js for why this
     // runs here rather than in a job.
@@ -224,8 +232,10 @@ export default function ScheduleShow() {
   // (`if (show.artist_id === auth.user.id) return null`). So the invited
   // artist looked fine and the owner had no route at all.
   //
-  // Flip to true after the 27th to restore scheduling.
-  const SHOW_SCHEDULE_FORM = false;
+  // Artist-owned scheduling is now the default product path. The form is
+  // still gated by `schedulingAvailable`, so a project that has not run
+  // docs/shows_setup.sql gets a useful setup state instead of broken inputs.
+  const SHOW_SCHEDULE_FORM = true;
 
   const upcoming = nextUpcomingShow(shows, now);
   const windowOpen = upcoming ? isWindowOpen(upcoming, now) : false;
@@ -301,8 +311,14 @@ export default function ScheduleShow() {
         {' '}Kit Check is always open and never connects to the internet stream — camera, audio and cues only.
       </div>
 
+      {!schedulingAvailable && (
+        <div role="status" style={{ padding: '12px 14px', border: '1px solid rgba(255,159,28,0.45)', background: 'rgba(255,159,28,0.08)', color: INK, fontSize: 12, lineHeight: 1.55 }}>
+          Show scheduling is being set up. Run <strong>docs/shows_setup.sql</strong> in Supabase, then refresh this page.
+        </div>
+      )}
+
       {/* ── Schedule form ───────────────────────────────────── */}
-      {SHOW_SCHEDULE_FORM && (
+      {SHOW_SCHEDULE_FORM && schedulingAvailable && (
       <div style={{ border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 12 }}>Schedule a show</div>
 
