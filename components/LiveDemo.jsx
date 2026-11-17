@@ -1596,6 +1596,24 @@ export default function LiveDemo() {
   }
 
   if (step === 'blocked') {
+    if (!showIdParam && profileRole === 'artist') {
+      return (
+        <PageShell active="live">
+          <section style={{ maxWidth: 800, padding: '60px 28px', margin: '0 auto', color: '#fdfffc' }} aria-labelledby="artist-live-title">
+            <span style={{ color: '#8de1d5', fontSize: 10, letterSpacing: '.16em' }}>ARTIST LIVE STUDIO</span>
+            <h1 id="artist-live-title" style={{ fontSize: 'clamp(34px, 5vw, 60px)', lineHeight: 1.05, letterSpacing: '-.05em', margin: '24px 0' }}>Your next live moment starts here.</h1>
+            <p style={{ color: '#a7bdca', fontSize: 14, lineHeight: 1.8, maxWidth: 500 }}>There’s no performance ready to join right now. Check your camera and sound in Kit Check, or return to your dashboard to prepare for your next show.</p>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 28 }}>
+              <Link href="/kit-check" style={{ ...primaryBtnStyle, borderRadius: 6, textDecoration: 'none', fontSize: 13, fontWeight: 700 }}>Open Kit Check →</Link>
+              <Link href="/dashboard/artist" style={{ padding: 12, color: '#8de1d5', border: '1px solid #8de1d540', borderRadius: 6, textDecoration: 'none', fontSize: 13 }}>Artist dashboard</Link>
+            </div>
+            <div style={{ borderTop: '1px solid #ffffff20', paddingTop: 24, marginTop: 45 }}>
+              <Link href="/profile" style={{ color: '#8de1d5', fontSize: 13, textDecoration: 'none' }}>← Back to my profile</Link>
+            </div>
+          </section>
+        </PageShell>
+      );
+    }
     return (
       <PageShell active="live">
         <div style={{ maxWidth: 420, margin: '60px auto', display: 'flex', flexDirection: 'column', gap: 12 }}>

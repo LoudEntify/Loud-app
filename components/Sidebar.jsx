@@ -17,7 +17,7 @@ import Logo from './Logo';
 const BASE_ITEMS = [
   { key: 'dashboard', label: 'DASHBOARD', href: '/dashboard', Icon: SquaresFour },
   { key: 'discover', label: 'DISCOVER', href: '/discover', Icon: Compass },
-  { key: 'live', label: 'LIVE', href: '/', Icon: Broadcast },
+  { key: 'live', label: 'LIVE', href: '/live', Icon: Broadcast },
   { key: 'notifications', label: 'NOTIFICATIONS', href: '/notifications', Icon: Bell },
   { key: 'wallet', label: 'WALLET', href: '/wallet', Icon: Coins },
 ];

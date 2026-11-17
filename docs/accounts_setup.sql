@@ -16,7 +16,9 @@ alter table public.profiles
   add column if not exists full_name text,
   add column if not exists username text,
   add column if not exists date_of_birth date,
-  add column if not exists country text;
+  add column if not exists country text,
+  add column if not exists bio text,
+  add column if not exists avatar_url text;
 
 create unique index if not exists profiles_username_key
   on public.profiles (username) where username is not null;

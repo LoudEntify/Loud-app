@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import KitCheck from '../../components/KitCheck';
+import PageShell from '../../components/PageShell';
 import RequireAuth from '../../components/RequireAuth';
 
 export const metadata = {
@@ -7,17 +8,17 @@ export const metadata = {
   description: 'Set up your camera, audio and cues locally — connected to nothing',
 };
 
-// Deliberately NOT wrapped in PageShell's live overlay chrome: Kit Check
-// is a studio surface, not a broadcast one, and the distinction should be
-// visible the moment the page loads.
+// Kit Check is an artist studio surface, so it keeps the regular artist
+// navigation. It deliberately does not enable PageShell's live overlay:
+// testing equipment is preparation, not an active broadcast.
 export default function KitCheckPage() {
   return (
-    <main>
+    <PageShell active="live">
       <Suspense fallback={null}>
-        <RequireAuth>
+        <RequireAuth signInPath="/auth/artist">
           <KitCheck />
         </RequireAuth>
       </Suspense>
-    </main>
+    </PageShell>
   );
 }

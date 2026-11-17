@@ -23,6 +23,12 @@ const INK = '#011627';
 const PORCELAIN = '#fdfffc';
 const TEAL = '#2ec4b6';
 
+function isMissingShowsTable(error) {
+  if (!error) return false;
+  if (error.code === 'PGRST205' || error.code === '42P01') return true;
+  return /relation .*shows.* does not exist|could not find the table .*shows|schema cache/i.test(error.message || '');
+}
+
 // KIT CHECK -- the artist's whole rig, running locally.
 //
 // THIS IS THE CAMERA-OWNERSHIP INVERSION, done where it matters. The
@@ -67,6 +73,8 @@ export default function KitCheck() {
   const [artistEmail, setArtistEmail] = useState('');
   const [upcoming, setUpcoming] = useState(null);
   const [showLoadError, setShowLoadError] = useState('');
+  const [scheduleAvailable, setScheduleAvailable] = useState(true);
+  const scheduleAvailableRef = useRef(true);
   const [handoverError, setHandoverError] = useState('');
   const [now, setNow] = useState(() => Date.now());
   // `countdown` is derived from the clock further down, not stored --
@@ -351,6 +359,7 @@ export default function KitCheck() {
   // because "which show is next" must consider both kinds — a guest
   // spot tonight beats a show they own next week.
   const loadUpcoming = useCallback(async (userId, accessToken) => {
+    if (!scheduleAvailableRef.current) return;
     try {
       const { data, error } = await getSupabase().from('shows').select('*').eq('artist_id', userId);
       if (error) throw error;
@@ -387,7 +396,15 @@ export default function KitCheck() {
 
       setUpcoming(nextUpcomingShow([...(data || []), ...invited]));
       setShowLoadError('');
+      setScheduleAvailable(true);
     } catch (err) {
+      if (isMissingShowsTable(err)) {
+        scheduleAvailableRef.current = false;
+        setScheduleAvailable(false);
+        setUpcoming(null);
+        setShowLoadError('');
+        return;
+      }
       // Never silent again. If Kit Check cannot work out when the artist
       // is on, the artist has to be told — they are sitting here waiting
       // for it to take them to their own show.
@@ -595,6 +612,12 @@ export default function KitCheck() {
 
         {showLoadError && (
           <div style={{ marginTop: 12, fontSize: 11.5, color: '#e71d36', lineHeight: 1.5 }}>{showLoadError}</div>
+        )}
+
+        {!scheduleAvailable && (
+          <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)', lineHeight: 1.5 }}>
+            Scheduled shows are not set up yet. You can still check your camera and audio here.
+          </div>
         )}
 
         {upcoming && (

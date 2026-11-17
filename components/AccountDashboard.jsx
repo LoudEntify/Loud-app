@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getSession, getProfile } from '../lib/supabaseAuth';
+import { getSession, ensureProfile } from '../lib/supabaseAuth';
+import ArtistWorkspace from './ArtistWorkspace';
 import RequireAuth from './RequireAuth';
 import PageShell from './PageShell';
 import styles from '../styles/AccountDashboard.module.css';
@@ -21,7 +22,7 @@ function DashboardContent({ accountRole }) {
       try {
         const session = await getSession();
         if (!session?.user) return;
-        const result = await getProfile(session.user.id);
+        const result = await ensureProfile(session.user);
         if (cancelled) return;
         if (result.error || !['artist', 'viewer'].includes(result.profile?.role)) {
           setError('We couldn’t load your account profile. Please try again or contact build@loudentify.app.');
@@ -45,7 +46,7 @@ function DashboardContent({ accountRole }) {
 
   const artist = accountRole === 'artist';
   const actions = artist ? [
-    { title: 'Your artist console', description: 'Manage your stage, performances and artist profile.', href: `/artist/${profile.id}`, label: 'Open console', number: '01' },
+    { title: 'Your artist profile', description: 'Update your display name, genres and artist bio.', href: '/settings', label: 'Edit your profile', number: '01' },
     { title: 'Your recorded shows', description: 'Find your recordings and revisit past performances.', href: '/shows', label: 'View recordings', number: '02' },
     { title: 'Get stage ready', description: 'Check your camera and microphone before your next performance.', href: '/kit-check', label: 'Run kit check', number: '03' },
   ] : [
@@ -60,8 +61,9 @@ function DashboardContent({ accountRole }) {
         <span className={styles.eyebrow}>{artist ? 'ARTIST' : 'FAN'} DASHBOARD</span>
         <h1>Welcome back, <span>{profile.display_name || profile.username || (artist ? 'artist' : 'music lover')}.</span></h1>
         <p>{artist ? 'Your music. Your stage. Everything you need for your next performance.' : 'Your front row starts here. Find the music and artists you love.'}</p>
-        <Link href={artist ? `/artist/${profile.id}` : '/discover'} className={styles.primary}>{artist ? 'Open your artist console' : 'Explore performances'} <span aria-hidden="true">↗</span></Link>
+        <Link href={artist ? (profile.bio?.trim() && profile.genres?.length ? '/kit-check' : '/settings') : '/discover'} className={styles.primary}>{artist ? (profile.bio?.trim() && profile.genres?.length ? 'Check your camera and sound' : 'Finish your artist profile') : 'Explore performances'} <span aria-hidden="true">↗</span></Link>
       </header>
+      {artist && <ArtistWorkspace profile={profile} />}
       <section className={styles.cards} aria-label={artist ? 'Artist tools' : 'Your fan space'}>
         {actions.map(action => <Link key={action.href} href={action.href} className={styles.card}><span className={styles.number}>{action.number}</span><h2>{action.title}</h2><p>{action.description}</p><strong>{action.label} <span aria-hidden="true">→</span></strong></Link>)}
       </section>

@@ -37,7 +37,7 @@ export default function PageShell({ active = 'live', hideSidebar = false, autoHi
             someone's live performance is indefensible, and gating it here
             (rather than inside the component) means no live surface can
             accidentally opt back in. */}
-        {!liveOverlay && <OnboardingNudge />}
+        {!liveOverlay && active !== 'dashboard' && <OnboardingNudge />}
         {children}
       </main>
     </div>

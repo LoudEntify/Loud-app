@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "check:waitlist": "node scripts/check-waitlist.mjs",
+    "smoke:accounts": "node scripts/account-access-smoke.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

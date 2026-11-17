@@ -72,6 +72,14 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  'auth/username/route.js': {
+    status: 'settled',
+    reason:
+      'Public, rate-limited signup handle availability check. Signup precedes authentication, ' +
+      'and owner-only profiles cannot be queried by anonymous clients. The service-role HEAD ' +
+      'query returns only an availability boolean for a validated handle, never account ids, ' +
+      'emails or profile details. The database unique index remains the final collision guard.',
+  },
   'waitlist/route.js': {
     status: 'settled',
     reason:
