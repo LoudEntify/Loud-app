@@ -1,517 +1,149 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signUp, signIn, getSession, getProfile, validateUsername, isUsernameAvailable, normaliseUsername } from '../lib/supabaseAuth';
+import { signUp, signIn, getSession, getProfile, validateUsername, isUsernameAvailable, normaliseUsername, checkSignupSetup } from '../lib/supabaseAuth';
 import { countryOptions } from '../lib/countries';
-import GenreSelect from './GenreSelect';
 import { setAccountType } from '../lib/mockAccount';
 import styles from '../styles/Auth.module.css';
-import '../styles/reactions.css';
-import Logo from './Logo';
 
-const INK = '#011627';
-const PORCELAIN = '#fdfffc';
-const TEAL = '#2ec4b6';
-
-// Age is derived from DOB at validation time and never persisted --
-// storing an integer age means storing a number that is wrong tomorrow.
-function ageFrom(dob) {
-  const d = new Date(dob);
-  if (Number.isNaN(d.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - d.getFullYear();
-  const m = now.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
-  return age;
-}
-
-// Platform minimum age. Single source for the client-side check and
-// the copy beneath the date field; the server enforces it independently
-// (see the DB constraint in docs/age_policy_migration.sql).
 export const MIN_AGE = 18;
 
-/**
- * A human-readable message out of ANY error shape.
- *
- * Found while building the authenticated smoke check: a 500 from
- * Supabase signup ("Error sending confirmation email", i.e. the project's
- * SMTP is not configured) rendered on screen as the literal string
- * `{}`. Someone creating an account sees two braces and no idea what to
- * do. Error objects arrive here from three different libraries with
- * three different shapes, so this stops guessing that any one of them
- * has `.message`.
- */
-function errorMessage(err, fallback) {
-  if (!err) return fallback;
-  if (typeof err === 'string') return err.trim() || fallback;
-  const msg = err.message || err.error_description || err.error || err.msg;
-  if (typeof msg === 'string' && msg.trim() && msg.trim() !== '{}') return msg.trim();
-  return fallback;
+function message(error, fallback) {
+  return typeof error?.message === 'string' && error.message.trim() ? error.message : fallback;
 }
 
-const labelStyle = { fontSize: 10, letterSpacing: '0.08em', color: 'rgba(1,22,39,0.45)', fontWeight: 700, marginBottom: 4 };
+function safeNext(value) {
+  return value.startsWith('/') && !value.startsWith('//') && !/[\\\r\n]/.test(value) ? value : '';
+}
 
-const inputStyle = { border: '1px solid rgba(1,22,39,0.15)', background: 'transparent', padding: '13px 14px', fontSize: 13, color: INK, outline: 'none', clipPath: 'polygon(8px 0,100% 0,100% 100%,0 100%,0 8px)', fontFamily: 'inherit' };
-
-// Real Supabase Auth (email+password), Accounts & Identity Day 1 --
-// replaces the old mock continueAction that never read the email/
-// password fields at all. `role` here is the UI's existing 'fan'/
-// 'artist' toggle (unchanged copy/branding); it's mapped to the
-// profiles table's stored 'viewer'/'artist' values at the signUp() call
-// site below, since those are two independent vocabularies (product
-// copy vs. the DB CHECK constraint) that happen to mean the same thing.
-//
-// setAccountType() (lib/mockAccount.js) is still called on success as a
-// bridging step -- Sidebar.jsx's PROFILE link destination and
-// AccountSettings.jsx still read that localStorage flag, and replacing
-// those is out of scope for this round. Real auth is now the source of
-// truth for identity; the mock flag just keeps existing nav behavior
-// working until that's migrated too.
-//
-// No genre field here (Day 2 product decision) -- genres are now a fixed-
-// list multi-select (lib/genres.js, components/GenreSelect.jsx), and this
-// compact signup form never had room for that picker. Every account
-// starts with genres: [] and picks them later via Settings.
-export default function Auth({ accountRole = null }) {
+export default function Auth({ accountRole = null, initialMode = 'login' }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Where to land after a successful auth. Defaults per role, but a
-  // ?next= (set by RequireAuth) wins so a shared show link survives the
-  // detour through this page.
-  const nextParam = searchParams?.get('next') || '';
-  // ── PILOT 2: NO SELF-SIGNUP ───────────────────────────────────
-  // Artist accounts are created by hand in the Supabase dashboard for
-  // both pilots, and the audience never reaches this screen at all --
-  // they come through the viewer door with a name and an email, and
-  // never hold an account.
-  //
-  // HIDDEN, NOT DELETED, and behind a single flag. Everything the signup
-  // path does -- role selection, username validation, the profile row
-  // built from user_metadata by ensureProfile -- is left intact and
-  // untouched, so restoring it after the 27th is flipping this constant
-  // back rather than rebuilding a flow and re-testing it.
-  const SELF_SIGNUP_ENABLED = false;
-  const [mode, setMode] = useState('login');
+  const next = safeNext(searchParams?.get('next') || '');
+  const signup = initialMode === 'signup';
   const [role, setRole] = useState(accountRole || 'fan');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [country, setCountry] = useState('');
-  const [genres, setGenres] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [confirmation, setConfirmation] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  // Gated as well as hidden. The tab is the only way to reach signup
-  // today, but a flag that only hides a button leaves the form one stray
-  // setMode away from rendering.
-  const isSignup = SELF_SIGNUP_ENABLED && mode === 'signup';
 
-  function destinationFor(dbRole) {
-    if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.includes('\\')) return nextParam;
-    return dbRole === 'artist' ? '/dashboard/artist' : '/dashboard/fan';
-  }
+  const target = dbRole => next || `/dashboard/${dbRole === 'artist' ? 'artist' : 'fan'}`;
+  const withNext = path => next ? `${path}?next=${encodeURIComponent(next)}` : path;
 
-  // A brand-new account goes to the walkthrough; everyone else goes where
-  // they were headed.
-  //
-  // Only on SIGN-UP, deliberately. Routing every login through onboarding
-  // until it is "complete" would turn a skippable helper into a gate that
-  // reappears every session — and someone who skipped the photo step has
-  // already told us their answer. Returning accounts get the dismissible
-  // bar (components/OnboardingNudge.jsx) instead, which they can act on
-  // or ignore.
-  //
-  // A ?next= still wins: someone who followed a show link and signed up to
-  // watch it should land on the show, not on a setup screen. The nudge
-  // catches them afterwards.
-  function signupDestinationFor(dbRole) {
-    if (nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') && !nextParam.includes('\\')) return nextParam;
-    return '/welcome';
-  }
-
-  // Already signed in? Don't show a login form. Runs once on mount; the
-  // redirect is `replace` so Back doesn't bounce them straight here again.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const session = await getSession();
-      if (cancelled || !session?.user) return;
-      const { profile, error: profileError } = await getProfile(session.user.id);
-      if (cancelled) return;
-      if (profileError || !['artist', 'viewer'].includes(profile?.role)) {
-        setError('We couldn’t load your account profile. Please try again or contact build@loudentify.app.');
-        return;
+      try {
+        const session = await getSession();
+        if (cancelled || !session?.user) return;
+        const result = await getProfile(session.user.id);
+        if (cancelled) return;
+        if (result.error || !['artist', 'viewer'].includes(result.profile?.role)) {
+          setError('We couldn’t load your account profile. Please contact build@loudentify.app.');
+          return;
+        }
+        router.replace(target(result.profile.role));
+      } catch {
+        if (!cancelled) setError('We couldn’t connect to your account. Please try again.');
+      } finally {
+        if (!cancelled) setChecking(false);
       }
-      router.replace(destinationFor(profile?.role));
     })();
     return () => { cancelled = true; };
+    // Each route mounts its own form. Preserve the requested destination on arrival.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function continueAction() {
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting || checking) return;
     setError('');
-    setNotice('');
-    if (!email.trim() || !password) {
-      setError('Email and password are required.');
-      return;
+    if (signup) {
+      if (!fullName.trim()) return setError('Please enter your full name.');
+      const usernameError = validateUsername(username);
+      if (usernameError) return setError(usernameError);
+      const dob = new Date(`${dateOfBirth}T00:00:00`);
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      if (today.getMonth() < dob.getMonth() || (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) age--;
+      if (Number.isNaN(dob.getTime()) || age < MIN_AGE || age > 120) return setError('Please enter a valid date of birth. You must be 18 or over.');
+      if (!countryOptions().some(option => option.code === country)) return setError('Please select your country.');
     }
-
-    if (isSignup) {
-      if (!fullName.trim()) {
-        setError('Full name is required.');
-        return;
-      }
-      const usernameProblem = validateUsername(username);
-      if (usernameProblem) {
-        setError(`${role === 'artist' ? 'Stage name' : 'Username'}: ${usernameProblem}`);
-        return;
-      }
-      if (!dateOfBirth) {
-        setError('Date of birth is required.');
-        return;
-      }
-      // Age is DERIVED here and never stored -- see DECISIONS.md.
-      //
-      // 18+, not 13+. This is standing launch policy, not a preference:
-      // paid voting mechanics, UK Online Safety Act exposure and
-      // safeguarding all land on the same floor. Self-declaration is
-      // sufficient at this stage; formal age assurance is a later phase.
-      const age = ageFrom(dateOfBirth);
-      if (age === null || age < MIN_AGE) {
-        setError(`You must be at least ${MIN_AGE} to create an account.`);
-        return;
-      }
-      if (age > 120) {
-        setError('Check the date of birth.');
-        return;
-      }
-      if (!country) {
-        setError('Select a country.');
-        return;
-      }
-      const free = await isUsernameAvailable(username);
-      if (!free) {
-        setError(`That ${role === 'artist' ? 'stage name' : 'username'} is taken.`);
-        return;
-      }
-    }
-
     setSubmitting(true);
     try {
-      if (isSignup) {
+      if (signup) {
+        const setup = await checkSignupSetup();
+        if (setup.error) return setError(setup.error.message);
+        if (!await isUsernameAvailable(username)) {
+          setError(`That ${role === 'artist' ? 'stage name' : 'username'} is unavailable. Please choose another.`);
+          return;
+        }
         const dbRole = role === 'artist' ? 'artist' : 'viewer';
         const result = await signUp({
-          email: email.trim(),
-          password,
-          role: dbRole,
-          // display_name is what renders on the stage; default it to the
-          // handle rather than the raw email, which nobody wants shown.
-          displayName: displayName.trim() || normaliseUsername(username),
-          fullName: fullName.trim(),
-          username,
-          dateOfBirth,
-          country,
-          genres,
+          email: email.trim(), password, role: dbRole,
+          displayName: normaliseUsername(username), fullName: fullName.trim(),
+          username, dateOfBirth, country, genres: [],
+          emailRedirectTo: new URL(withNext(`/auth/${role}`), window.location.origin).toString(),
         });
-        if (result.error) {
-          setError(errorMessage(result.error, 'Sign up failed. If this keeps happening, the email service may be down — try again shortly.'));
-          return;
-        }
+        if (result.error) return setError(message(result.error, 'Could not create your account. Please try again.'));
         if (result.needsEmailConfirmation) {
-          setNotice('Check your email to confirm your account, then log in.');
-          setMode('login');
+          setPassword('');
+          setConfirmation(true);
           return;
         }
-        setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
-        router.push(signupDestinationFor(dbRole));
+        if (!['artist', 'viewer'].includes(result.profile?.role)) return setError('Your account was created, but your profile is not ready. Please sign in again or contact build@loudentify.app.');
+        setAccountType(result.profile.role === 'artist' ? 'artist' : 'fan');
+        router.push(target(result.profile.role));
       } else {
         const result = await signIn({ email: email.trim(), password });
-        if (result.error) {
-          setError(errorMessage(result.error, 'Log in failed. Check the email and password.'));
-          return;
-        }
-        const dbRole = result.profile?.role;
-        if (!['artist', 'viewer'].includes(dbRole)) {
-          setError('Your account profile is not ready. Please contact build@loudentify.app.');
-          return;
-        }
-        setAccountType(dbRole === 'artist' ? 'artist' : 'fan');
-        router.push(destinationFor(dbRole));
+        if (result.error) return setError(message(result.error, 'Sign in failed. Please check your email and password.'));
+        if (!['artist', 'viewer'].includes(result.profile?.role)) return setError('Your account profile is not ready. Please contact build@loudentify.app.');
+        setAccountType(result.profile.role === 'artist' ? 'artist' : 'fan');
+        router.push(target(result.profile.role));
       }
+    } catch {
+      setError('We couldn’t connect. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
- return (
-  <div className={styles.auth}>
-    {SELF_SIGNUP_ENABLED ? (
-      <div className={styles.modeTabs}>
-        <button
-          type="button"
-          onClick={() => setMode('login')}
-          className={`${styles.modeButton} ${
-            mode === 'login' ? styles.modeButtonActive : ''
-          }`}
-        >
-          LOG IN
-        </button>
+  if (confirmation) return <div className={styles.confirmation}><span className={styles.confirmationIcon} aria-hidden="true">✓</span><h3>Check your inbox.</h3><p role="status">We’ve requested a confirmation email for <strong>{email}</strong>. Follow the link if it arrives, then sign in. If you already have an account, you can sign in now.</p><Link className={styles.submitLink} href={withNext(`/auth/${role}`)}>Continue to sign in →</Link></div>;
 
-        <button
-          type="button"
-          onClick={() => setMode('signup')}
-          className={`${styles.modeButton} ${
-            mode === 'signup' ? styles.modeButtonActive : ''
-          }`}
-        >
-          CREATE ACCOUNT
-        </button>
-      </div>
-    ) : (
-      <div
-        className={`${styles.modeTabs} ${styles.modeTabsSingle}`}
-      >
-        <div
-          className={`${styles.modeButton} ${styles.modeButtonActive} ${styles.loginLabel}`}
-        >
-          {accountRole === 'artist' ? 'ARTIST SIGN IN' : accountRole === 'fan' ? 'FAN SIGN IN' : 'ACCOUNT SIGN IN'}
+  return (
+    <form className={styles.auth} onSubmit={submit}>
+      <fieldset disabled={submitting || checking} className={styles.fieldset}>
+        {signup ? <>
+          <div className={styles.roles} aria-label="Choose account type">
+            <button type="button" onClick={() => setRole('fan')} aria-pressed={role === 'fan'} className={`${styles.roleButton} ${role === 'fan' ? styles.roleActive : ''}`}><span aria-hidden="true">♡</span><strong>I’m a fan</strong><small>Find your front row</small></button>
+            <button type="button" onClick={() => setRole('artist')} aria-pressed={role === 'artist'} className={`${styles.roleButton} ${role === 'artist' ? styles.roleActive : ''}`}><span aria-hidden="true">♫</span><strong>I’m an artist</strong><small>Make the stage yours</small></button>
+          </div>
+          <div className={styles.signupFields}>
+            <div className={styles.field}><label className={styles.label} htmlFor="auth-full-name">FULL NAME</label><input id="auth-full-name" className={styles.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Your full name" autoComplete="name" maxLength={120} required /></div>
+            <div className={styles.field}><label className={styles.label} htmlFor="auth-username">{role === 'artist' ? 'STAGE NAME / HANDLE' : 'USERNAME'}</label><input id="auth-username" className={styles.input} value={username} onChange={e => setUsername(e.target.value)} placeholder="your_name" autoComplete="username" autoCapitalize="none" autoCorrect="off" minLength={3} maxLength={20} pattern="[a-z0-9_]{3,20}" aria-describedby="username-help" required /><p id="username-help" className={styles.helper}>3–20 lowercase letters, numbers or underscores.</p></div>
+            <div className={styles.field}><label className={styles.label} htmlFor="auth-dob">DATE OF BIRTH</label><input id="auth-dob" className={styles.input} type="date" value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} autoComplete="bday" aria-describedby="age-help" required /><p id="age-help" className={styles.helper}>You must be 18 or over.</p></div>
+            <div className={styles.field}><label className={styles.label} htmlFor="auth-country">COUNTRY</label><select id="auth-country" className={styles.select} value={country} onChange={e => setCountry(e.target.value)} autoComplete="country" required><option value="">Select country</option>{countryOptions().map(option => <option key={option.code} value={option.code}>{option.name}</option>)}</select></div>
+          </div>
+        </> : <div className={styles.loginContext}><span aria-hidden="true">●</span>{accountRole === 'artist' ? 'ARTIST' : accountRole === 'fan' ? 'FAN' : 'ACCOUNT'} SIGN IN</div>}
+        <div className={styles.credentials}>
+          <div className={styles.field}><label className={styles.label} htmlFor="auth-email">EMAIL ADDRESS</label><input id="auth-email" className={styles.input} type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" maxLength={254} required /></div>
+          <div className={styles.field}><label className={styles.label} htmlFor="auth-password">PASSWORD</label><div className={styles.passwordWrap}><input id="auth-password" className={styles.input} type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={signup ? 'Create a strong password' : 'Your password'} autoComplete={signup ? 'new-password' : 'current-password'} minLength={signup ? 8 : undefined} aria-describedby={signup ? 'password-help' : undefined} required /><button type="button" className={styles.showPassword} onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>{showPassword ? 'HIDE' : 'SHOW'}</button></div>{signup && <p id="password-help" className={styles.helper}>At least 8 characters. Choose a password unique to this account.</p>}</div>
         </div>
-      </div>
-    )}
-
-    {isSignup && (
-      <>
-        <div className={styles.roles}>
-          <button
-            type="button"
-            onClick={() => setRole('fan')}
-            className={`${styles.roleButton} ${
-              role === 'fan' ? styles.roleActive : ''
-            }`}
-          >
-            I'M A FAN
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRole('artist')}
-            className={`${styles.roleButton} ${
-              role === 'artist' ? styles.roleActive : ''
-            }`}
-          >
-            I'M AN ARTIST
-          </button>
-        </div>
-
-        <div className={styles.signupFields}>
-          <div className={styles.field}>
-            <label className={styles.label}>
-              FULL NAME
-            </label>
-
-            <input
-              className={styles.input}
-              placeholder="Your full name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              autoComplete="name"
-            />
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>
-              {role === 'artist'
-                ? 'STAGE NAME'
-                : 'USERNAME'}
-            </label>
-
-            <input
-              className={styles.input}
-              placeholder={
-                role === 'artist'
-                  ? 'How you appear on stage'
-                  : 'Pick a handle'
-              }
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoCapitalize="none"
-              autoCorrect="off"
-              autoComplete="username"
-            />
-
-            <p className={styles.helper}>
-              {username
-                ? `loudentify.com/@${normaliseUsername(
-                    username
-                  )}`
-                : 'Lowercase letters, numbers and underscores.'}
-            </p>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>
-              DATE OF BIRTH
-            </label>
-
-            <input
-              className={styles.input}
-              type="date"
-              value={dateOfBirth}
-              onChange={(e) =>
-                setDateOfBirth(e.target.value)
-              }
-            />
-
-            <p className={styles.helper}>
-              Loudentify is {MIN_AGE}+.
-            </p>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>
-              COUNTRY
-            </label>
-
-            <select
-              className={styles.select}
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-            >
-              <option value="">
-                Select your country
-              </option>
-
-              {countryOptions().map((c) => (
-                <option
-                  key={c.code}
-                  value={c.code}
-                >
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label}>
-              GENRES{' '}
-              <span className={styles.optional}>
-                (optional)
-              </span>
-            </label>
-
-            <GenreSelect
-              value={genres}
-              onChange={setGenres}
-            />
-          </div>
-        </div>
-      </>
-    )}
-
-    <div className={styles.credentials}>
-      <div className={styles.field}>
-        <label
-          className={styles.label}
-          htmlFor="loudentify-email"
-        >
-          EMAIL ADDRESS
-        </label>
-
-        <input
-          id="loudentify-email"
-          className={styles.input}
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          autoComplete="email"
-        />
-      </div>
-
-      <div className={styles.field}>
-        <label
-          className={styles.label}
-          htmlFor="loudentify-password"
-        >
-          PASSWORD
-        </label>
-
-        <div className={styles.passwordWrap}>
-          <input
-            id="loudentify-password"
-            className={styles.input}
-            type={showPassword ? 'text' : 'password'}
-            placeholder="Enter your password"
-            value={password}
-            onChange={(e) =>
-              setPassword(e.target.value)
-            }
-            autoComplete={
-              isSignup
-                ? 'new-password'
-                : 'current-password'
-            }
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !submitting) {
-                continueAction();
-              }
-            }}
-          />
-
-          <button
-            type="button"
-            className={styles.showPassword}
-            onClick={() =>
-              setShowPassword((current) => !current)
-            }
-            aria-label={
-              showPassword
-                ? 'Hide password'
-                : 'Show password'
-            }
-          >
-            {showPassword ? 'HIDE' : 'SHOW'}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    {error && (
-      <div
-        className={styles.error}
-        role="alert"
-      >
-        {error}
-      </div>
-    )}
-
-    {notice && (
-      <div
-        className={styles.notice}
-        role="status"
-      >
-        {notice}
-      </div>
-    )}
-
-    <button
-      type="button"
-      onClick={continueAction}
-      disabled={submitting}
-      className={styles.submit}
-    >
-      {submitting
-        ? 'SIGNING YOU IN...'
-        : isSignup
-          ? 'CREATE ACCOUNT'
-          : 'ENTER LOUDENTIFY →'}
-    </button>
-  </div>
-);
+        {!signup && <Link href="/forgot-password" className={styles.forgotLink}>Forgot password?</Link>}
+        {signup && <p className={styles.privacy}>Read how we handle your details in our <Link href="/privacy">Privacy Notice</Link>. Creating an account does not subscribe you to the waitlist.</p>}
+        {error && <div className={styles.error} role="alert">{error}</div>}
+        <button type="submit" className={styles.submit} disabled={submitting || checking}>{checking ? 'CHECKING YOUR SESSION…' : submitting ? signup ? 'CREATING YOUR ACCOUNT…' : 'SIGNING YOU IN…' : signup ? 'Create your account →' : 'Step inside →'}</button>
+      </fieldset>
+      <p className={styles.switchMode}>{signup ? 'Already part of the show?' : 'New to Loudentify?'} <Link href={withNext(signup ? accountRole ? `/auth/${accountRole}` : '/auth' : accountRole ? `/signup/${accountRole}` : '/signup')}>{signup ? 'Sign in' : 'Create an account'} ↗</Link></p>
+    </form>
+  );
 }

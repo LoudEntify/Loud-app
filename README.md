@@ -147,3 +147,26 @@ and confirm the migration and environment variables are present.
 Connect this repo to Vercel (Next.js works there with zero config). Add
 the three LiveKit environment variables in the Vercel project settings —
 not just locally — since the token route needs them in production too.
+
+### Artist and fan account registration
+
+Sign in at `/auth` (or `/auth/artist` and `/auth/fan`). Create an account
+at `/signup`, with dedicated `/signup/artist` and `/signup/fan` entry points.
+Both use Supabase email/password Auth; waitlist entries remain separate.
+
+Run `docs/accounts_setup.sql` in the same Supabase project's SQL Editor
+before enabling registration. It creates the profile columns and owner-only
+row policies required by signup and the dashboards, without changing waitlist
+entries. It does not provision the other artist console feature tables.
+
+In Supabase Authentication URL Configuration, set your Site URL to your
+production origin and allow your deployed `/auth/**` callback URLs (and
+`http://localhost:3000/auth/**` for local development). When email confirmation
+is enabled, the confirmation link returns to sign-in; the profile is initialized
+on the first successful sign-in. Review your email delivery settings before launch.
+
+Password recovery: sign-in pages link to `/forgot-password`. Supabase emails
+return to `/reset-password`, where the authenticated recovery session can set
+a new password. Add the production `/reset-password` URL and
+`http://localhost:3000/reset-password` to Supabase Authentication → URL
+Configuration → Redirect URLs. Recovery mail uses the project's email settings.

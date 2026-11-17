@@ -74,6 +74,8 @@ export default function PerformanceHero({
   const [selectedGenre, setSelectedGenre] = useState("For You");
   const [activeIndex, setActiveIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [motionPaused, setMotionPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   const rankedPerformances = useMemo(() => {
     if (selectedGenre !== "For You") {
@@ -107,14 +109,22 @@ export default function PerformanceHero({
   }, [selectedGenre, preferredGenres]);
 
   useEffect(() => {
-    if (paused || count <= 1) return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (paused || motionPaused || reducedMotion || count <= 1) return;
 
     const interval = setInterval(() => {
       setActiveIndex((current) => (current + 1) % count);
     }, 6500);
 
     return () => clearInterval(interval);
-  }, [paused, count]);
+  }, [paused, motionPaused, reducedMotion, count]);
 
   const next = () => {
     setActiveIndex((current) => (current + 1) % count);
@@ -134,7 +144,7 @@ export default function PerformanceHero({
 
   return (
     <section
-      className={styles.hero}
+      className={`${styles.hero} ${motionPaused ? styles.motionPaused : ''}`}
       aria-label="Featured performance previews"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
@@ -163,7 +173,7 @@ export default function PerformanceHero({
       <div className={styles.content}>
         <div className={styles.topLabel}>
           <span className={styles.dot} />
-          CURATED FOR YOUR MUSIC TASTE
+          LIVE MUSIC, REIMAGINED · JANUARY 2027
         </div>
 
         <div className={styles.genreTabs}>
@@ -184,7 +194,7 @@ export default function PerformanceHero({
           ))}
         </div>
 
-        <div className={styles.heroCopy} key={active.id}>
+        <div className={styles.heroCopy}>
           <div className={styles.meta}>
             <span className={styles.previewBadge}>
               {active.label}
@@ -193,15 +203,8 @@ export default function PerformanceHero({
             <span>{active.date}</span>
           </div>
 
-          <h1>{active.title}</h1>
-
-          <p className={styles.artist}>
-            {active.artist}
-          </p>
-
-          <p className={styles.description}>
-            {active.description}
-          </p>
+          <h1>The stage<br />is <em>everywhere.</em></h1>
+          <p className={styles.description}>Real artists. Every angle. Feel the room, find your people, and get closer to the music.</p>
 
           <div className={styles.actions}>
             <Link
@@ -209,17 +212,22 @@ export default function PerformanceHero({
               className={styles.primaryButton}
             >
               <span aria-hidden="true">▶</span>
-              Get Early Access
+              Join the waitlist
             </Link>
 
             <a
               href="#experience"
               className={styles.secondaryButton}
             >
-              Discover Loudentify
+              Explore the experience ↗
             </a>
           </div>
         </div>
+      </div>
+
+      <div className={styles.sceneCaption}>
+        <span className={styles.sceneNumber}>0{activeIndex + 1} / 0{count}</span>
+        <div><span className={styles.sceneLabel}>A TASTE OF WHAT’S COMING</span><h2>{active.title}</h2><p>{active.description}</p></div>
       </div>
 
       <div className={styles.controls}>
@@ -241,6 +249,7 @@ export default function PerformanceHero({
         </div>
 
         <div className={styles.arrows}>
+          <button type="button" className={styles.pauseButton} onClick={() => setMotionPaused(value => !value)} aria-pressed={motionPaused} aria-label={motionPaused ? 'Play showcase animation' : 'Pause showcase animation'}>{motionPaused ? '▶' : 'Ⅱ'}</button>
           <button
             type="button"
             onClick={previous}

@@ -63,9 +63,12 @@ export default function Footer() {
                 Early Access
               </Link>
 
-              <Link href="/auth">
+              <Link href="/auth/artist">
                 Artist Sign In
               </Link>
+
+              <Link href="/auth/fan">Fan Sign In</Link>
+              <Link href="/signup">Create an account</Link>
 
               <Link href="/privacy">
                 Privacy
