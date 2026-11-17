@@ -7,29 +7,7 @@
 .manifesto { padding: 30px 6%; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-block: 1px solid #ffffff13; color: #adc1c9; font-size: 9px; letter-spacing: .16em; }
 .manifesto i { color: #7ee4d4; font-style: normal; font-size: 15px; }
 .discover { padding: 95px 0 30px; background: radial-gradient(ellipse at 90% 30%, #123b3720, transparent 60%); }
-.contentSection { margin-bottom: 65px; }
-.sectionTop { display: flex; justify-content: space-between; align-items: end; gap: 25px; padding: 0 6%; margin-bottom: 28px; }
 .overline { color: #7ee4d4; font-size: 9px; letter-spacing: .17em; font-weight: 700; }
-.sectionTop h2 { font-size: clamp(30px, 3.3vw, 48px); letter-spacing: -.05em; margin: 15px 0 10px; }
-.sectionTop p { font-size: 13px; color: #9eafbd; margin: 0; }
-.viewAll { color: #7ee4d4 !important; font-size: 11px; white-space: nowrap; padding-bottom: 4px; }
-.horizontalScroll { display: flex; gap: 16px; overflow-x: auto; padding: 5px 6% 20px; scrollbar-width: thin; scrollbar-color: #34535a transparent; }
-.contentCard { flex: 0 0 clamp(240px, 26vw, 380px); min-width: 0; }
-.poster { height: 285px; overflow: hidden; position: relative; border-radius: 8px; background: #162831; border: 1px solid #ffffff12; }
-.artwork { position: absolute; inset: 0; display: flex; align-items: end; padding: 25px; overflow: hidden; background: #132b32; }
-.artPhoto { position: absolute; inset: 0; background: linear-gradient(0deg, #030b13f0, #030b1320 80%), var(--image) center / cover; transition: transform .7s ease; opacity: .85; }
-.contentCard:hover .artPhoto { transform: scale(1.06); }
-.purple { --image: url('https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=800&q=80'); }
-.orange { --image: url('https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80'); }
-.blue { --image: url('https://images.unsplash.com/photo-1511196044526-5cb3bcb7071b?auto=format&fit=crop&w=800&q=80'); }
-.red { --image: url('https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=800&q=80'); }
-.green { --image: url('https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80'); }
-.artTitle { position: relative; z-index: 1; font-size: clamp(28px, 3vw, 42px); font-weight: 700; letter-spacing: -.05em; max-width: 80%; text-shadow: 0 3px 20px #0008; }
-.posterTag { position: absolute; left: 18px; top: 18px; background: #08141bb0; backdrop-filter: blur(8px); color: #c9dcd9; border: 1px solid #ffffff20; padding: 7px 9px; border-radius: 3px; font-size: 7px; letter-spacing: .13em; }
-.posterPlay { position: absolute; bottom: 23px; right: 20px; width: 37px; height: 37px; display: grid; place-items: center; border: 1px solid #ffffff40; border-radius: 50%; background: #ffffff15; backdrop-filter: blur(8px); }
-.cardInfo { padding: 17px 0 0; }
-.cardInfo h3 { font-size: 14px; margin: 0 0 8px; font-weight: 500; }
-.cardInfo p { font-size: 8px; letter-spacing: .14em; color: #8ea3b0; margin: 0; }
 .experience { display: grid; grid-template-columns: 1.05fr 1fr; align-items: center; gap: 8%; padding: 110px 6%; border-top: 1px solid #ffffff0d; background: radial-gradient(ellipse at 15% 50%, #183d3b30, transparent 60%), #0b121a; }
 .experienceVisual { border: 1px solid #ffffff20; border-radius: 10px; padding: 13px; background: #0a121a; box-shadow: 0 40px 80px #0005; transform: rotate(-2deg); }
 .playerTop { display: flex; justify-content: space-between; gap: 15px; font-size: 8px; color: #b8cbd2; letter-spacing: .09em; padding: 8px 5px 17px; }
@@ -70,5 +48,5 @@
 .bottomCTA p { color: #a5b9c6; line-height: 1.8; font-size: 13px; max-width: 400px; margin: 25px auto 0; }
 .bottomCTA small { display: block; color: #8ca3b0; font-size: 8px; letter-spacing: .12em; margin-top: 22px; }
 @media (max-width: 1000px) { .manifesto { font-size: 7px; letter-spacing: .1em; gap: 14px; } .experience { gap: 5%; padding-block: 80px; } .playerStage { height: 290px; } .artistBanner { padding-block: 80px; } .artistDecor { padding: 0; } }
-@media (max-width: 760px) { .manifesto { flex-wrap: wrap; justify-content: center; padding: 25px; gap: 14px; font-size: 7px; } .manifesto i:last-of-type { display: none; } .manifesto > span:last-child { display: none; } .discover { padding-top: 65px; } .sectionTop { padding-inline: 24px; align-items: start; } .sectionTop h2 { font-size: 29px; } .sectionTop p { font-size: 11px; line-height: 1.6; } .viewAll { font-size: 10px; margin-top: 26px; } .overline { font-size: 8px; } .horizontalScroll { padding-inline: 24px; } .contentCard { flex-basis: 260px; } .poster { height: 285px; } .experience { grid-template-columns: 1fr; gap: 50px; padding: 65px 24px; } .experienceVisual { max-width: 540px; transform: none; } .experienceText h2 { font-size: 54px; } .artistBanner { grid-template-columns: 1fr; padding: 75px 24px; min-height: 650px; gap: 50px; } .artistDecor { display: none; } .artistBanner h2 { font-size: 64px; } .bottomCTA { padding-block: 80px; } }
+@media (max-width: 760px) { .manifesto { flex-wrap: wrap; justify-content: center; padding: 25px; gap: 14px; font-size: 7px; } .manifesto i:last-of-type { display: none; } .manifesto > span:last-child { display: none; } .discover { padding-top: 65px; }     .overline { font-size: 8px; }    .experience { grid-template-columns: 1fr; gap: 50px; padding: 65px 24px; } .experienceVisual { max-width: 540px; transform: none; } .experienceText h2 { font-size: 54px; } .artistBanner { grid-template-columns: 1fr; padding: 75px 24px; min-height: 650px; gap: 50px; } .artistDecor { display: none; } .artistBanner h2 { font-size: 64px; } .bottomCTA { padding-block: 80px; } }
 @media (prefers-reduced-motion: reduce) { .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; } }

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import styles from "../styles/streaming-home.module.css";
 import PerformanceHero from "../components/PerformanceHero";
-import AutoScrollRow from "../components/AutoScrollRow";
+import ExperienceCarousel from "../components/ExperienceCarousel";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import MobileAppPreview from "../components/MobileAppPreview";
@@ -97,74 +97,6 @@ function PlayIcon({ size = 16 }) {
 function ArrowIcon() {
   return <span aria-hidden="true">↗</span>;
 }
-
-function Artwork({ item }) {
-  return (
-    <div className={`${styles.artwork} ${styles[item.theme]}`}>
-      <div className={styles.artPhoto} aria-hidden="true" />
-      <div className={styles.artTitle}>{item.title}</div>
-    </div>
-  );
-}
-
-function ContentCard({ item }) {
-  return (
-    <Link href="/early-access" className={styles.contentCard}>
-      <div className={styles.poster}>
-        <Artwork item={item} />
-
-        {item.tag && (
-          <span className={styles.posterTag}>{item.tag}</span>
-        )}
-
-        <div className={styles.posterPlay}>
-          <PlayIcon size={19} />
-        </div>
-      </div>
-
-      <div className={styles.cardInfo}>
-        <h3>{item.title}</h3>
-        <p>{item.category}</p>
-      </div>
-    </Link>
-  );
-}
-
-
-function ContentRow({ collection, index = 0 }) {
-  return (
-    <section className={styles.contentSection}>
-      <div className={styles.sectionTop}>
-        <div>
-          <span className={styles.overline}>{index === 0 ? '01 / THE EXPERIENCES' : '02 / YOUR SOUNDTRACK'}</span>
-          <h2>{collection.title}</h2>
-          <p>{collection.subtitle}</p>
-        </div>
-
-        <Link
-          href="/early-access"
-          className={styles.viewAll}
-        >
-          Get access <ArrowIcon />
-        </Link>
-      </div>
-
-      <AutoScrollRow
-        className={styles.horizontalScroll}
-        speed={index % 2 === 0 ? 25 : 18}
-        direction="left"
-      >
-        {collection.items.map((item) => (
-          <ContentCard
-            key={item.title}
-            item={item}
-          />
-        ))}
-      </AutoScrollRow>
-    </section>
-  );
-}
-
 
 function Experience() {
   return (
@@ -286,7 +218,7 @@ export default function HomePage() {
 
       <div id="discover" className={styles.discover}>
         {collections.map((collection, index) => (
-            <ContentRow
+            <ExperienceCarousel
               key={collection.title}
               collection={collection}
               index={index}
