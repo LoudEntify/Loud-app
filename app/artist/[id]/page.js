@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import PageShell from '../../../components/PageShell';
 import ProfileSurface from '../../../components/ProfileSurface';
 
 // Phase 4d — an artist profile is a share target too.
@@ -34,7 +35,8 @@ async function fetchPublicArtist(id) {
 }
 
 export async function generateMetadata({ params }) {
-  const artist = await fetchPublicArtist(params.id);
+  const { id } = await params;
+  const artist = await fetchPublicArtist(id);
   if (!artist) {
     return { title: 'Profile · Loudentify' };
   }
@@ -79,12 +81,13 @@ export async function generateMetadata({ params }) {
 // ONE route, two modes. The owner gets their console here; everyone else
 // gets the storefront at the SAME url. Which one you see is decided by
 // who you are, not by which link you followed.
-export default function ArtistProfileRoute({ params }) {
+export default async function ArtistProfileRoute({ params }) {
+  const { id } = await params;
   return (
-    <main>
+    <PageShell active="profile">
       <Suspense fallback={null}>
-        <ProfileSurface artistId={params.id} />
+        <ProfileSurface artistId={id} />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }

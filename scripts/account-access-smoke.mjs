@@ -69,6 +69,15 @@ try {
     pass(`${audience}: opposite dashboard resolves from the stored role`);
     if (role === 'artist') {
       await page.getByRole('heading', { name: 'Get ready for your stage.' }).waitFor();
+      await page.getByRole('link', { name: 'LIVE', exact: true }).click();
+      await page.waitForURL('**/live');
+      await page.getByRole('heading', { name: 'Your next live moment starts here.' }).waitFor();
+      await page.getByRole('link', { name: 'Back to my profile', exact: false }).click();
+      await page.waitForURL(`**/artist/${profile.id}`);
+      await page.getByText('Profile not found', { exact: true }).waitFor({ state: 'hidden' });
+      await page.goto(`${base}/dashboard/artist`);
+      pass('artist Live navigation opens its studio and provides a working return to profile');
+
       await page.getByRole('link', { name: /Finish your artist profile/ }).waitFor();
       assert.ok(await page.getByRole('link', { name: /Open kit check/ }).isVisible());
       await page.screenshot({ path: process.env.ACCOUNT_SMOKE_SCREENSHOT || '/private/tmp/loud-artist-dashboard.png', fullPage: true });
