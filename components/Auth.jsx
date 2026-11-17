@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signUp, signIn, getSession, getProfile, validateUsername, isUsernameAvailable, normaliseUsername, checkSignupSetup } from '../lib/supabaseAuth';
+import { signUp, signIn, getSession, ensureProfile, validateUsername, isUsernameAvailable, normaliseUsername, checkSignupSetup } from '../lib/supabaseAuth';
 import { countryOptions } from '../lib/countries';
 import { setAccountType } from '../lib/mockAccount';
 import styles from '../styles/Auth.module.css';
@@ -28,6 +28,7 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
+  const [stageName, setStageName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [country, setCountry] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -45,7 +46,7 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
       try {
         const session = await getSession();
         if (cancelled || !session?.user) return;
-        const result = await getProfile(session.user.id);
+        const result = await ensureProfile(session.user);
         if (cancelled) return;
         if (result.error || !['artist', 'viewer'].includes(result.profile?.role)) {
           setError('We couldn’t load your account profile. Please contact build@loudentify.app.');
@@ -69,6 +70,7 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
     setError('');
     if (signup) {
       if (!fullName.trim()) return setError('Please enter your full name.');
+      if (role === 'artist' && !stageName.trim()) return setError('Please enter your stage name.');
       const usernameError = validateUsername(username);
       if (usernameError) return setError(usernameError);
       const dob = new Date(`${dateOfBirth}T00:00:00`);
@@ -90,7 +92,7 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
         const dbRole = role === 'artist' ? 'artist' : 'viewer';
         const result = await signUp({
           email: email.trim(), password, role: dbRole,
-          displayName: normaliseUsername(username), fullName: fullName.trim(),
+          displayName: role === 'artist' ? stageName.trim() : normaliseUsername(username), fullName: fullName.trim(),
           username, dateOfBirth, country, genres: [],
           emailRedirectTo: new URL(withNext(`/auth/${role}`), window.location.origin).toString(),
         });
@@ -110,8 +112,8 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
         setAccountType(result.profile.role === 'artist' ? 'artist' : 'fan');
         router.push(target(result.profile.role));
       }
-    } catch {
-      setError('We couldn’t connect. Please check your connection and try again.');
+    } catch (error) {
+      setError(message(error, 'We couldn’t connect. Please check your connection and try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -129,7 +131,8 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
           </div>
           <div className={styles.signupFields}>
             <div className={styles.field}><label className={styles.label} htmlFor="auth-full-name">FULL NAME</label><input id="auth-full-name" className={styles.input} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Your full name" autoComplete="name" maxLength={120} required /></div>
-            <div className={styles.field}><label className={styles.label} htmlFor="auth-username">{role === 'artist' ? 'STAGE NAME / HANDLE' : 'USERNAME'}</label><input id="auth-username" className={styles.input} value={username} onChange={e => setUsername(e.target.value)} placeholder="your_name" autoComplete="username" autoCapitalize="none" autoCorrect="off" minLength={3} maxLength={20} pattern="[a-z0-9_]{3,20}" aria-describedby="username-help" required /><p id="username-help" className={styles.helper}>3–20 lowercase letters, numbers or underscores.</p></div>
+            {role === 'artist' && <div className={styles.field}><label className={styles.label} htmlFor="auth-stage-name">STAGE NAME</label><input id="auth-stage-name" className={styles.input} value={stageName} onChange={e => setStageName(e.target.value)} placeholder="e.g. DJ Nova" autoComplete="nickname" maxLength={80} aria-describedby="stage-name-help" required /><p id="stage-name-help" className={styles.helper}>Your public name. Spaces and capitals are welcome.</p></div>}
+            <div className={styles.field}><label className={styles.label} htmlFor="auth-username">{role === 'artist' ? 'UNIQUE HANDLE' : 'USERNAME'}</label><input id="auth-username" className={styles.input} value={username} onChange={e => { e.target.setCustomValidity(''); setUsername(normaliseUsername(e.target.value.replace(/^@/, ''))); }} onInvalid={e => e.target.setCustomValidity(validateUsername(e.target.value) || '')} placeholder={role === 'artist' ? 'e.g. dj_nova' : 'your_name'} autoComplete="username" autoCapitalize="none" autoCorrect="off" minLength={3} maxLength={20} pattern="[a-z0-9_]{3,20}" aria-describedby="username-help" required /><p id="username-help" className={styles.helper}>3–20 letters, numbers or underscores. No spaces. Capitals become lowercase.</p></div>
             <div className={styles.field}><label className={styles.label} htmlFor="auth-dob">DATE OF BIRTH</label><input id="auth-dob" className={styles.input} type="date" value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} autoComplete="bday" aria-describedby="age-help" required /><p id="age-help" className={styles.helper}>You must be 18 or over.</p></div>
             <div className={styles.field}><label className={styles.label} htmlFor="auth-country">COUNTRY</label><select id="auth-country" className={styles.select} value={country} onChange={e => setCountry(e.target.value)} autoComplete="country" required><option value="">Select country</option>{countryOptions().map(option => <option key={option.code} value={option.code}>{option.name}</option>)}</select></div>
           </div>

@@ -18,3 +18,31 @@
 .container a:focus-visible, .retry:focus-visible { outline: 2px solid #2ec4b6; outline-offset: 5px; }
 @media (max-width: 1000px) { .cards { grid-template-columns: 1fr; } .header { padding-bottom: 30px; } .container { padding-top: 40px; } }
 @media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover { transform: none; } }
+.workspace { display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; margin: 0 0 32px; }
+.setupPanel, .showPanel { padding: 28px; border: 1px solid #ffffff18; border-radius: 14px; background: linear-gradient(140deg, #13272d80, #101a24); min-width: 0; }
+.panelHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.workspace h2 { font-size: 24px; line-height: 1.15; letter-spacing: -.04em; margin: 15px 0 20px; }
+.setupCount { color: #8de1d5; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.setupProgress { display: block; width: 100%; height: 3px; border: 0; border-radius: 4px; margin: 0 0 25px; background: #ffffff10; accent-color: #2ec4b6; }
+.setupProgress::-webkit-progress-bar { background: #ffffff10; border-radius: 4px; }
+.setupProgress::-webkit-progress-value { background: #2ec4b6; border-radius: 4px; }
+.setupProgress::-moz-progress-bar { background: #2ec4b6; border-radius: 4px; }
+.setupStep { display: flex; align-items: flex-start; gap: 12px; padding: 18px 0; border-bottom: 1px solid #ffffff0e; }
+.stepIcon { display: grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border: 1px solid #ffffff20; border-radius: 50%; color: #94aeb9; }
+.stepComplete { color: #8de1d5; background: #2ec4b610; border-color: #2ec4b640; }
+.setupStep > div, .kitStep > div { flex: 1; min-width: 0; }
+.workspace h3 { font-size: 14px; line-height: 1.5; margin: 0; font-weight: 600; }
+.workspace p { color: #9fb5c3; font-size: 12px; line-height: 1.8; margin: 6px 0 0; }
+.setupStep a, .kitStep a { font-size: 10px; line-height: 1.8; color: #8de1d5; text-decoration: none; white-space: nowrap; }
+.kitStep { display: flex; align-items: center; gap: 12px; padding: 23px 0 0; }
+.kitStep > span { color: #8de1d5; font-size: 26px; }
+.kitStep a { align-self: flex-end; }
+.calendarIcon { display: block; font-size: 40px; color: #547d81; padding: 12px 0; }
+.showPanel .retry { margin-top: 20px; font-size: 11px; }
+.subtleLink { display: inline-block; font-size: 11px; color: #8de1d5; text-decoration: none; margin-top: 25px; }
+.showList { list-style: none; padding: 0; margin: 0; }
+.showList li { border-top: 1px solid #ffffff15; padding: 18px 0; }
+.showList li > span { display: block; color: #8de1d5; font-size: 10px; margin-bottom: 8px; }
+.showList a { display: inline-block; color: #8de1d5; font-size: 11px; text-decoration: none; margin-top: 15px; }
+@media (max-width: 1100px) { .workspace { grid-template-columns: 1fr; } }
+@media (max-width: 540px) { .setupPanel, .showPanel { padding: 22px; } .setupStep { flex-wrap: wrap; } .setupStep a { margin-left: 38px; } .kitStep { flex-wrap: wrap; } .kitStep a { margin-left: 38px; } }

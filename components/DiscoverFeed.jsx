@@ -15,6 +15,7 @@ import {
 } from '../lib/discoveryFeed';
 import { fetchFollowedArtistIds } from '../lib/follows';
 import { getSession } from '../lib/supabaseAuth';
+import { mergeDiscoveryItems } from '../lib/discoveryPagination';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -51,6 +52,8 @@ export default function DiscoverFeed() {
     typeof window === 'undefined' ? 1200 : window.innerWidth
   );
   const sentinelRef = useRef(null);
+  const generationRef = useRef(0);
+  const pendingRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -75,23 +78,32 @@ export default function DiscoverFeed() {
   // new results would append underneath the old ones.
   useEffect(() => {
     let cancelled = false;
+    const generation = ++generationRef.current;
+    const request = {};
+    pendingRef.current = request;
     setArtists([]);
     setNextPage(0);
     setLoading(true);
     fetchArtistsPage({ page: 0, query, genre: activeGenre }).then((res) => {
-      if (cancelled) return;
-      setArtists(res.items);
+      if (cancelled || generation !== generationRef.current) return;
+      pendingRef.current = null;
+      setArtists(mergeDiscoveryItems([], res.items));
       setNextPage(res.nextPage);
       setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; generationRef.current++; };
   }, [query, activeGenre]);
 
   const loadMore = useCallback(async () => {
-    if (loading || nextPage === null) return;
+    if (pendingRef.current || loading || nextPage === null) return;
+    const generation = generationRef.current;
+    const request = {};
+    pendingRef.current = request;
     setLoading(true);
     const res = await fetchArtistsPage({ page: nextPage, query, genre: activeGenre });
-    setArtists((prev) => [...prev, ...res.items]);
+    if (generation !== generationRef.current || pendingRef.current !== request) return;
+    pendingRef.current = null;
+    setArtists((prev) => mergeDiscoveryItems(prev, res.items));
     setNextPage(res.nextPage);
     setLoading(false);
   }, [loading, nextPage, query, activeGenre]);
