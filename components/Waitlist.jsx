@@ -37,7 +37,8 @@ export default function Waitlist() {
 
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState('');
-  const [count, setCount] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [countsUnavailable, setCountsUnavailable] = useState(false);
 
   const mountedAt = useRef(Date.now());
   const turnstileToken = useRef('');
@@ -59,15 +60,15 @@ export default function Waitlist() {
 
         const data = await res.json();
 
-        if (
-          alive &&
-          data &&
-          typeof data.count === 'number'
-        ) {
-          setCount(data.count);
+        if (!alive) return;
+        if (res.ok && data.ok && ['artists', 'fans', 'total'].every(key => Number.isInteger(data[key]) && data[key] >= 0)) {
+          setCounts(data);
+          setCountsUnavailable(false);
+        } else {
+          setCountsUnavailable(true);
         }
       } catch {
-        // Counter failure must not prevent registration.
+        if (alive) setCountsUnavailable(true);
       }
     }
 
@@ -82,7 +83,7 @@ export default function Waitlist() {
       alive = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [status]);
 
   /*
    * Cloudflare Turnstile is optional.
@@ -267,188 +268,27 @@ export default function Waitlist() {
         ========================================== */}
 
         <div className={styles.leftColumn}>
-          <div>
-            <div className={styles.logoWrap}>
-              {/* <Logo /> */}
-            </div>
-
-            {status === 'done' ? (
-              <div>
-                <span className={styles.eyebrow}>
-                  EARLY ACCESS
-                </span>
-
-                <h1 className={styles.heroTitle}>
-                  You&apos;re on
-                  <br />
-                  the list.
-                </h1>
-
-                <p className={styles.heroLead}>
-                  Thanks for joining Loudentify.
-                  We&apos;ll email you about the
-                  January 2027 launch.
-                </p>
-
-                {isArtist &&
-                  count != null &&
-                  count > 0 && (
-                    <div
-                      className={
-                        styles.counterBlock
-                      }
-                    >
-                      <span
-                        className={
-                          styles.counterNum
-                        }
-                      >
-                        {count.toLocaleString(
-                          'en-GB'
-                        )}
-                      </span>
-
-                      <span
-                        className={
-                          styles.counterLabel
-                        }
-                      >
-                        {count === 1
-                          ? 'artist has joined'
-                          : 'artists have joined'}{' '}
-                        so far.
-                      </span>
-                    </div>
-                  )}
-              </div>
-            ) : (
-              <>
-                <span
-                  className={styles.eyebrow}
-                >
-                  JANUARY 2027 · EARLY ACCESS
-                </span>
-
-                <h1
-                  className={
-                    styles.heroTitle
-                  }
-                >
-                  Live music.
-                  <br />
-
-                  <span
-                    className={
-                      styles.accent
-                    }
-                  >
-                    Live directed.
-                  </span>
-                </h1>
-
-                <p
-                  className={
-                    styles.heroLead
-                  }
-                >
-                  Turn the phones you already
-                  own into a produced,
-                  multi-camera live show —
-                  directed automatically and
-                  streamed to your audience.
-                </p>
-
-                <div
-                  className={
-                    styles.counterBlock
-                  }
-                >
-                  {count != null &&
-                  count > 0 ? (
-                    <>
-                      <span
-                        className={
-                          styles.counterNum
-                        }
-                      >
-                        {count.toLocaleString(
-                          'en-GB'
-                        )}
-                      </span>
-
-                      <span
-                        className={
-                          styles.counterLabel
-                        }
-                      >
-                        {count === 1
-                          ? 'artist on the waitlist'
-                          : 'artists on the waitlist'}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span
-                        className={
-                          styles.counterNum
-                        }
-                      >
-                        60
-                      </span>
-
-                      <span
-                        className={
-                          styles.counterLabel
-                        }
-                      >
-                        target launch cohort ·
-                        Manchester &amp; London
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                <div
-                  className={styles.toggle}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRole('artist')
-                    }
-                    className={`${styles.toggleBtn} ${
-                      isArtist
-                        ? styles.toggleOn
-                        : ''
-                    }`}
-                  >
-                    I&apos;m an artist
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRole('viewer')
-                    }
-                    className={`${styles.toggleBtn} ${
-                      !isArtist
-                        ? styles.toggleOn
-                        : ''
-                    }`}
-                  >
-                    I&apos;m a fan
-                  </button>
-                </div>
-              </>
-            )}
+          <div className={styles.heroTopline}>
+            <Link href="/" aria-label="Loudentify home"><Logo height={30} /></Link>
+            <span>THE FIRST CHAPTER</span>
           </div>
-
-          <Link
-            href="/"
-            className={styles.backLink}
-          >
-            ← Back to Loudentify
-          </Link>
+          <div className={styles.heroContent}>
+            <span className={styles.eyebrow}><i aria-hidden="true" /> JANUARY 2027 · EARLY ACCESS</span>
+            <h1 className={styles.heroTitle}>
+              {status === 'done' ? <>You&apos;re part<br />of <span className={styles.accent}>the beginning.</span></> : <>Don&apos;t just<br />hear it.<br /><span className={styles.accent}>Be there.</span></>}
+            </h1>
+            <p className={styles.heroLead}>
+              {status === 'done' ? "You’re on the list. We’ll email you with launch updates and details about getting access." : 'Real artists. Every angle. A whole new way to feel live music. Join the artists and fans building the next stage.'}
+            </p>
+          </div>
+          <div className={styles.community}>
+            <div className={styles.communityHeader}><span>THE COMMUNITY STARTS HERE</span><span className={styles.liveStatus}><i aria-hidden="true" />{countsUnavailable ? 'UPDATES UNAVAILABLE' : counts ? 'LIVE WAITLIST' : 'CONNECTING'}</span></div>
+            <dl className={styles.counters} aria-label="Waitlist signup counts" aria-busy={!counts && !countsUnavailable}>
+              {[['total', 'Total signups'], ['artists', 'Artists'], ['fans', 'Fans']].map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{!countsUnavailable && counts ? counts[key].toLocaleString('en-GB') : '—'}</dd></div>)}
+            </dl>
+            <p className={styles.counterNote} role="status">{countsUnavailable ? 'Live counts are temporarily unavailable. You can still join.' : counts ? 'Live signup totals · refreshed every 30 seconds. An email can join once per role.' : 'Loading live signup totals…'}</p>
+          </div>
+          <div className={styles.heroFooter}><Link href="/" className={styles.backLink}>← Back to Loudentify</Link><span>MANCHESTER · LONDON · EVERYWHERE</span></div>
         </div>
 
         {/* =========================================
@@ -532,7 +372,7 @@ export default function Waitlist() {
                     styles.formTitle
                   }
                 >
-                  Get early access.
+                  Your next chapter starts here.
                 </h2>
 
                 <p
@@ -544,6 +384,11 @@ export default function Waitlist() {
                   yourself and we&apos;ll keep
                   you updated.
                 </p>
+              </div>
+
+              <div className={styles.toggle} aria-label="Choose your waitlist role">
+                <button type="button" onClick={() => setRole('artist')} aria-pressed={isArtist} className={`${styles.toggleBtn} ${isArtist ? styles.toggleOn : ''}`}><span aria-hidden="true">♫</span> I&apos;m an artist</button>
+                <button type="button" onClick={() => setRole('viewer')} aria-pressed={!isArtist} className={`${styles.toggleBtn} ${!isArtist ? styles.toggleOn : ''}`}><span aria-hidden="true">♡</span> I&apos;m a fan</button>
               </div>
 
               {/* Honeypot */}
