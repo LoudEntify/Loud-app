@@ -121,6 +121,29 @@ draft, not a finished feature:
 
 ## Deploying
 
+### Connect the waitlist to Supabase
+
+1. Run [`docs/waitlist_migration.sql`](docs/waitlist_migration.sql) in your
+   Supabase project's SQL Editor. It creates `public.waitlist_signups`
+   with row level security; browser clients cannot read personal details.
+2. Copy `.env.local.example` to `.env.local` and set
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
+   `SUPABASE_SERVICE_ROLE_KEY` from the same Supabase project. Keep the
+   service role key server-side and never commit it or paste it into chat.
+3. Set these variables in your hosting project's environment settings too,
+   then redeploy. For local development, restart `npm run dev`.
+4. Run `npm run check:waitlist` to check the server credentials and table
+   schema without reading or writing signup details.
+5. Open `/early-access`, submit the form with consent, and check the new
+   row in Supabase's Table Editor. Artist entries require city and genre;
+   viewer entries store those fields as null. Repeated email/role pairs
+   succeed without adding another row. `/api/waitlist/count` returns the
+   aggregate artist count.
+
+The form posts to `/api/waitlist`; only that server endpoint inserts into
+Supabase. If submission fails, check server logs for `[waitlist]` errors
+and confirm the migration and environment variables are present.
+
 Connect this repo to Vercel (Next.js works there with zero config). Add
 the three LiveKit environment variables in the Vercel project settings —
 not just locally — since the token route needs them in production too.

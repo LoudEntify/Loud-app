@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import Logo from "./Logo";
 import Waitlist from "./Waitlist";
-import styles from "./LandingHome.module.css";
+import styles from "../styles/LandingHome.module.css";
 
 const features = [
   {

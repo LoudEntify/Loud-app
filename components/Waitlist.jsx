@@ -9,17 +9,11 @@ import {
 import Link from 'next/link';
 import Logo from './Logo';
 import { GENRES } from '../lib/genres';
-import { isValidEmail } from '../lib/waitlist';
+import { CONSENT_VERSION, isValidEmail } from '../lib/waitlist';
 import styles from '../styles/Waitlist.module.css';
 
 const TURNSTILE_SITE_KEY =
   process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
-
-/*
- * Increment this whenever the wording presented to users
- * materially changes.
- */
-const CONSENT_VERSION = 'waitlist-2026-11-09-v1';
 
 const CONSENT_TEXT =
   'I agree that Loudentify can collect and use the details I enter to contact me about early access and launch, as described above. I can withdraw this at any time.';
@@ -491,7 +485,7 @@ export default function Waitlist() {
                   styles.formTitle
                 }
               >
-                Registration complete
+                You&apos;re on the waitlist
               </h2>
 
               <p
@@ -499,19 +493,18 @@ export default function Waitlist() {
                   styles.formIntro
                 }
               >
-                Your details stay private and
-                are never shown publicly. Keep
-                an eye on your inbox for
-                Loudentify launch updates.
+                Joining the waitlist does not create an account.
+                We&apos;ll email you with launch updates and details
+                about getting access. Your details stay private.
               </p>
 
               <Link
-                href="/auth"
+                href="/"
                 className={
                   styles.submitLink
                 }
               >
-                Artist sign in
+                Back to home
                 <span>→</span>
               </Link>
             </div>
@@ -940,8 +933,7 @@ export default function Waitlist() {
                   styles.artistLogin
                 }
               >
-                Already have an artist
-                account?{' '}
+                Already have a Loudentify account?{' '}
                 <strong>Sign in</strong>
               </Link>
             </form>

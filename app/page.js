@@ -1,12 +1,11 @@
 
 import Link from "next/link";
-import Logo from "../components/Logo";
 import styles from "../styles/streaming-home.module.css";
 import PerformanceHero from "../components/PerformanceHero";
 import AutoScrollRow from "../components/AutoScrollRow";
-// import ContentCard from "../components/ContentCard";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
+import MobileAppPreview from "../components/MobileAppPreview";
 
 export const metadata = {
   title: "Loudentify | Live Music, Reimagined",
@@ -407,6 +406,7 @@ export default function HomePage() {
     <main className={styles.page}>
       <Navbar />
       <PerformanceHero preferredGenres={["Afrobeats", "R&B"]} />
+      <MobileAppPreview />
 
       <div id="discover" className={styles.discover}>
         {collections.map((collection, index) => (

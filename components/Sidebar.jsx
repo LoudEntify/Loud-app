@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft } from '@phosphor-icons/react';
+import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft, SquaresFour } from '@phosphor-icons/react';
 import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
 import { getSession } from '../lib/supabaseAuth';
 import { fetchUnreadCount } from '../lib/unreadCount';
@@ -15,6 +15,7 @@ import Logo from './Logo';
 // fans always land on Fan Profile, regardless of what page they were
 // just on.
 const BASE_ITEMS = [
+  { key: 'dashboard', label: 'DASHBOARD', href: '/dashboard', Icon: SquaresFour },
   { key: 'discover', label: 'DISCOVER', href: '/discover', Icon: Compass },
   { key: 'live', label: 'LIVE', href: '/', Icon: Broadcast },
   { key: 'notifications', label: 'NOTIFICATIONS', href: '/notifications', Icon: Bell },
@@ -79,13 +80,13 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
   }, []);
 
   const items = [
-    ...BASE_ITEMS.slice(0, 2),
+    ...BASE_ITEMS.slice(0, 3),
     // One profile destination for everyone. /profile resolves to the
     // artist's own console or the viewer's profile depending on who is
     // asking, so the nav no longer needs to know -- and no longer reads
     // the legacy localStorage accountType flag to decide.
     { key: 'profile', label: 'PROFILE', href: '/profile', Icon: UserCircle },
-    ...BASE_ITEMS.slice(2),
+    ...BASE_ITEMS.slice(3),
   ];
 
   const resetTimer = useCallback(() => {
