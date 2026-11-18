@@ -68,7 +68,6 @@ export default function Footer() {
               </Link>
 
               <Link href="/auth/fan">Fan Sign In</Link>
-              <Link href="/signup">Create an account</Link>
 
               <Link href="/privacy">
                 Privacy

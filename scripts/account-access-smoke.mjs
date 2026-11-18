@@ -164,21 +164,18 @@ try {
   await guest.getByRole('heading', { name: 'Check your inbox.' }).waitFor();
   assert.ok(recoveryRequested);
   pass('forgot-password form requests the correct callback (email dispatch stubbed)');
-  await guest.goto(`${base}/signup/fan`);
+  let signupRequested = false;
   await guest.route('**/auth/v1/signup**', async route => {
-    const payload = route.request().postDataJSON();
-    assert.equal(payload.data.role, 'viewer');
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({id:'00000000-0000-0000-0000-000000000001',aud:'authenticated',role:'authenticated',email:payload.email,user_metadata:payload.data,identities:[]}) });
+    signupRequested = true;
+    await route.abort();
   });
-  await guest.getByLabel('FULL NAME', { exact: true }).fill('Temporary signup UI');
-  await guest.getByLabel('USERNAME', { exact: true }).fill(`ui_${run}`);
-  await guest.getByLabel('DATE OF BIRTH', { exact: true }).fill('1990-01-01');
-  await guest.getByLabel('COUNTRY', { exact: true }).selectOption('GB');
-  await guest.getByLabel('EMAIL ADDRESS', { exact: true }).fill(`signup-ui-${run}@example.invalid`);
-  await guest.getByLabel('PASSWORD', { exact: true }).fill(`Ui-${randomBytes(12).toString('hex')}!`);
-  await guest.getByRole('button', { name: 'Create your account' }).click();
-  await guest.getByRole('heading', { name: 'Check your inbox.' }).waitFor();
-  pass('signup form reaches confirmation state with valid fan metadata (email dispatch stubbed)');
+  await guest.goto(`${base}/signup/fan`);
+  await guest.waitForURL('**/early-access');
+  assert.equal(signupRequested, false);
+  await guest.goto(`${base}/auth/fan`);
+  const waitlistLink = guest.getByRole('link', { name: /Join the waitlist/ });
+  assert.equal(await waitlistLink.getAttribute('href'), '/early-access');
+  pass('public signup routes are closed while sign-in points new visitors to the waitlist');
   await guest.close();
 } catch (error) {
   // Never print recovery URLs, tokens, full responses, or test passwords.

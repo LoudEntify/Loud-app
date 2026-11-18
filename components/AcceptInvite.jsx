@@ -107,7 +107,7 @@ export default function AcceptInvite({ token }) {
                 <EmptyState
                   title="Log in to accept"
                   body="Your slot gets tied to your account, so you can rejoin from any device if you drop out mid-show."
-                  action="LOG IN OR SIGN UP"
+                  action="SIGN IN"
                   actionHref={`/auth?next=${encodeURIComponent(`/join/${token}`)}`}
                 />
               </div>

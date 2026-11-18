@@ -8,8 +8,8 @@ export const metadata = {
 
 // Deliberately NOT behind RequireAuth: the invite should be readable
 // before you have an account, so someone can see what they are being
-// asked to join before deciding to sign up. Accepting still requires
-// being logged in -- that check lives in the component and in the API.
+// asked to join. Accepting still requires an existing signed-in account --
+// that check lives in the component and in the API.
 export default function JoinPage({ params }) {
   return (
     <main>
