@@ -118,6 +118,15 @@ try {
       assert.equal(scheduled.duration_minutes, 60);
       assert.equal(scheduled.performance_mode, 'solo');
       pass('artist schedule page creates an owner-scoped show and keeps the sidebar visible');
+      await page.getByRole('button', { name: 'CANCEL SHOW' }).click();
+      await page.getByRole('button', { name: 'YES, CANCEL' }).click();
+      await page.getByText(showTitle, { exact: true }).waitFor({ state: 'hidden' });
+      const cancelledShow = requireResult(await admin.from('shows').select('state,cancelled_at,cancelled_reason,actual_started_at').eq('artist_id', generated.user.id).eq('title', showTitle).single(), 'Cancelled show');
+      assert.equal(cancelledShow.state, 'ended');
+      assert.ok(cancelledShow.cancelled_at);
+      assert.equal(cancelledShow.cancelled_reason, 'artist_cancelled');
+      assert.equal(cancelledShow.actual_started_at, null);
+      pass('artist can confirm cancellation without recording a false performance end');
 
     }
     if (role === 'viewer') {

@@ -70,6 +70,8 @@ export default function ScheduleShow() {
   const [invited, setInvited] = useState({});
   const [inviteBusy, setInviteBusy] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [cancelConfirmId, setCancelConfirmId] = useState(null);
+  const [cancelBusyId, setCancelBusyId] = useState(null);
 
   // One-second clock so the countdown and the GO LIVE button flip on
   // their own, without the artist reloading at the critical moment.
@@ -220,6 +222,29 @@ export default function ScheduleShow() {
       }
     } finally {
       setInviteBusy(null);
+    }
+  }
+
+  async function cancelShow(show) {
+    if (!session?.access_token || cancelBusyId) return;
+    setCancelBusyId(show.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/shows/${show.id}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not cancel that show.');
+        return;
+      }
+      setCancelConfirmId(null);
+      await load(session.user.id);
+    } catch {
+      setError('Could not cancel that show. Check your connection and try again.');
+    } finally {
+      setCancelBusyId(null);
     }
   }
 
@@ -530,6 +555,20 @@ export default function ScheduleShow() {
                     {expired ? 'MISSED' : open ? 'WINDOW OPEN' : humanCountdown(msUntilWindow(s, now)).toUpperCase()}
                   </span>
                 </div>
+
+                  {s.state === 'scheduled' && !expired && (
+                    <div style={{ marginTop: 9, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                      {cancelConfirmId === s.id ? (
+                        <>
+                          <span style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.6)' }}>Cancel this performance?</span>
+                          <button type="button" onClick={() => setCancelConfirmId(null)} disabled={cancelBusyId === s.id} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.55)', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>KEEP SHOW</button>
+                          <button type="button" onClick={() => cancelShow(s)} disabled={cancelBusyId === s.id} style={{ border: '1px solid rgba(231,29,54,0.45)', background: 'rgba(231,29,54,0.06)', color: '#b5122a', padding: '6px 9px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: cancelBusyId === s.id ? 'default' : 'pointer' }}>{cancelBusyId === s.id ? 'CANCELLING…' : 'YES, CANCEL'}</button>
+                        </>
+                      ) : (
+                        <button type="button" onClick={() => setCancelConfirmId(s.id)} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.48)', padding: 0, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>CANCEL SHOW</button>
+                      )}
+                    </div>
+                  )}
 
                   {/* ── VERSUS NEEDS A SECOND PERFORMER ─────────────
                       Selection first, link second. The link took the
