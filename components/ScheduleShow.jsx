@@ -47,6 +47,7 @@ const labelStyle = { fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,3
 // that opens a connection, and it cannot be pressed before the window.
 export default function ScheduleShow() {
   const [session, setSession] = useState(null);
+  const [accountRole, setAccountRole] = useState(null);
   // Needed to populate shows.artist_name -- a pre-accounts denormalised
   // column that is still read by the recordings-sync title builder and
   // the viewer holding screen. Identity comes from artist_id now, but
@@ -111,8 +112,12 @@ export default function ScheduleShow() {
       setSession(s);
       if (s?.user) {
         const { profile } = await getProfile(s.user.id);
-        if (!cancelled) setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
-        await load(s.user.id);
+        if (!cancelled) {
+          setAccountRole(profile?.role || 'viewer');
+          setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
+        }
+        if (profile?.role === 'artist') await load(s.user.id);
+        else if (!cancelled) setShows([]);
       } else {
         setShows([]);
       }
@@ -250,7 +255,13 @@ export default function ScheduleShow() {
   const ownsNoLiveShows = shows !== null && shows.filter((s) => s.state !== 'ended').length === 0;
 
   if (!session) {
-    return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="LOG IN" actionHref="/auth" />;
+    return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="ARTIST SIGN IN" actionHref="/auth/artist" />;
+  }
+
+  if (accountRole === null) return <div role="status" style={{ fontSize: 12, color: 'rgba(1,22,39,0.45)' }}>Loading your artist studio…</div>;
+
+  if (accountRole !== 'artist') {
+    return <EmptyState title="Artist scheduling only" body="Show scheduling is available from an artist account." action="BACK TO DASHBOARD" actionHref="/dashboard/fan" />;
   }
 
   if (!SHOW_SCHEDULE_FORM && ownsNoLiveShows) return null;

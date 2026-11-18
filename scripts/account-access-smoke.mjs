@@ -102,6 +102,29 @@ try {
       assert.ok(saved.genres.includes('Afrobeats')); assert.equal(saved.bio, 'Temporary artist integration check.');
       pass('artist profile edits persist and advance the dashboard to equipment preparation');
 
+      const showTitle = `Smoke show ${run}`;
+      const showDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      await page.goto(`${base}/schedule`);
+      await page.getByRole('heading', { name: /Put your next/ }).waitFor();
+      await page.getByRole('link', { name: 'SCHEDULE', exact: true }).waitFor();
+      await page.getByPlaceholder('What are you calling this one?').fill(showTitle);
+      await page.locator('input[type="date"]').fill(showDate);
+      await page.locator('input[type="time"]').fill('12:00');
+      await page.getByRole('button', { name: 'SCHEDULE SHOW' }).click();
+      await page.getByText(showTitle, { exact: true }).waitFor();
+      const scheduled = requireResult(await admin.from('shows').select('artist_id,state,duration_minutes,performance_mode').eq('artist_id', generated.user.id).eq('title', showTitle).single(), 'Scheduled show');
+      assert.equal(scheduled.artist_id, generated.user.id);
+      assert.equal(scheduled.state, 'scheduled');
+      assert.equal(scheduled.duration_minutes, 60);
+      assert.equal(scheduled.performance_mode, 'solo');
+      pass('artist schedule page creates an owner-scoped show and keeps the sidebar visible');
+
+    }
+    if (role === 'viewer') {
+      await page.goto(`${base}/schedule`);
+      await page.getByText('Artist scheduling only', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'SCHEDULE', exact: true }).count(), 0);
+      pass('fan accounts cannot use artist scheduling or see its sidebar destination');
     }
     // Owner-only profiles: a second anonymous client cannot read the test row.
     const publicRows = requireResult(await client().from('profiles').select('id').eq('id', generated.user.id), 'Anonymous profile access');
@@ -174,7 +197,8 @@ try {
   assert.equal(signupRequested, false);
   await guest.goto(`${base}/auth/fan`);
   const waitlistLink = guest.getByRole('link', { name: /Join the waitlist/ });
-  assert.equal(await waitlistLink.getAttribute('href'), '/early-access');
+  assert.ok(await waitlistLink.count() >= 1);
+  for (const href of await waitlistLink.evaluateAll(links => links.map(link => link.getAttribute('href')))) assert.equal(href, '/early-access');
   pass('public signup routes are closed while sign-in points new visitors to the waitlist');
   await guest.close();
 } catch (error) {
