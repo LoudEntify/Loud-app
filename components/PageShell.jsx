@@ -1,6 +1,7 @@
 'use client';
 
 import Sidebar from './Sidebar';
+import Navbar from './Navbar';
 import OnboardingNudge from './OnboardingNudge';
 import '../styles/reactions.css';
 
@@ -21,25 +22,28 @@ import '../styles/reactions.css';
 // halo, etc.) -- every other page's call site omits it, so nothing in
 // this build can affect Discover/Profile/etc, structurally, not just by
 // convention: the class this all depends on can't exist there.
-export default function PageShell({ active = 'live', hideSidebar = false, autoHideSidebar = false, sidebarCollapsed = false, onToggleSidebarCollapse, liveOverlay = false, children }) {
+export default function PageShell({ active = 'live', hideSidebar = false, autoHideSidebar = false, sidebarCollapsed = false, onToggleSidebarCollapse, liveOverlay = false, showNavbar = false, children }) {
   return (
-    <div className={`page-shell ${liveOverlay ? 'page-shell--live' : ''}`}>
-      {!hideSidebar && (
-        <Sidebar
-          active={active}
-          autoHide={autoHideSidebar}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={onToggleSidebarCollapse}
-        />
-      )}
-      <main className="page-shell-main">
-        {/* Deliberately gated on !liveOverlay: a setup reminder laid over
-            someone's live performance is indefensible, and gating it here
-            (rather than inside the component) means no live surface can
-            accidentally opt back in. */}
-        {!liveOverlay && active !== 'dashboard' && <OnboardingNudge />}
-        {children}
-      </main>
-    </div>
+    <>
+      {showNavbar && <Navbar />}
+      <div className={`page-shell ${liveOverlay ? 'page-shell--live' : ''} ${showNavbar ? 'page-shell--with-navbar' : ''}`}>
+        {!hideSidebar && (
+          <Sidebar
+            active={active}
+            autoHide={autoHideSidebar}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={onToggleSidebarCollapse}
+          />
+        )}
+        <main className="page-shell-main">
+          {/* Deliberately gated on !liveOverlay: a setup reminder laid over
+              someone's live performance is indefensible, and gating it here
+              (rather than inside the component) means no live surface can
+              accidentally opt back in. */}
+          {!liveOverlay && active !== 'dashboard' && <OnboardingNudge />}
+          {children}
+        </main>
+      </div>
+    </>
   );
 }

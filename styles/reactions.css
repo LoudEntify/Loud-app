@@ -672,6 +672,33 @@ button {
   position: relative;
 }
 
+/* Dashboard pages keep the public top navigation as well as the
+   role-aware studio sidebar. Navbar is fixed, so the whole shell begins
+   beneath it and the sticky sidebar uses only the remaining viewport. */
+.page-shell--with-navbar {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding-top: 76px;
+}
+
+.page-shell--with-navbar .sidebar {
+  top: 76px;
+  height: calc(100vh - 76px);
+  height: calc(100dvh - 76px);
+}
+
+@media (max-width: 600px) {
+  .page-shell--with-navbar {
+    padding-top: 66px;
+  }
+
+  .page-shell--with-navbar .sidebar {
+    top: 66px;
+    height: calc(100vh - 66px);
+    height: calc(100dvh - 66px);
+  }
+}
+
 /* Build 3c -- live-screen-only overlay conversion for the shared Sidebar
    component. .page-shell--live is added ONLY by LiveDemo.jsx (see
    PageShell.jsx's liveOverlay prop) -- every other page's PageShell call

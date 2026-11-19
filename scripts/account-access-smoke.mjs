@@ -59,6 +59,8 @@ try {
     await page.goto(`${base}/auth/${audience}`);
     await page.waitForURL(`**/dashboard/${audience}`, { timeout: 30000 });
     await page.getByRole('heading', { name: /Welcome back/ }).waitFor();
+    await page.getByRole('banner').getByRole('link', { name: 'Loudentify home' }).waitFor();
+    await page.getByRole('navigation', { name: 'Main navigation' }).waitFor();
     const profile = requireResult(await admin.from('profiles').select('*').eq('id', generated.user.id).single(), 'Profile after confirmation');
     if (role === 'artist') artistFixture = { id: generated.user.id, displayName: profile.display_name };
     assert.equal(profile.role, role); assert.equal(profile.date_of_birth, '1990-01-01'); assert.equal(profile.country, 'GB');
@@ -73,6 +75,26 @@ try {
     await page.goto(`${base}/dashboard/${wrong}`);
     await page.waitForURL(`**/dashboard/${audience}`);
     pass(`${audience}: opposite dashboard resolves from the stored role`);
+    await page.goto(`${base}/`);
+    const studioLink = page.getByRole('link', { name: 'Open Studio', exact: true }).first();
+    await studioLink.waitFor();
+    await studioLink.click();
+    await page.waitForURL(`**/dashboard/${audience}`);
+    pass(`${audience}: public navbar recognizes the session and returns to the correct dashboard`);
+    if (role === 'artist') {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${base}/`);
+      const menuButton = page.getByRole('button', { name: 'Open navigation menu' });
+      await menuButton.click();
+      assert.equal(await page.locator('#mobile-navigation').getAttribute('aria-hidden'), 'false');
+      assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden');
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('#mobile-navigation').getAttribute('aria-hidden'), 'true');
+      assert.equal(await page.evaluate(() => document.body.style.overflow), '');
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto(`${base}/dashboard/artist`);
+      pass('mobile navbar locks background scroll and closes accessibly with Escape');
+    }
     if (role === 'artist') {
       await page.getByRole('heading', { name: 'Get ready for your stage.' }).waitFor();
       await page.getByRole('link', { name: 'LIVE', exact: true }).click();
