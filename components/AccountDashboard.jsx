@@ -12,6 +12,7 @@ import styles from '../styles/AccountDashboard.module.css';
 function DashboardContent({ accountRole }) {
   const router = useRouter();
   const [profile, setProfile] = useState(null);
+  const [accessToken, setAccessToken] = useState(null);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
 
@@ -22,6 +23,7 @@ function DashboardContent({ accountRole }) {
       try {
         const session = await getSession();
         if (!session?.user) return;
+        setAccessToken(session.access_token || null);
         const result = await ensureProfile(session.user);
         if (cancelled) return;
         if (result.error || !['artist', 'viewer'].includes(result.profile?.role)) {
@@ -63,7 +65,7 @@ function DashboardContent({ accountRole }) {
         <p>{artist ? 'Your music. Your stage. Everything you need for your next performance.' : 'Your front row starts here. Find the music and artists you love.'}</p>
         <Link href={artist ? (profile.bio?.trim() && profile.genres?.length ? '/kit-check' : '/settings') : '/discover'} className={styles.primary}>{artist ? (profile.bio?.trim() && profile.genres?.length ? 'Check your camera and sound' : 'Finish your artist profile') : 'Explore performances'} <span aria-hidden="true">↗</span></Link>
       </header>
-      {artist && <ArtistWorkspace profile={profile} />}
+      {artist && <ArtistWorkspace profile={profile} accessToken={accessToken} />}
       <section className={styles.cards} aria-label={artist ? 'Artist tools' : 'Your fan space'}>
         {actions.map(action => <Link key={action.href} href={action.href} className={styles.card}><span className={styles.number}>{action.number}</span><h2>{action.title}</h2><p>{action.description}</p><strong>{action.label} <span aria-hidden="true">→</span></strong></Link>)}
       </section>

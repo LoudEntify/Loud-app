@@ -50,7 +50,7 @@ function when(iso) {
   });
 }
 
-export default function InvitedShows({ accessToken }) {
+export default function InvitedShows({ accessToken, className = '' }) {
   const [slots, setSlots] = useState(null);
   // One-second clock, the same one the host's own card runs on, so the
   // window opens on both artists' screens at the same moment rather than
@@ -90,7 +90,7 @@ export default function InvitedShows({ accessToken }) {
   const claimed = slots.filter((s) => s.status === 'claimed');
 
   return (
-    <div style={{ marginTop: 28 }}>
+    <div className={className} style={{ marginTop: 28 }}>
       {pending.length > 0 && (
         <>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: TEAL }}>INVITATIONS</span>

@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getSupabase } from '../lib/supabaseClient';
+import InvitedShows from './InvitedShows';
 import styles from '../styles/AccountDashboard.module.css';
 
-export default function ArtistWorkspace({ profile }) {
+export default function ArtistWorkspace({ profile, accessToken }) {
   const [shows, setShows] = useState(null);
   const [unavailable, setUnavailable] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -38,6 +39,7 @@ export default function ArtistWorkspace({ profile }) {
   const completed = checks.filter(check => check.complete).length;
 
   return <div className={styles.workspace}>
+    <InvitedShows accessToken={accessToken} className={styles.invitedPanel} />
     <section className={styles.setupPanel} aria-labelledby="artist-setup-title">
       <div className={styles.panelHeader}><div><span className={styles.eyebrow}>YOUR FIRST STEPS</span><h2 id="artist-setup-title">Get ready for your stage.</h2></div><span className={styles.setupCount}>{completed}/{checks.length}</span></div>
       <progress className={styles.setupProgress} value={completed} max={checks.length} aria-label="Artist profile setup" />

@@ -1,5 +1,6 @@
 import nextEnv from '@next/env';
 import { createClient } from '@supabase/supabase-js';
+import { chromium } from 'playwright';
 import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 
@@ -14,6 +15,7 @@ const admin = createClient(url, serviceKey, { auth: { persistSession: false, aut
 const anon = () => createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
 const run = randomBytes(4).toString('hex');
 const created = [];
+let browser;
 const pass = message => console.log(`PASS: ${message}`);
 
 async function artist(suffix) {
@@ -85,6 +87,17 @@ try {
   assert.equal(mine.body.slots?.[0]?.show?.id, show.data.id);
   pass('accepted Versus show appears in the guest artist’s own schedule');
 
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const storageKey = `sb-${new URL(url).hostname.split('.')[0]}-auth-token`;
+  await context.addInitScript(({ key, session }) => localStorage.setItem(key, JSON.stringify(session)), { key: storageKey, session: guest.session });
+  const page = await context.newPage();
+  await page.goto(`${base}/dashboard/artist`);
+  await page.getByText('YOU ARE PERFORMING IN', { exact: true }).waitFor();
+  await page.getByText(show.data.title, { exact: true }).waitFor();
+  pass('confirmed guest performance is visible on the main artist dashboard');
+  await context.close();
+
   const reused = await api('/api/performer/accept-invite', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${guest.session.access_token}` },
@@ -93,6 +106,7 @@ try {
   assert.equal(reused.response.status, 404);
   pass('accepted invitation token cannot be reused');
 } finally {
+  await browser?.close();
   for (const id of created) {
     const { error } = await admin.auth.admin.deleteUser(id);
     if (error) console.error('CLEANUP ERROR: temporary Versus user could not be deleted');
