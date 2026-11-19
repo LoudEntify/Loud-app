@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSession, ensureProfile } from '../lib/supabaseAuth';
 import ArtistWorkspace from './ArtistWorkspace';
+import FanWorkspace from './FanWorkspace';
 import RequireAuth from './RequireAuth';
 import PageShell from './PageShell';
 import styles from '../styles/AccountDashboard.module.css';
@@ -66,6 +67,7 @@ function DashboardContent({ accountRole }) {
         <Link href={artist ? (profile.bio?.trim() && profile.genres?.length ? '/kit-check' : '/settings') : '/discover'} className={styles.primary}>{artist ? (profile.bio?.trim() && profile.genres?.length ? 'Check your camera and sound' : 'Finish your artist profile') : 'Explore performances'} <span aria-hidden="true">↗</span></Link>
       </header>
       {artist && <ArtistWorkspace profile={profile} accessToken={accessToken} />}
+      {!artist && <FanWorkspace userId={profile.id} />}
       <section className={styles.cards} aria-label={artist ? 'Artist tools' : 'Your fan space'}>
         {actions.map(action => <Link key={action.href} href={action.href} className={styles.card}><span className={styles.number}>{action.number}</span><h2>{action.title}</h2><p>{action.description}</p><strong>{action.label} <span aria-hidden="true">→</span></strong></Link>)}
       </section>

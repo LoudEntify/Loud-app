@@ -18,6 +18,7 @@ const client = () => createClient(url, anon, { auth: { persistSession: false, au
 const run = randomBytes(4).toString('hex');
 const created = [];
 let browser;
+let artistFixture = null;
 const pass = text => console.log(`PASS: ${text}`);
 const requireResult = (result, label) => {
   if (result.error) throw new Error(`${label}: ${result.error.code || result.error.status || 'request failed'}`);
@@ -28,6 +29,8 @@ try {
   requireResult(await admin.from('profiles').select('id,role,display_name,genres,full_name,username,date_of_birth,country').limit(0), 'Account schema');
   const { error: versusSchemaError } = await admin.from('show_slots').select('id').limit(0);
   const versusReady = !versusSchemaError;
+  const { error: followsSchemaError } = await admin.from('follows').select('artist_id').limit(0);
+  const followsReady = !followsSchemaError;
   browser = await chromium.launch({ headless: true });
   for (const role of ['artist', 'viewer']) {
     const audience = role === 'artist' ? 'artist' : 'fan';
@@ -57,6 +60,7 @@ try {
     await page.waitForURL(`**/dashboard/${audience}`, { timeout: 30000 });
     await page.getByRole('heading', { name: /Welcome back/ }).waitFor();
     const profile = requireResult(await admin.from('profiles').select('*').eq('id', generated.user.id).single(), 'Profile after confirmation');
+    if (role === 'artist') artistFixture = { id: generated.user.id, displayName: profile.display_name };
     assert.equal(profile.role, role); assert.equal(profile.date_of_birth, '1990-01-01'); assert.equal(profile.country, 'GB');
     pass(`${audience}: confirmation session initializes its profile and opens the correct dashboard`);
     const taken = await fetch(`${base}/api/auth/username?username=${metadata.username}`).then(r => r.json());
@@ -155,6 +159,38 @@ try {
 
     }
     if (role === 'viewer') {
+      await page.goto(`${base}/dashboard/fan`);
+      await page.getByRole('heading', { name: 'Your front row.' }).waitFor();
+      if (followsReady) {
+        assert.ok(artistFixture);
+        requireResult(await admin.from('follows').insert({ follower_id: generated.user.id, artist_id: artistFixture.id }), 'Create temporary follow');
+        const followedTitle = `Followed show ${run}`;
+        const followedShow = requireResult(await admin.from('shows').insert({ artist_id: artistFixture.id, artist_name: artistFixture.displayName, room_name: `followed-${run}`, title: followedTitle, slated_at: new Date(Date.now() + 29 * 60000).toISOString(), duration_minutes: 60, performance_mode: 'solo', state: 'scheduled' }).select('id').single(), 'Create followed show');
+        await page.reload();
+        await page.getByText(followedTitle, { exact: true }).waitFor();
+        let fanReminder = null;
+        for (let reminderAttempt = 0; reminderAttempt < 10; reminderAttempt += 1) {
+          const result = await admin.from('notifications').select('kind,href').eq('user_id', generated.user.id).eq('dedupe_key', `followed-show:${followedShow.id}:reminder:30`).maybeSingle();
+          if (result.error) throw result.error;
+          fanReminder = result.data;
+          if (fanReminder) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        assert.equal(fanReminder?.kind, 'show_reminder');
+        assert.equal(fanReminder?.href, `/live?show=${followedShow.id}`);
+        pass('fan dashboard surfaces followed shows and creates a deduplicated fan reminder');
+      } else {
+        await page.getByRole('link', { name: /Find artists to follow/ }).waitFor();
+        pass('fan dashboard degrades safely while the follows migration is pending');
+      }
+      requireResult(await admin.from('notifications').upsert({ user_id: generated.user.id, kind: 'system', body: `Notification badge ${run}`, href: '/dashboard/fan', dedupe_key: `account-smoke-badge:${run}` }, { onConflict: 'user_id,dedupe_key' }), 'Create badge notification');
+      await page.reload();
+      const notificationsLink = page.getByRole('link', { name: /NOTIFICATIONS/ });
+      await notificationsLink.locator('[aria-label$=" unread"]').waitFor();
+      await notificationsLink.click();
+      await page.getByText(`Notification badge ${run}`, { exact: true }).waitFor();
+      await notificationsLink.locator('[aria-label$=" unread"]').waitFor({ state: 'hidden' });
+      pass('opening notifications renders new activity and clears the shared sidebar badge');
       await page.goto(`${base}/schedule`);
       await page.getByText('Artist scheduling only', { exact: true }).waitFor();
       assert.equal(await page.getByRole('link', { name: 'SCHEDULE', exact: true }).count(), 0);

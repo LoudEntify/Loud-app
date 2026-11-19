@@ -43,19 +43,19 @@ export async function POST(request, { params }) {
     // succeeds even if show_slots/notifications have not been migrated.
     const { data: slots } = await admin
       .from('show_slots')
-      .select('claimed_by_user_id')
-      .eq('show_id', show.id)
-      .not('claimed_by_user_id', 'is', null);
+      .select('claimed_by_user_id, invited_user_id')
+      .eq('show_id', show.id);
 
-    const invitees = [...new Set((slots || []).map(slot => slot.claimed_by_user_id).filter(id => id && id !== auth.user.id))];
+    const invitees = [...new Set((slots || []).flatMap(slot => [slot.claimed_by_user_id, slot.invited_user_id]).filter(id => id && id !== auth.user.id))];
     if (invitees.length) {
       await admin.from('notifications').upsert(
         invitees.map(userId => ({
           user_id: userId,
           kind: 'system',
           body: `“${show.title || 'A show'}” has been cancelled by the host.`,
-          href: '/shows',
+          href: '/dashboard/artist',
           dedupe_key: `show-cancelled:${show.id}:${userId}`,
+          read_at: null,
         })),
         { onConflict: 'user_id,dedupe_key', ignoreDuplicates: true }
       );

@@ -69,6 +69,7 @@ export default function ScheduleShow() {
   // reached them. Separate from `invites` (the link fallback) because
   // they are different states with different next actions.
   const [invited, setInvited] = useState({});
+  const [lineups, setLineups] = useState({});
   const [inviteBusy, setInviteBusy] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [cancelConfirmId, setCancelConfirmId] = useState(null);
@@ -76,6 +77,8 @@ export default function ScheduleShow() {
   const [editingId, setEditingId] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
   const [editForm, setEditForm] = useState({ title: '', date: '', time: '', duration: DEFAULT_DURATION_MINUTES });
+  const [withdrawConfirmId, setWithdrawConfirmId] = useState(null);
+  const [withdrawBusyId, setWithdrawBusyId] = useState(null);
 
   // One-second clock so the countdown and the GO LIVE button flip on
   // their own, without the artist reloading at the critical moment.
@@ -84,7 +87,7 @@ export default function ScheduleShow() {
     return () => clearInterval(id);
   }, []);
 
-  const load = useCallback(async (userId) => {
+  const load = useCallback(async (userId, accessToken) => {
     const { data, error: err } = await getSupabase()
       .from('shows')
       .select('*')
@@ -99,6 +102,20 @@ export default function ScheduleShow() {
     }
     setSchedulingAvailable(true);
     setShows(data || []);
+    const versusShows = (data || []).filter(show => show.performance_mode === 'versus' && show.state !== 'ended');
+    if (accessToken && versusShows.length) {
+      const entries = await Promise.all(versusShows.map(async show => {
+        try {
+          const response = await fetch(`/api/performer/show-lineup?show_id=${encodeURIComponent(show.id)}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+          return [show.id, response.ok ? await response.json() : { status: 'unavailable' }];
+        } catch {
+          return [show.id, { status: 'unavailable' }];
+        }
+      }));
+      setLineups(Object.fromEntries(entries));
+    } else {
+      setLineups({});
+    }
     // Lazy reminder generation -- see lib/scheduling.js for why this
     // runs here rather than in a job.
     syncShowReminders(userId, data || []).catch(() => {});
@@ -122,7 +139,7 @@ export default function ScheduleShow() {
           setAccountRole(profile?.role || 'viewer');
           setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
         }
-        if (profile?.role === 'artist') await load(s.user.id);
+        if (profile?.role === 'artist') await load(s.user.id, s.access_token);
         else if (!cancelled) setShows([]);
       } else {
         setShows([]);
@@ -136,9 +153,21 @@ export default function ScheduleShow() {
     (async () => {
       try {
         const { error: slotsError } = await getSupabase().from('show_slots').select('id').limit(0);
-        if (!cancelled) setVersusAvailable(!slotsError);
+        // show_slots intentionally has zero browser policies and all
+        // grants are revoked. A permission error therefore means the
+        // table EXISTS and is protected correctly; only a missing-table
+        // error means Versus setup has not been applied. Treating every
+        // error as absence disabled Versus on the correctly secured DB.
+        const missing = slotsError && (
+          ['PGRST205', '42P01'].includes(slotsError.code)
+          || /could not find the table|relation .*show_slots.* does not exist|schema cache/i.test(slotsError.message || '')
+        );
+        if (!cancelled) setVersusAvailable(!missing);
       } catch {
-        if (!cancelled) setVersusAvailable(false);
+        // A transient capability check must not remove a scheduling
+        // format. The authenticated invite route remains the authority
+        // and returns a useful setup error if the table truly is absent.
+        if (!cancelled) setVersusAvailable(true);
       }
     })();
     return () => { cancelled = true; };
@@ -199,7 +228,7 @@ export default function ScheduleShow() {
       }
       setOpponent(null);
       setForm({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
-      await load(session.user.id);
+      await load(session.user.id, session.access_token);
     } finally {
       setCreating(false);
     }
@@ -222,6 +251,7 @@ export default function ScheduleShow() {
       if (!res.ok) { setError(body.error || 'Could not create an invite.'); return; }
 
       if (artist) {
+        setLineups((prev) => ({ ...prev, [show.id]: { status: 'pending', artist: { id: artist.id, displayName: body.invited?.displayName || artist.display_name, username: body.invited?.username || artist.username }, inviteToken: body.inviteToken } }));
         setInvited((prev) => ({
           ...prev,
           [show.id]: {
@@ -235,6 +265,7 @@ export default function ScheduleShow() {
           },
         }));
       } else {
+        setLineups((prev) => ({ ...prev, [show.id]: { status: 'pending', artist: null, inviteToken: body.inviteToken } }));
         setInvites((prev) => ({ ...prev, [show.id]: `${window.location.origin}/join/${body.inviteToken}` }));
       }
     } finally {
@@ -257,11 +288,36 @@ export default function ScheduleShow() {
         return;
       }
       setCancelConfirmId(null);
-      await load(session.user.id);
+      await load(session.user.id, session.access_token);
     } catch {
       setError('Could not cancel that show. Check your connection and try again.');
     } finally {
       setCancelBusyId(null);
+    }
+  }
+
+  async function withdrawInvite(show) {
+    if (!session?.access_token || withdrawBusyId) return;
+    setWithdrawBusyId(show.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/performer/show-lineup?show_id=${encodeURIComponent(show.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not withdraw that invitation.');
+        return;
+      }
+      setWithdrawConfirmId(null);
+      setLineups((prev) => ({ ...prev, [show.id]: { status: 'empty' } }));
+      setInvited((prev) => { const next = { ...prev }; delete next[show.id]; return next; });
+      setInvites((prev) => { const next = { ...prev }; delete next[show.id]; return next; });
+    } catch {
+      setError('Could not withdraw that invitation. Check your connection and try again.');
+    } finally {
+      setWithdrawBusyId(null);
     }
   }
 
@@ -299,7 +355,7 @@ export default function ScheduleShow() {
         return;
       }
       setEditingId(null);
-      await load(session.user.id);
+      await load(session.user.id, session.access_token);
     } catch {
       setError('Could not update that show. Check your connection and try again.');
     } finally {
@@ -689,7 +745,27 @@ export default function ScheduleShow() {
                       expect. */}
                   {SHOW_SCHEDULE_FORM && (s.performance_mode === 'versus') && !expired && (
                     <div style={{ marginTop: 8 }}>
-                      {invited[s.id] ? (
+                      {lineups[s.id]?.status === 'claimed' ? (
+                        <div style={{ border: '1px solid rgba(46,196,182,0.55)', background: 'rgba(46,196,182,0.07)', padding: '10px 12px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>LINE-UP CONFIRMED</div>
+                          <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.58)', marginTop: 4 }}>
+                            {(lineups[s.id].artist?.displayName || lineups[s.id].artist?.username || 'Your guest artist')} accepted slot B.
+                          </div>
+                        </div>
+                      ) : lineups[s.id]?.status === 'pending' ? (
+                        <div style={{ border: '1px solid rgba(255,159,28,0.45)', background: 'rgba(255,159,28,0.05)', padding: '10px 12px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>INVITATION PENDING</div>
+                          <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.58)', marginTop: 4 }}>
+                            Waiting for {(lineups[s.id].artist?.displayName || lineups[s.id].artist?.username || lineups[s.id].invitedUsername || 'the invited artist')} to accept slot B.
+                          </div>
+                          {lineups[s.id].inviteToken && (
+                            <button type="button" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/join/${lineups[s.id].inviteToken}`); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }} style={{ marginTop: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{copiedId === s.id ? 'LINK COPIED' : 'COPY INVITE LINK'}</button>
+                          )}
+                          <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                            {withdrawConfirmId === s.id ? <><span style={{ fontSize: 10, color: 'rgba(1,22,39,0.55)' }}>Withdraw this invitation?</span><button type="button" onClick={() => setWithdrawConfirmId(null)} disabled={withdrawBusyId === s.id} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.5)', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>KEEP IT</button><button type="button" onClick={() => withdrawInvite(s)} disabled={withdrawBusyId === s.id} style={{ border: '1px solid rgba(231,29,54,0.4)', background: 'rgba(231,29,54,0.06)', color: '#b5122a', padding: '5px 8px', fontSize: 9, fontWeight: 700, cursor: withdrawBusyId === s.id ? 'default' : 'pointer' }}>{withdrawBusyId === s.id ? 'WITHDRAWING…' : 'YES, WITHDRAW'}</button></> : <button type="button" onClick={() => setWithdrawConfirmId(s.id)} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.48)', padding: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', cursor: 'pointer' }}>WITHDRAW INVITE</button>}
+                          </div>
+                        </div>
+                      ) : invited[s.id] ? (
                         <div style={{ border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
                           <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>
                             Invited {invited[s.id].name}

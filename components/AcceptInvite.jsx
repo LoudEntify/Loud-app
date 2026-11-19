@@ -21,6 +21,8 @@ export default function AcceptInvite({ token }) {
   const [invite, setInvite] = useState(undefined); // undefined = loading, null = invalid
   const [session, setSession] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [declineConfirm, setDeclineConfirm] = useState(false);
+  const [declined, setDeclined] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -60,6 +62,23 @@ export default function AcceptInvite({ token }) {
     }
   }
 
+  async function decline() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/performer/accept-invite', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ invite_token: token }),
+      });
+      const body = await res.json();
+      if (!res.ok) { setError(body.error || 'Could not decline this invitation.'); return; }
+      setDeclined(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (invite === undefined) {
     return <div style={{ padding: 40, fontSize: 12, color: 'rgba(1,22,39,0.4)' }}>Loading…</div>;
   }
@@ -80,7 +99,13 @@ export default function AcceptInvite({ token }) {
           </div>
         )}
 
-        {invite && (
+        {declined && (
+          <div style={{ marginTop: 28 }}>
+            <EmptyState title="Invitation declined" body="The host has been notified and the slot is available again." action="BACK TO DASHBOARD" actionHref="/dashboard/artist" />
+          </div>
+        )}
+
+        {invite && !declined && (
           <>
             <div style={{ fontSize: 10, letterSpacing: '0.14em', color: 'rgba(1,22,39,0.5)', marginTop: 26 }}>YOU&apos;RE INVITED TO PERFORM</div>
             <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8, lineHeight: 1.2 }}>
@@ -95,14 +120,10 @@ export default function AcceptInvite({ token }) {
             {error && <div style={{ fontSize: 12, color: '#e71d36', marginTop: 14 }}>{error}</div>}
 
             {session ? (
-              <button
-                type="button"
-                onClick={accept}
-                disabled={busy}
-                style={{ marginTop: 22, width: '100%', padding: '15px 0', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: PORCELAIN, background: 'linear-gradient(90deg,#2ec4b6,#ff9f1c)', border: 'none', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}
-              >
-                {busy ? 'ACCEPTING…' : 'ACCEPT AND ADD TO MY SHOWS'}
-              </button>
+              <div style={{ marginTop: 22 }}>
+                <button type="button" onClick={accept} disabled={busy} style={{ width: '100%', padding: '15px 0', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: PORCELAIN, background: 'linear-gradient(90deg,#2ec4b6,#ff9f1c)', border: 'none', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'WORKING…' : 'ACCEPT AND ADD TO MY SHOWS'}</button>
+                {declineConfirm ? <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}><span style={{ fontSize: 11, color: 'rgba(1,22,39,0.55)' }}>Decline this invitation?</span><button type="button" onClick={() => setDeclineConfirm(false)} disabled={busy} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.55)', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>KEEP IT</button><button type="button" onClick={decline} disabled={busy} style={{ border: '1px solid rgba(231,29,54,0.45)', background: 'rgba(231,29,54,0.06)', color: '#b5122a', padding: '7px 10px', fontSize: 10, fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? 'DECLINING…' : 'YES, DECLINE'}</button></div> : <button type="button" onClick={() => setDeclineConfirm(true)} disabled={busy} style={{ display: 'block', margin: '12px auto 0', border: 0, background: 'none', color: 'rgba(1,22,39,0.5)', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>DECLINE INVITATION</button>}
+              </div>
             ) : (
               <div style={{ marginTop: 22 }}>
                 <EmptyState

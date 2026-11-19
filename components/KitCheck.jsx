@@ -56,7 +56,7 @@ function isMissingShowsTable(error) {
 // the stage regardless. See handOverToShow.
 const HANDOVER_MIGRATE_CEILING_MS = 2500;
 
-export default function KitCheck() {
+export default function KitCheck({ liveStreamingReady = true }) {
   const router = useRouter();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -487,6 +487,10 @@ export default function KitCheck() {
   const handOverToShow = useCallback((reason) => {
     if (handingOver) return;
     if (!upcoming?.id) return;
+    if (!liveStreamingReady) {
+      setHandoverError('Live streaming setup is still pending. Your kit settings are safe, but the stage cannot open yet.');
+      return;
+    }
     setHandingOver(true);
     setHandoverError('');
 
@@ -543,7 +547,7 @@ export default function KitCheck() {
         clearTimeout(guard);
         go();
       });
-  }, [handingOver, upcoming, session, router, stopCamera]);
+  }, [handingOver, upcoming, liveStreamingReady, session, router, stopCamera]);
 
   // ── The last minute before SHOWTIME → countdown, then live ──
   //
@@ -556,14 +560,16 @@ export default function KitCheck() {
   const countdown = handover.status === 'countdown' || handover.status === 'due' ? handover.countdown : null;
 
   useEffect(() => {
+    if (!liveStreamingReady) return;
     if (handover.status !== 'due') return;
     handOverToShow('automatic');
-  }, [handover.status, handOverToShow]);
+  }, [handover.status, handOverToShow, liveStreamingReady]);
 
   // Manual GO LIVE NOW (Finding 2). Available whenever the broadcast
   // window is open -- see canHandOverNow for why that bound and not the
   // show window.
-  const canGoLiveNow = canHandOverNow(upcoming, now);
+  const windowAllowsGoLive = canHandOverNow(upcoming, now);
+  const canGoLiveNow = liveStreamingReady && windowAllowsGoLive;
   // The clock time the button unlocks, not only the countdown. An artist
   // setting up hours early wants to know WHEN to come back; "in 4h 12m"
   // is something they then have to do arithmetic on.
@@ -614,6 +620,13 @@ export default function KitCheck() {
           <div style={{ marginTop: 12, fontSize: 11.5, color: '#e71d36', lineHeight: 1.5 }}>{showLoadError}</div>
         )}
 
+        {!liveStreamingReady && (
+          <div role="status" style={{ marginTop: 12, padding: '12px 14px', maxWidth: 640, border: '1px solid rgba(255,159,28,0.35)', borderRadius: 12, background: 'rgba(255,159,28,0.08)', color: '#6b4100', fontSize: 11.5, lineHeight: 1.55 }}>
+            <strong style={{ display: 'block', letterSpacing: '0.05em' }}>STREAMING SETUP PENDING</strong>
+            Camera, audio, cues and local Kit Check remain available. Automatic handoff is paused and Go Live stays locked until the broadcast service is configured.
+          </div>
+        )}
+
         {!scheduleAvailable && (
           <div style={{ marginTop: 12, fontSize: 11.5, color: 'rgba(1,22,39,0.55)', lineHeight: 1.5 }}>
             Scheduled shows are not set up yet. You can still check your camera and audio here.
@@ -654,7 +667,9 @@ export default function KitCheck() {
               onClick={() => handOverToShow('manual')}
               disabled={!canGoLiveNow || handingOver}
               title={
-                canGoLiveNow
+                !liveStreamingReady
+                  ? 'Live streaming setup is pending'
+                  : canGoLiveNow
                   ? 'Take me to my show now'
                   : `Unlocks at ${goLiveUnlocksAtLabel} — 30 minutes before your show`
               }
@@ -672,6 +687,8 @@ export default function KitCheck() {
             <span style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.5)', lineHeight: 1.5, flex: '1 1 240px' }}>
               {handingOver
                 ? 'Moving your cameras across and putting you on stage.'
+                : !liveStreamingReady
+                  ? 'Your kit stays available here. Go Live will unlock when streaming setup is complete.'
                 : canGoLiveNow
                   ? 'Skips the wait. Your paired cameras come with you, exactly as they would at showtime.'
                   : `Unlocks at ${goLiveUnlocksAtLabel}, ${humanCountdown(msUntilWindow(upcoming, now))} — 30 minutes before your show.`}

@@ -1323,7 +1323,7 @@ button {
   }
 }
 
-/* Live show discovery rail (LiveShowRail.jsx) -- skeleton this round,
+/* Live show discovery rail (LiveShowRail.jsx),
    viewer-only, docked in .desktop-side-column--right (the same column
    BroadcastStage's VideoDeckPanel uses; viewer never has that column's
    content, so no collision). Unlike the fully-transparent control
@@ -1405,6 +1405,46 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.live-show-swipe-hint {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .live-show-swipe-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 82px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transform: translateX(-50%);
+    padding: 6px 10px;
+    border: 1px solid rgba(46, 196, 182, 0.35);
+    border-radius: 999px;
+    background: rgba(1, 22, 39, 0.58);
+    color: rgba(253, 255, 252, 0.72);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-shadow: var(--text-halo);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: swipeHintIn 500ms ease-out both;
+  }
+
+  .live-show-swipe-hint span {
+    color: #2ec4b6;
+    font-size: 14px;
+    line-height: 0.7;
+  }
+}
+
+@keyframes swipeHintIn {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 /* The panel's own box is a sibling of .stage-video-area with a higher

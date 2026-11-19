@@ -26,7 +26,7 @@ export async function PATCH(request, { params }) {
     const admin = getSupabaseAdmin();
     const { data: show, error: readError } = await admin
       .from('shows')
-      .select('id, artist_id, state, actual_started_at')
+      .select('id, artist_id, title, slated_at, duration_minutes, performance_mode, state, actual_started_at')
       .eq('id', id)
       .maybeSingle();
 
@@ -49,6 +49,26 @@ export async function PATCH(request, { params }) {
 
     if (updateError) return NextResponse.json({ error: 'Could not update that show.' }, { status: 503 });
     if (!updated) return NextResponse.json({ error: 'The show changed before it could be updated. Refresh and try again.' }, { status: 409 });
+
+    if (show.performance_mode === 'versus') {
+      const { data: slots } = await admin
+        .from('show_slots')
+        .select('invited_user_id, claimed_by_user_id')
+        .eq('show_id', show.id)
+        .eq('slot', 'b');
+      const guests = [...new Set((slots || []).flatMap(slot => [slot.claimed_by_user_id, slot.invited_user_id]).filter(Boolean))];
+      if (guests.length) {
+        const when = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/London' }).format(slatedAt);
+        await admin.from('notifications').upsert(guests.map(userId => ({
+          user_id: userId,
+          kind: 'system',
+          body: `“${updated.title || 'A Versus show'}” was updated. It is now scheduled for ${when}.`,
+          href: '/dashboard/artist',
+          dedupe_key: `show-updated:${show.id}:${userId}`,
+          read_at: null,
+        })), { onConflict: 'user_id,dedupe_key' });
+      }
+    }
 
     return NextResponse.json({ ok: true, show: updated });
   } catch (error) {

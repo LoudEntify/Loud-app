@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft, SquaresFour, CalendarBlank } from '@phosphor-icons/react';
 import { getSession, getProfile } from '../lib/supabaseAuth';
-import { fetchUnreadCount } from '../lib/unreadCount';
+import { fetchUnreadCount, NOTIFICATIONS_CHANGED_EVENT } from '../lib/unreadCount';
 import Logo from './Logo';
 
 // Shared account navigation. The schedule destination is loaded from the
@@ -65,8 +65,18 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
     // Re-read on return, so opening the panel in another tab and coming
     // back does not leave a badge claiming unread items that are read.
     const onFocus = () => load();
+    const onNotificationsChanged = (event) => {
+      const next = event.detail?.unreadCount;
+      if (Number.isFinite(next)) setUnread(next);
+      else load();
+    };
     window.addEventListener('focus', onFocus);
-    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+    };
   }, []);
 
   const [hidden, setHidden] = useState(false);

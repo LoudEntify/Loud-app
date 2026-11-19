@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Broadcast, ChatCircleText, UserPlus, Bell } from '@phosphor-icons/react';
 import { getSupabase } from '../lib/supabaseClient';
@@ -44,19 +44,16 @@ function relativeTime(iso) {
 export default function Notifications() {
   const [items, setItems] = useState(null); // null = loading
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const load = useCallback(async ({ markRead = true } = {}) => {
       try {
         const session = await getSession();
-        if (!session?.user) { if (!cancelled) setItems([]); return; }
+        if (!session?.user) { setItems([]); return; }
         const { data, error } = await getSupabase()
           .from('notifications')
           .select('*')
           .eq('user_id', session.user.id)
           .order('created_at', { ascending: false })
           .limit(50);
-        if (cancelled) return;
         setItems(error ? [] : (data || []));
 
         // ── MARKED READ ON OPEN, AFTER RENDERING ──────────────────
@@ -70,13 +67,26 @@ export default function Notifications() {
         // notification stayed unread forever, which was invisible
         // because nothing counted them; adding a badge without this
         // would have produced a number that only ever grew.
-        if (session?.user?.id) markAllNotificationsRead(session.user.id);
+        if (markRead && session?.user?.id) markAllNotificationsRead(session.user.id);
       } catch {
-        if (!cancelled) setItems([]);
+        setItems([]);
       }
-    })();
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    load();
+    const refresh = setInterval(() => { if (active) load(); }, 30000);
+    const onVisible = () => {
+      if (active && document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      clearInterval(refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load]);
 
   return (
     <div style={{ minHeight: '100vh', width: '100%', boxSizing: 'border-box', background: PORCELAIN, color: INK, padding: '32px 40px 60px' }}>

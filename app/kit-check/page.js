@@ -12,11 +12,17 @@ export const metadata = {
 // navigation. It deliberately does not enable PageShell's live overlay:
 // testing equipment is preparation, not an active broadcast.
 export default function KitCheckPage() {
+  const liveStreamingReady = Boolean(
+    process.env.LIVEKIT_URL
+    && process.env.LIVEKIT_API_KEY
+    && process.env.LIVEKIT_API_SECRET
+  );
+
   return (
     <PageShell active="live">
       <Suspense fallback={null}>
         <RequireAuth signInPath="/auth/artist">
-          <KitCheck />
+          <KitCheck liveStreamingReady={liveStreamingReady} />
         </RequireAuth>
       </Suspense>
     </PageShell>
