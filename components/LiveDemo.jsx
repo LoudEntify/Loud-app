@@ -59,6 +59,7 @@ import {
 } from '../lib/trackSources';
 import { createBrollPlayer, isBrollPlaybackSupported } from '../lib/brollPlayback';
 import { createAutoDirector } from '../lib/autoDirector';
+import { cameraRecommendationForRules } from '../lib/cameraRecommendationRuntime';
 import { createCueDirector } from '../lib/cueDirector';
 import { effectiveState, showOriginMs, showOriginSource } from '../lib/showState';
 import { showWindowClosesAt } from '../lib/showWindow';
@@ -5002,7 +5003,17 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       logHealthEvent('shot_unresolved', { shot: shotKey, decisionSource, availableRoles: roles });
       return null;
     }
-    const { targetIdentity, targetSourceKey } = resolveTarget(sourceTracks, role, sourceRole);
+    let { targetIdentity, targetSourceKey } = resolveTarget(sourceTracks, role, sourceRole);
+    if (isAutomatic && targetSourceKey) {
+      const selected = cameraRecommendationForRules(targetSourceKey, { decisionSource });
+      if (selected.cameraId && selected.cameraId !== targetSourceKey) {
+        const recommendedTrack = sourceTracks.find(trackRef => sourceKey(trackRef) === selected.cameraId);
+        if (recommendedTrack) {
+          targetSourceKey = selected.cameraId;
+          targetIdentity = recommendedTrack.participant?.identity || targetIdentity;
+        }
+      }
+    }
     const command = buildShotCommand({
       showId: roomName,
       artistId,
