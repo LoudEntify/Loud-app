@@ -21,6 +21,7 @@ import ViewerStage from './ViewerStage';
 import PairingPanel from './PairingPanel';
 import ReactionLayer from './ReactionLayer';
 import ViewerAudioGate from './ViewerAudioGate';
+import YouTubeLivePlayer from './YouTubeLivePlayer';
 
 // PILOT 2 — see the render site for why. Flip to true after the 27th.
 const REACTIONS_ENABLED = false;
@@ -812,6 +813,8 @@ export default function LiveDemo() {
   // sets 'a'/'b' locally -- entitlement is join-show's answer, not this
   // component's guess.
   const [role, setRole] = useState('viewer'); // 'viewer' | 'a' | 'b' (post-join only)
+  const [youtubeExperience, setYouTubeExperience] = useState(null);
+  const youtubeLookupAttemptedRef = useRef(false);
 
   // ── ITEM 4 / 11f: who is watching ─────────────────────────────
   // viewerId is device-scoped and NEVER goes over the LiveKit wire --
@@ -1236,6 +1239,22 @@ export default function LiveDemo() {
     }
   }, [show?.id]);
 
+  const resolveYouTubeViewer = useCallback(async () => {
+    if (!show?.id) return false;
+    try {
+      const response = await fetch(`/api/shows/${encodeURIComponent(show.id)}/youtube-player`, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (data.status === 'NOT_CONFIGURED' || data.status === 'NOT_FOUND') return false;
+      setYouTubeExperience({ ...data, title: data.title || show.title || 'Live show', roomName: data.roomName || show.room_name });
+      setStep('youtube');
+      return true;
+    } catch {
+      // Rollout fallback: an unavailable lookup must not remove the
+      // existing LiveKit viewer experience.
+      return false;
+    }
+  }, [show]);
+
   // ── Entering the show ────────────────────────────────────────
   // Performer first, viewer second, and the SERVER decides which. This
   // client makes no entitlement guess at all: join-show re-checks
@@ -1373,6 +1392,10 @@ export default function LiveDemo() {
     }
 
     try {
+      // YouTube distribution replaces the audience transport only. It
+      // does not create a LiveKit identity or a Loudentify viewer-session
+      // row, and performers never reach this branch.
+      if (await resolveYouTubeViewer()) return;
       // Identity is derived from the account rather than a typed name --
       // the same account on a second device gets a distinct identity
       // (the timestamp) so the two can't collide and evict each other.
@@ -1442,7 +1465,7 @@ export default function LiveDemo() {
       setBlockedReason(e.message || 'Could not connect to this show.');
       setStep('blocked');
     }
-  }, [show, session, name, registerParticipant, showNotice]);
+  }, [show, session, name, registerParticipant, showNotice, resolveYouTubeViewer]);
 
   // One entry attempt per mount. The window flipping open is what
   // triggers it for anyone who arrived early -- `now` ticks every
@@ -1454,7 +1477,10 @@ export default function LiveDemo() {
     if (step !== 'resolving' && step !== 'waiting') return;
     if (session === undefined || !identityReady || !show) return;
     if (showState === 'ended') {
-      setStep('ended');
+      if (!youtubeLookupAttemptedRef.current) {
+        youtubeLookupAttemptedRef.current = true;
+        resolveYouTubeViewer().then((found) => { if (!found) setStep('ended'); });
+      }
       return;
     }
     if (!windowOpen) {
@@ -1499,6 +1525,10 @@ export default function LiveDemo() {
     // row carries their real user_id -- which is a stronger key than a
     // typed name.
     if (!session?.user?.id && !viewerEntry) {
+      if (!youtubeLookupAttemptedRef.current) {
+        youtubeLookupAttemptedRef.current = true;
+        resolveYouTubeViewer();
+      }
       setStep('waiting');
       return;
     }
@@ -1506,7 +1536,7 @@ export default function LiveDemo() {
     enterAttemptedRef.current = true;
     setStep('entering');
     enterShow();
-  }, [step, session, identityReady, show, showState, windowOpen, enterShow, viewerEntry]);
+  }, [step, session, identityReady, show, showState, windowOpen, enterShow, viewerEntry, resolveYouTubeViewer]);
 
   // One deliberate human retry, for the case the automatic path gave up
   // on. Resets the once-per-mount guard rather than reloading the page,
@@ -1579,6 +1609,14 @@ export default function LiveDemo() {
             {profileRole === 'artist' ? 'GO TO MY CONSOLE' : 'BROWSE SHOWS'}
           </Link>
         </div>
+      </PageShell>
+    );
+  }
+
+  if (step === 'youtube' && youtubeExperience) {
+    return (
+      <PageShell active="live" autoHideSidebar liveOverlay>
+        <YouTubeLivePlayer experience={youtubeExperience} />
       </PageShell>
     );
   }

@@ -3,6 +3,7 @@ import { assertYouTubeConnectionOwner, buildYouTubeAuthorizationUrl, createPkceP
 import { classifyYouTubeReadinessError, readinessCacheTtlMs, YOUTUBE_READINESS } from '../lib/youtubeReadiness.mjs';
 import { assertBroadcastOwner, classifyBroadcastError, showMarker, validateBroadcastInput } from '../lib/youtubeBroadcastCore.mjs';
 import { createYouTubeBroadcastManager } from '../lib/youtubeBroadcastManager.mjs';
+import { youtubePlayerExperience } from '../lib/youtubePlayer.mjs';
 
 const key = Buffer.alloc(32, 7).toString('base64');
 assert.equal(parseEncryptionKey(key).length, 32);
@@ -114,5 +115,12 @@ provider.getStatus = async () => { throw Object.assign(new Error('quota'), { sta
 await assert.rejects(() => manager.status({ showId: show.id, artistId: 'artist-a' }), error => error.broadcastFailure?.code === 'YOUTUBE_QUOTA_LIMIT');
 assert.equal(rows.get(show.id).last_error, 'YOUTUBE_QUOTA_LIMIT');
 provider.getStatus = workingStatus;
+
+const playerShow = { state: 'soundcheck', title: 'Player show', room_name: 'room-a' };
+assert.deepEqual(youtubePlayerExperience(playerShow, null), { status: 'NOT_CONFIGURED' });
+assert.equal(youtubePlayerExperience(playerShow, { youtube_broadcast_id: 'abcdefghijk', privacy_status: 'private', state: 'live' }).status, 'PRIVATE');
+assert.equal(youtubePlayerExperience(playerShow, { youtube_broadcast_id: 'abcdefghijk', privacy_status: 'unlisted', state: 'live' }).status, 'LIVE');
+assert.equal(youtubePlayerExperience({ ...playerShow, state: 'ended' }, { youtube_broadcast_id: 'abcdefghijk', privacy_status: 'public', state: 'complete' }).status, 'ENDED');
+assert.equal(youtubePlayerExperience(playerShow, { youtube_broadcast_id: 'not-valid', privacy_status: 'public', state: 'live' }).status, 'UNAVAILABLE');
 
 console.log('youtube core: OAuth, ownership, readiness and mocked broadcast management passed');

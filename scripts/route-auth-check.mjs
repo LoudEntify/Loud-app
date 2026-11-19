@@ -73,6 +73,15 @@ const AUTH_MARKERS = [
 // Clearing a `pending` means fixing the route and DELETING the entry —
 // not editing it into a `settled`.
 const ALLOWLIST = {
+  'shows/[id]/youtube-player/route.js': {
+    status: 'settled',
+    reason:
+      'Public, rate-limited, read-only lookup for the public show-viewing page. It returns ' +
+      'only the associated YouTube video id for public or unlisted broadcasts plus a coarse ' +
+      'playback state. Private broadcasts return no id. The query never selects OAuth tokens, ' +
+      'ingestion credentials, channel credentials or artist-private data. Requiring a session ' +
+      'would prevent the anonymous audience from using the official embedded player.',
+  },
   'auth/username/route.js': {
     status: 'settled',
     reason:
