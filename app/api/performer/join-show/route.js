@@ -46,13 +46,6 @@ function windowState(show, now = Date.now()) {
 
 export async function POST(request) {
   try {
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const livekitUrl = process.env.LIVEKIT_URL;
-    if (!apiKey || !apiSecret || !livekitUrl) {
-      return NextResponse.json({ error: 'Server missing LiveKit environment variables' }, { status: 500 });
-    }
-
     const auth = await verifyArtistAuth(request);
     if (auth.error) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -139,6 +132,23 @@ export async function POST(request) {
       return NextResponse.json(
         { error: 'You are not on the line-up for this show.' },
         { status: 403 }
+      );
+    }
+
+    // Only report infrastructure readiness after the request has passed
+    // authentication, the live-window gate and line-up authorization. This
+    // keeps an early or unauthorized request from being mistaken for a
+    // LiveKit outage and avoids exposing server configuration to outsiders.
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL;
+    if (!apiKey || !apiSecret || !livekitUrl) {
+      return NextResponse.json(
+        {
+          error: 'Live streaming is not configured yet. Your schedule is safe, but Go Live is temporarily unavailable.',
+          code: 'LIVE_NOT_CONFIGURED',
+        },
+        { status: 503 }
       );
     }
 

@@ -6129,6 +6129,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     blurFillCandidates[0];
 
   const stageProps = {
+    showId,
     performanceMode: effectivePerformanceMode,
     renderSlot,
     activePerformerSlot,

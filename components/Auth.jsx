@@ -146,7 +146,7 @@ export default function Auth({ accountRole = null, initialMode = 'login' }) {
         {error && <div className={styles.error} role="alert">{error}</div>}
         <button type="submit" className={styles.submit} disabled={submitting || checking}>{checking ? 'CHECKING YOUR SESSION…' : submitting ? signup ? 'CREATING YOUR ACCOUNT…' : 'SIGNING YOU IN…' : signup ? 'Create your account →' : 'Step inside →'}</button>
       </fieldset>
-      <p className={styles.switchMode}>{signup ? 'Already part of the show?' : 'New to Loudentify?'} <Link href={withNext(signup ? accountRole ? `/auth/${accountRole}` : '/auth' : accountRole ? `/signup/${accountRole}` : '/signup')}>{signup ? 'Sign in' : 'Create an account'} ↗</Link></p>
+      <p className={styles.switchMode}>{signup ? 'Already part of the show?' : 'New to Loudentify?'} <Link href={signup ? withNext(accountRole ? `/auth/${accountRole}` : '/auth') : '/early-access'}>{signup ? 'Sign in' : 'Join the waitlist'} ↗</Link></p>
     </form>
   );
 }

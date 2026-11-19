@@ -1,3 +1,7 @@
-import AccountSignInPage from '../../../components/AccountSignInPage';
-export const metadata = { title: 'Fan Signup | Loudentify', description: 'Create your Loudentify fan account.' };
-export default function FanSignupPage() { return <AccountSignInPage mode="signup" accountRole="fan" />; }
+import { redirect } from 'next/navigation';
+
+export const metadata = { title: 'Fan Waitlist | Loudentify', description: 'Join the Loudentify fan waitlist.' };
+
+export default function FanSignupPage() {
+  redirect('/early-access');
+}

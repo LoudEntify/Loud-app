@@ -82,7 +82,7 @@ export default function WatchRecording({ recording, recordingId }) {
                   compact
                   title="Watching needs an account"
                   body="Loudentify shows are for signed-in members."
-                  action="LOG IN OR SIGN UP"
+                  action="SIGN IN"
                   actionHref={`/auth?next=${encodeURIComponent(`/watch/${recordingId}`)}`}
                 />
               </div>

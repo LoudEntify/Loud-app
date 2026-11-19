@@ -50,8 +50,11 @@ function when(iso) {
   });
 }
 
-export default function InvitedShows({ accessToken }) {
+export default function InvitedShows({ accessToken, className = '' }) {
   const [slots, setSlots] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+  const [declineKey, setDeclineKey] = useState(null);
+  const [actionError, setActionError] = useState('');
   // One-second clock, the same one the host's own card runs on, so the
   // window opens on both artists' screens at the same moment rather than
   // whenever one of them happens to re-render.
@@ -80,6 +83,32 @@ export default function InvitedShows({ accessToken }) {
     return () => { cancelled = true; };
   }, [accessToken]);
 
+  async function respond(slot, action) {
+    const key = `${slot.show.id}:${slot.slot}`;
+    setBusyKey(key);
+    setActionError('');
+    try {
+      const response = await fetch('/api/performer/accept-invite', {
+        method: action === 'accept' ? 'POST' : 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ invite_token: slot.inviteToken }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setActionError(body.error || `Could not ${action} this invitation.`);
+        return;
+      }
+      setDeclineKey(null);
+      setSlots(current => action === 'accept'
+        ? current.map(item => item.show.id === slot.show.id && item.slot === slot.slot ? { ...item, status: 'claimed', inviteToken: null } : item)
+        : current.filter(item => !(item.show.id === slot.show.id && item.slot === slot.slot)));
+    } catch {
+      setActionError(`Could not ${action} this invitation. Check your connection and try again.`);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   // Nothing at all is the common case and deserves no space. Distinct
   // from `null` (still loading), which also renders nothing but for a
   // different reason — a heading that appears and then empties is worse
@@ -90,10 +119,11 @@ export default function InvitedShows({ accessToken }) {
   const claimed = slots.filter((s) => s.status === 'claimed');
 
   return (
-    <div style={{ marginTop: 28 }}>
+    <div className={className} style={{ marginTop: 28 }}>
       {pending.length > 0 && (
         <>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: TEAL }}>INVITATIONS</span>
+          {actionError && <div role="alert" style={{ marginTop: 8, fontSize: 11, color: '#e71d36' }}>{actionError}</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
             {pending.map((s) => (
               <div
@@ -114,16 +144,11 @@ export default function InvitedShows({ accessToken }) {
                     resolves — the same screen a link would have opened.
                     One accept path, whether the invitation arrived as a
                     notification, a banner, or a link. */}
-                <Link
-                  href={`/join/${s.inviteToken}`}
-                  style={{
-                    display: 'inline-block', marginTop: 9, padding: '8px 14px',
-                    fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-                    background: TEAL, color: INK, textDecoration: 'none',
-                  }}
-                >
-                  ACCEPT
-                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => respond(s, 'accept')} disabled={busyKey === `${s.show.id}:${s.slot}`} style={{ padding: '8px 14px', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', background: TEAL, color: INK, border: 0, cursor: busyKey ? 'default' : 'pointer' }}>{busyKey === `${s.show.id}:${s.slot}` ? 'WORKING…' : 'ACCEPT'}</button>
+                  <Link href={`/join/${s.inviteToken}`} style={{ fontSize: 9.5, fontWeight: 700, color: 'rgba(1,22,39,0.52)', textDecoration: 'none' }}>VIEW DETAILS</Link>
+                  {declineKey === `${s.show.id}:${s.slot}` ? <><span style={{ fontSize: 10, color: 'rgba(1,22,39,0.5)' }}>Decline?</span><button type="button" onClick={() => setDeclineKey(null)} disabled={!!busyKey} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.5)', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>KEEP</button><button type="button" onClick={() => respond(s, 'decline')} disabled={!!busyKey} style={{ border: '1px solid rgba(231,29,54,0.4)', background: 'rgba(231,29,54,0.05)', color: '#b5122a', padding: '6px 8px', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>YES, DECLINE</button></> : <button type="button" onClick={() => setDeclineKey(`${s.show.id}:${s.slot}`)} disabled={!!busyKey} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.48)', padding: 0, fontSize: 9.5, fontWeight: 700, cursor: 'pointer' }}>DECLINE</button>}
+                </div>
               </div>
             ))}
           </div>

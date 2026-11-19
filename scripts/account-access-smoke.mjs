@@ -18,6 +18,7 @@ const client = () => createClient(url, anon, { auth: { persistSession: false, au
 const run = randomBytes(4).toString('hex');
 const created = [];
 let browser;
+let artistFixture = null;
 const pass = text => console.log(`PASS: ${text}`);
 const requireResult = (result, label) => {
   if (result.error) throw new Error(`${label}: ${result.error.code || result.error.status || 'request failed'}`);
@@ -26,6 +27,10 @@ const requireResult = (result, label) => {
 
 try {
   requireResult(await admin.from('profiles').select('id,role,display_name,genres,full_name,username,date_of_birth,country').limit(0), 'Account schema');
+  const { error: versusSchemaError } = await admin.from('show_slots').select('id').limit(0);
+  const versusReady = !versusSchemaError;
+  const { error: followsSchemaError } = await admin.from('follows').select('artist_id').limit(0);
+  const followsReady = !followsSchemaError;
   browser = await chromium.launch({ headless: true });
   for (const role of ['artist', 'viewer']) {
     const audience = role === 'artist' ? 'artist' : 'fan';
@@ -55,6 +60,7 @@ try {
     await page.waitForURL(`**/dashboard/${audience}`, { timeout: 30000 });
     await page.getByRole('heading', { name: /Welcome back/ }).waitFor();
     const profile = requireResult(await admin.from('profiles').select('*').eq('id', generated.user.id).single(), 'Profile after confirmation');
+    if (role === 'artist') artistFixture = { id: generated.user.id, displayName: profile.display_name };
     assert.equal(profile.role, role); assert.equal(profile.date_of_birth, '1990-01-01'); assert.equal(profile.country, 'GB');
     pass(`${audience}: confirmation session initializes its profile and opens the correct dashboard`);
     const taken = await fetch(`${base}/api/auth/username?username=${metadata.username}`).then(r => r.json());
@@ -102,6 +108,93 @@ try {
       assert.ok(saved.genres.includes('Afrobeats')); assert.equal(saved.bio, 'Temporary artist integration check.');
       pass('artist profile edits persist and advance the dashboard to equipment preparation');
 
+      const showTitle = `Smoke show ${run}`;
+      const showDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      await page.goto(`${base}/schedule`);
+      await page.getByRole('heading', { name: /Put your next/ }).waitFor();
+      await page.getByRole('link', { name: 'SCHEDULE', exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'VERSUS' }).isDisabled(), !versusReady);
+      await page.getByPlaceholder('What are you calling this one?').fill(showTitle);
+      await page.locator('input[type="date"]').fill(showDate);
+      await page.locator('input[type="time"]').fill('12:00');
+      await page.getByRole('button', { name: 'SCHEDULE SHOW' }).click();
+      await page.getByText(showTitle, { exact: true }).waitFor();
+      const scheduled = requireResult(await admin.from('shows').select('artist_id,state,duration_minutes,performance_mode').eq('artist_id', generated.user.id).eq('title', showTitle).single(), 'Scheduled show');
+      assert.equal(scheduled.artist_id, generated.user.id);
+      assert.equal(scheduled.state, 'scheduled');
+      assert.equal(scheduled.duration_minutes, 60);
+      assert.equal(scheduled.performance_mode, 'solo');
+      pass('artist schedule page creates an owner-scoped show and keeps the sidebar visible');
+      const editedTitle = `${showTitle} edited`;
+      const editedDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      await page.getByRole('button', { name: 'EDIT SHOW' }).click();
+      await page.getByLabel('EDIT SHOW TITLE').fill(editedTitle);
+      await page.getByLabel('EDIT SHOW DATE').fill(editedDate);
+      await page.getByLabel('EDIT SHOW TIME').fill('14:30');
+      await page.getByLabel('EDIT SHOW DURATION').selectOption('90');
+      await page.getByRole('button', { name: 'SAVE CHANGES' }).click();
+      await page.getByText(editedTitle, { exact: true }).waitFor();
+      const edited = requireResult(await admin.from('shows').select('title,slated_at,duration_minutes').eq('artist_id', generated.user.id).eq('title', editedTitle).single(), 'Edited show');
+      assert.equal(edited.duration_minutes, 90);
+      assert.ok(edited.slated_at.startsWith(editedDate));
+      pass('artist can reschedule and edit a show before it starts');
+      await page.getByRole('button', { name: 'CANCEL SHOW' }).click();
+      const [cancelResponse] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/api/shows/') && response.url().endsWith('/cancel')),
+        page.getByRole('button', { name: 'YES, CANCEL' }).click(),
+      ]);
+      assert.equal(cancelResponse.status(), 200, await cancelResponse.text());
+      await page.getByText(editedTitle, { exact: true }).waitFor({ state: 'hidden' });
+      let cancelledShow = null;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        cancelledShow = requireResult(await admin.from('shows').select('state,cancelled_at,cancelled_reason,actual_started_at').eq('artist_id', generated.user.id).eq('title', editedTitle).single(), 'Cancelled show');
+        if (cancelledShow.state === 'ended') break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(cancelledShow.state, 'ended');
+      assert.ok(cancelledShow.cancelled_at);
+      assert.equal(cancelledShow.cancelled_reason, 'artist_cancelled');
+      assert.equal(cancelledShow.actual_started_at, null);
+      pass('artist can confirm cancellation without recording a false performance end');
+
+    }
+    if (role === 'viewer') {
+      await page.goto(`${base}/dashboard/fan`);
+      await page.getByRole('heading', { name: 'Your front row.' }).waitFor();
+      if (followsReady) {
+        assert.ok(artistFixture);
+        requireResult(await admin.from('follows').insert({ follower_id: generated.user.id, artist_id: artistFixture.id }), 'Create temporary follow');
+        const followedTitle = `Followed show ${run}`;
+        const followedShow = requireResult(await admin.from('shows').insert({ artist_id: artistFixture.id, artist_name: artistFixture.displayName, room_name: `followed-${run}`, title: followedTitle, slated_at: new Date(Date.now() + 29 * 60000).toISOString(), duration_minutes: 60, performance_mode: 'solo', state: 'scheduled' }).select('id').single(), 'Create followed show');
+        await page.reload();
+        await page.getByText(followedTitle, { exact: true }).waitFor();
+        let fanReminder = null;
+        for (let reminderAttempt = 0; reminderAttempt < 10; reminderAttempt += 1) {
+          const result = await admin.from('notifications').select('kind,href').eq('user_id', generated.user.id).eq('dedupe_key', `followed-show:${followedShow.id}:reminder:30`).maybeSingle();
+          if (result.error) throw result.error;
+          fanReminder = result.data;
+          if (fanReminder) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        assert.equal(fanReminder?.kind, 'show_reminder');
+        assert.equal(fanReminder?.href, `/live?show=${followedShow.id}`);
+        pass('fan dashboard surfaces followed shows and creates a deduplicated fan reminder');
+      } else {
+        await page.getByRole('link', { name: /Find artists to follow/ }).waitFor();
+        pass('fan dashboard degrades safely while the follows migration is pending');
+      }
+      requireResult(await admin.from('notifications').upsert({ user_id: generated.user.id, kind: 'system', body: `Notification badge ${run}`, href: '/dashboard/fan', dedupe_key: `account-smoke-badge:${run}` }, { onConflict: 'user_id,dedupe_key' }), 'Create badge notification');
+      await page.reload();
+      const notificationsLink = page.getByRole('link', { name: /NOTIFICATIONS/ });
+      await notificationsLink.locator('[aria-label$=" unread"]').waitFor();
+      await notificationsLink.click();
+      await page.getByText(`Notification badge ${run}`, { exact: true }).waitFor();
+      await notificationsLink.locator('[aria-label$=" unread"]').waitFor({ state: 'hidden' });
+      pass('opening notifications renders new activity and clears the shared sidebar badge');
+      await page.goto(`${base}/schedule`);
+      await page.getByText('Artist scheduling only', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'SCHEDULE', exact: true }).count(), 0);
+      pass('fan accounts cannot use artist scheduling or see its sidebar destination');
     }
     // Owner-only profiles: a second anonymous client cannot read the test row.
     const publicRows = requireResult(await client().from('profiles').select('id').eq('id', generated.user.id), 'Anonymous profile access');
@@ -164,21 +257,19 @@ try {
   await guest.getByRole('heading', { name: 'Check your inbox.' }).waitFor();
   assert.ok(recoveryRequested);
   pass('forgot-password form requests the correct callback (email dispatch stubbed)');
-  await guest.goto(`${base}/signup/fan`);
+  let signupRequested = false;
   await guest.route('**/auth/v1/signup**', async route => {
-    const payload = route.request().postDataJSON();
-    assert.equal(payload.data.role, 'viewer');
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({id:'00000000-0000-0000-0000-000000000001',aud:'authenticated',role:'authenticated',email:payload.email,user_metadata:payload.data,identities:[]}) });
+    signupRequested = true;
+    await route.abort();
   });
-  await guest.getByLabel('FULL NAME', { exact: true }).fill('Temporary signup UI');
-  await guest.getByLabel('USERNAME', { exact: true }).fill(`ui_${run}`);
-  await guest.getByLabel('DATE OF BIRTH', { exact: true }).fill('1990-01-01');
-  await guest.getByLabel('COUNTRY', { exact: true }).selectOption('GB');
-  await guest.getByLabel('EMAIL ADDRESS', { exact: true }).fill(`signup-ui-${run}@example.invalid`);
-  await guest.getByLabel('PASSWORD', { exact: true }).fill(`Ui-${randomBytes(12).toString('hex')}!`);
-  await guest.getByRole('button', { name: 'Create your account' }).click();
-  await guest.getByRole('heading', { name: 'Check your inbox.' }).waitFor();
-  pass('signup form reaches confirmation state with valid fan metadata (email dispatch stubbed)');
+  await guest.goto(`${base}/signup/fan`);
+  await guest.waitForURL('**/early-access');
+  assert.equal(signupRequested, false);
+  await guest.goto(`${base}/auth/fan`);
+  const waitlistLink = guest.getByRole('link', { name: /Join the waitlist/ });
+  assert.ok(await waitlistLink.count() >= 1);
+  for (const href of await waitlistLink.evaluateAll(links => links.map(link => link.getAttribute('href')))) assert.equal(href, '/early-access');
+  pass('public signup routes are closed while sign-in points new visitors to the waitlist');
   await guest.close();
 } catch (error) {
   // Never print recovery URLs, tokens, full responses, or test passwords.

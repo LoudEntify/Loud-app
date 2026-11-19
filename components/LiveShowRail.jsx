@@ -1,14 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getAdjacentLiveShows, switchToLiveShow } from '../lib/liveShowDiscovery';
 
-// Skeleton-only demo fixture -- lets the rail's visual styling be
-// reviewed (?demoRail=1) without a real discovery backend existing yet.
-// Deliberately NOT routed through getAdjacentLiveShows -- that stub
-// must stay a clean "always empty" contract for the real future
-// implementation to replace, unpolluted by this round's test fixture.
+// Optional visual fixture retained for design review with ?demoRail=1.
 const DEMO_SHOWS = [
   { id: 'demo-1', artistName: 'Nova Ridge', showTitle: 'Rooftop Session', posterColor: '#2ec4b6' },
   { id: 'demo-2', artistName: 'Kai Solene', showTitle: 'Late Night Acoustic', posterColor: '#e71d36' },
@@ -32,11 +28,11 @@ const DEMO_SHOWS = [
 //     why the data source and switch action live in lib/, not inline
 //     here, and why this component does nothing more than list-render
 //     + call the stub on click.
-// This round: skeleton only. getAdjacentLiveShows always resolves to
-// an empty list (no API route, no live query), so the rail renders
-// nothing by default -- confirmed via ?demoRail=1, which swaps in
-// DEMO_SHOWS above purely for visual review.
-export default function LiveShowRail() {
+// The rail refreshes live lifecycle rows in place. Room switching uses
+// Next navigation so unmounting the existing LiveKitRoom performs the
+// normal leave before the target stage mounts.
+export default function LiveShowRail({ currentShowId, discoveredShows = null }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const demoMode = searchParams.get('demoRail') === '1';
   const [shows, setShows] = useState([]);
@@ -46,17 +42,23 @@ export default function LiveShowRail() {
       setShows(DEMO_SHOWS);
       return undefined;
     }
+    if (Array.isArray(discoveredShows)) {
+      setShows(discoveredShows);
+      return undefined;
+    }
     let cancelled = false;
-    getAdjacentLiveShows().then((list) => {
+    const load = () => getAdjacentLiveShows(currentShowId).then((list) => {
       if (!cancelled) setShows(list);
     });
+    load();
+    const refresh = setInterval(load, 15000);
     return () => {
       cancelled = true;
+      clearInterval(refresh);
     };
-  }, [demoMode]);
+  }, [currentShowId, demoMode, discoveredShows]);
 
-  // Hides cleanly when there's nothing to show -- true unconditionally
-  // this round outside of ?demoRail=1.
+  // Hides cleanly when this is the only active show.
   if (shows.length === 0) return null;
 
   return (
@@ -67,9 +69,10 @@ export default function LiveShowRail() {
           key={show.id}
           type="button"
           className="live-show-rail-card"
-          onClick={() => switchToLiveShow(show.id)}
+          onClick={() => switchToLiveShow(show.id, (href) => router.push(href))}
+          aria-label={`Watch ${show.showTitle} by ${show.artistName}`}
         >
-          <div className="live-show-rail-poster" style={{ background: show.posterColor }}>
+          <div className="live-show-rail-poster" style={{ backgroundColor: show.posterColor, ...(show.avatarUrl ? { backgroundImage: `url(${JSON.stringify(show.avatarUrl)})`, backgroundPosition: 'center', backgroundSize: 'cover' } : {}) }}>
             <span className="live-show-rail-badge">LIVE</span>
           </div>
           <div className="live-show-rail-info">

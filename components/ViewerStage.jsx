@@ -1,10 +1,12 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import VersusSplit from './VersusSplit';
-import SpotlightStage from './SpotlightStage';
 import TopBar from './TopBar';
 import CommentsDock from './CommentsDock';
 import LiveShowRail from './LiveShowRail';
+import { getAdjacentLiveShows, switchToLiveShow, targetForDiscoverySwipe } from '../lib/liveShowDiscovery';
 
 // Desktop fan view -- matches Fan Viewer.dc.html. Solo drops any split
 // entirely. Versus routes to SpotlightStage (Stage 5, MULTI_PERFORMER_
@@ -23,6 +25,7 @@ import LiveShowRail from './LiveShowRail';
 // occupies, since a viewer never has that column's content competing
 // for the space (no technical panels on this path, matching the spec).
 export default function ViewerStage({
+  showId,
   performanceMode,
   renderSlot,
   activePerformerSlot,
@@ -41,11 +44,47 @@ export default function ViewerStage({
   onToggleMaximize,
   onStageClick,
 }) {
+  const router = useRouter();
   const isVersus = performanceMode === 'versus';
+  const [adjacentShows, setAdjacentShows] = useState([]);
+  const touchStart = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => getAdjacentLiveShows(showId).then((shows) => {
+      if (!cancelled) setAdjacentShows(shows);
+    });
+    load();
+    const refresh = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(refresh);
+    };
+  }, [showId]);
+
+  function handleTouchStart(event) {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    touchStart.current = { x: touch.clientX, y: touch.clientY, at: Date.now() };
+  }
+
+  function handleTouchEnd(event) {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start || !adjacentShows.length || !event.changedTouches.length) return;
+    const touch = event.changedTouches[0];
+    const target = targetForDiscoverySwipe(adjacentShows, {
+      dx: touch.clientX - start.x,
+      dy: touch.clientY - start.y,
+      elapsedMs: Date.now() - start.at,
+    });
+    if (!target) return;
+    switchToLiveShow(target.id, (href) => router.push(href));
+  }
 
   return (
     <div className="stage-root">
-      <div className="stage-video-area" onClick={onStageClick}>
+      <div className="stage-video-area" onClick={onStageClick} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {/* Same layout the artist's console shows. Deliberately one
             mental model of the show: the artist should see roughly what
             the audience sees, and a spotlight for one and a split for
@@ -73,9 +112,15 @@ export default function ViewerStage({
           maximized={maximized}
           onToggleMaximize={onToggleMaximize}
         />
+
+        {adjacentShows.length > 0 && (
+          <div className="live-show-swipe-hint" aria-hidden="true">
+            <span>‹</span> SWIPE FOR ANOTHER LIVE SHOW <span>›</span>
+          </div>
+        )}
       </div>
 
-      <LiveShowRail />
+      <LiveShowRail currentShowId={showId} discoveredShows={adjacentShows} />
 
       <CommentsDock
         variant="viewer"

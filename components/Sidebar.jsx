@@ -2,18 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft, SquaresFour } from '@phosphor-icons/react';
-import { getAccountType, onAccountTypeChange } from '../lib/mockAccount';
-import { getSession } from '../lib/supabaseAuth';
-import { fetchUnreadCount } from '../lib/unreadCount';
+import { Compass, Broadcast, UserCircle, Bell, Coins, CaretRight, CaretLeft, SquaresFour, CalendarBlank } from '@phosphor-icons/react';
+import { getSession, getProfile } from '../lib/supabaseAuth';
+import { fetchUnreadCount, NOTIFICATIONS_CHANGED_EVENT } from '../lib/unreadCount';
 import Logo from './Logo';
 
-// Matches Sidebar.dc.html from the Claude Design project exactly (icons,
-// labels, active/wallet color rules). PROFILE's destination is the one
-// item that isn't static -- it routes off the mock accountType (see
-// lib/mockAccount.js): artists always land on the Artist Dashboard,
-// fans always land on Fan Profile, regardless of what page they were
-// just on.
+// Shared account navigation. The schedule destination is loaded from the
+// authenticated database role, never from local storage, so fan accounts
+// cannot be shown an artist-only control after switching devices.
 const BASE_ITEMS = [
   { key: 'dashboard', label: 'DASHBOARD', href: '/dashboard', Icon: SquaresFour },
   { key: 'discover', label: 'DISCOVER', href: '/discover', Icon: Compass },
@@ -51,36 +47,44 @@ export default function Sidebar({ active = 'live', autoHide = false, collapsed =
   // realtime subscription held open on every page for a number nobody
   // acts on immediately is.
   const [unread, setUnread] = useState(0);
+  const [isArtist, setIsArtist] = useState(false);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       const session = await getSession();
       if (cancelled) return;
       setUnread(await fetchUnreadCount(session?.user?.id));
+      if (session?.user?.id) {
+        const { profile } = await getProfile(session.user.id);
+        if (!cancelled) setIsArtist(profile?.role === 'artist');
+      } else {
+        setIsArtist(false);
+      }
     };
     load();
     // Re-read on return, so opening the panel in another tab and coming
     // back does not leave a badge claiming unread items that are read.
     const onFocus = () => load();
+    const onNotificationsChanged = (event) => {
+      const next = event.detail?.unreadCount;
+      if (Number.isFinite(next)) setUnread(next);
+      else load();
+    };
     window.addEventListener('focus', onFocus);
-    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+    };
   }, []);
 
   const [hidden, setHidden] = useState(false);
   const timerRef = useRef(null);
 
-  // Defaults to 'fan' for the first (server-matching) render, then
-  // corrects on mount -- localStorage isn't available during SSR, and
-  // reading it before hydration would cause a mismatch.
-  const [accountType, setAccountTypeState] = useState('fan');
-
-  useEffect(() => {
-    setAccountTypeState(getAccountType());
-    return onAccountTypeChange(() => setAccountTypeState(getAccountType()));
-  }, []);
-
   const items = [
     ...BASE_ITEMS.slice(0, 3),
+    ...(isArtist ? [{ key: 'schedule', label: 'SCHEDULE', href: '/schedule', Icon: CalendarBlank }] : []),
     // One profile destination for everyone. /profile resolves to the
     // artist's own console or the viewer's profile depending on who is
     // asking, so the nav no longer needs to know -- and no longer reads

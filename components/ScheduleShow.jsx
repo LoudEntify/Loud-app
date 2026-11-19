@@ -47,12 +47,15 @@ const labelStyle = { fontSize: 9.5, letterSpacing: '0.08em', color: 'rgba(1,22,3
 // that opens a connection, and it cannot be pressed before the window.
 export default function ScheduleShow() {
   const [session, setSession] = useState(null);
+  const [accountRole, setAccountRole] = useState(null);
   // Needed to populate shows.artist_name -- a pre-accounts denormalised
   // column that is still read by the recordings-sync title builder and
   // the viewer holding screen. Identity comes from artist_id now, but
   // leaving that column empty would quietly break both of them.
   const [artistName, setArtistName] = useState('');
   const [shows, setShows] = useState(null);
+  const [schedulingAvailable, setSchedulingAvailable] = useState(true);
+  const [versusAvailable, setVersusAvailable] = useState(null);
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -66,8 +69,16 @@ export default function ScheduleShow() {
   // reached them. Separate from `invites` (the link fallback) because
   // they are different states with different next actions.
   const [invited, setInvited] = useState({});
+  const [lineups, setLineups] = useState({});
   const [inviteBusy, setInviteBusy] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [cancelConfirmId, setCancelConfirmId] = useState(null);
+  const [cancelBusyId, setCancelBusyId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editForm, setEditForm] = useState({ title: '', date: '', time: '', duration: DEFAULT_DURATION_MINUTES });
+  const [withdrawConfirmId, setWithdrawConfirmId] = useState(null);
+  const [withdrawBusyId, setWithdrawBusyId] = useState(null);
 
   // One-second clock so the countdown and the GO LIVE button flip on
   // their own, without the artist reloading at the critical moment.
@@ -76,14 +87,35 @@ export default function ScheduleShow() {
     return () => clearInterval(id);
   }, []);
 
-  const load = useCallback(async (userId) => {
+  const load = useCallback(async (userId, accessToken) => {
     const { data, error: err } = await getSupabase()
       .from('shows')
       .select('*')
       .eq('artist_id', userId)
       .order('slated_at', { ascending: true });
-    if (err) { setShows([]); return; }
+    if (err) {
+      setShows([]);
+      const missing = ['PGRST205', '42P01'].includes(err.code) || /could not find the table|relation .*shows.* does not exist|schema cache/i.test(err.message || '');
+      setSchedulingAvailable(!missing);
+      if (!missing) setError('Could not load your show schedule. Try again shortly.');
+      return;
+    }
+    setSchedulingAvailable(true);
     setShows(data || []);
+    const versusShows = (data || []).filter(show => show.performance_mode === 'versus' && show.state !== 'ended');
+    if (accessToken && versusShows.length) {
+      const entries = await Promise.all(versusShows.map(async show => {
+        try {
+          const response = await fetch(`/api/performer/show-lineup?show_id=${encodeURIComponent(show.id)}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+          return [show.id, response.ok ? await response.json() : { status: 'unavailable' }];
+        } catch {
+          return [show.id, { status: 'unavailable' }];
+        }
+      }));
+      setLineups(Object.fromEntries(entries));
+    } else {
+      setLineups({});
+    }
     // Lazy reminder generation -- see lib/scheduling.js for why this
     // runs here rather than in a job.
     syncShowReminders(userId, data || []).catch(() => {});
@@ -103,14 +135,43 @@ export default function ScheduleShow() {
       setSession(s);
       if (s?.user) {
         const { profile } = await getProfile(s.user.id);
-        if (!cancelled) setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
-        await load(s.user.id);
+        if (!cancelled) {
+          setAccountRole(profile?.role || 'viewer');
+          setArtistName(profile?.display_name || profile?.username || s.user.email || 'Artist');
+        }
+        if (profile?.role === 'artist') await load(s.user.id, s.access_token);
+        else if (!cancelled) setShows([]);
       } else {
         setShows([]);
       }
     })();
     return () => { cancelled = true; };
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { error: slotsError } = await getSupabase().from('show_slots').select('id').limit(0);
+        // show_slots intentionally has zero browser policies and all
+        // grants are revoked. A permission error therefore means the
+        // table EXISTS and is protected correctly; only a missing-table
+        // error means Versus setup has not been applied. Treating every
+        // error as absence disabled Versus on the correctly secured DB.
+        const missing = slotsError && (
+          ['PGRST205', '42P01'].includes(slotsError.code)
+          || /could not find the table|relation .*show_slots.* does not exist|schema cache/i.test(slotsError.message || '')
+        );
+        if (!cancelled) setVersusAvailable(!missing);
+      } catch {
+        // A transient capability check must not remove a scheduling
+        // format. The authenticated invite route remains the authority
+        // and returns a useful setup error if the table truly is absent.
+        if (!cancelled) setVersusAvailable(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function createShow() {
     setError('');
@@ -167,7 +228,7 @@ export default function ScheduleShow() {
       }
       setOpponent(null);
       setForm({ title: '', date: '', time: '', mode: 'solo', duration: DEFAULT_DURATION_MINUTES });
-      await load(session.user.id);
+      await load(session.user.id, session.access_token);
     } finally {
       setCreating(false);
     }
@@ -190,6 +251,7 @@ export default function ScheduleShow() {
       if (!res.ok) { setError(body.error || 'Could not create an invite.'); return; }
 
       if (artist) {
+        setLineups((prev) => ({ ...prev, [show.id]: { status: 'pending', artist: { id: artist.id, displayName: body.invited?.displayName || artist.display_name, username: body.invited?.username || artist.username }, inviteToken: body.inviteToken } }));
         setInvited((prev) => ({
           ...prev,
           [show.id]: {
@@ -203,10 +265,101 @@ export default function ScheduleShow() {
           },
         }));
       } else {
+        setLineups((prev) => ({ ...prev, [show.id]: { status: 'pending', artist: null, inviteToken: body.inviteToken } }));
         setInvites((prev) => ({ ...prev, [show.id]: `${window.location.origin}/join/${body.inviteToken}` }));
       }
     } finally {
       setInviteBusy(null);
+    }
+  }
+
+  async function cancelShow(show) {
+    if (!session?.access_token || cancelBusyId) return;
+    setCancelBusyId(show.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/shows/${show.id}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not cancel that show.');
+        return;
+      }
+      setCancelConfirmId(null);
+      await load(session.user.id, session.access_token);
+    } catch {
+      setError('Could not cancel that show. Check your connection and try again.');
+    } finally {
+      setCancelBusyId(null);
+    }
+  }
+
+  async function withdrawInvite(show) {
+    if (!session?.access_token || withdrawBusyId) return;
+    setWithdrawBusyId(show.id);
+    setError('');
+    try {
+      const response = await fetch(`/api/performer/show-lineup?show_id=${encodeURIComponent(show.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not withdraw that invitation.');
+        return;
+      }
+      setWithdrawConfirmId(null);
+      setLineups((prev) => ({ ...prev, [show.id]: { status: 'empty' } }));
+      setInvited((prev) => { const next = { ...prev }; delete next[show.id]; return next; });
+      setInvites((prev) => { const next = { ...prev }; delete next[show.id]; return next; });
+    } catch {
+      setError('Could not withdraw that invitation. Check your connection and try again.');
+    } finally {
+      setWithdrawBusyId(null);
+    }
+  }
+
+  function beginEdit(show) {
+    const date = new Date(show.slated_at);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString();
+    setEditForm({
+      title: show.title || '',
+      date: local.slice(0, 10),
+      time: local.slice(11, 16),
+      duration: show.duration_minutes || DEFAULT_DURATION_MINUTES,
+    });
+    setError('');
+    setCancelConfirmId(null);
+    setEditingId(show.id);
+  }
+
+  async function saveEdit(show) {
+    const slated = new Date(`${editForm.date}T${editForm.time}`);
+    if (Number.isNaN(slated.getTime()) || slated.getTime() <= Date.now()) {
+      setError('Choose a date and time in the future.');
+      return;
+    }
+    setEditBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/shows/${show.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ title: editForm.title, slated_at: slated.toISOString(), duration_minutes: editForm.duration }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not update that show.');
+        return;
+      }
+      setEditingId(null);
+      await load(session.user.id, session.access_token);
+    } catch {
+      setError('Could not update that show. Check your connection and try again.');
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -224,8 +377,10 @@ export default function ScheduleShow() {
   // (`if (show.artist_id === auth.user.id) return null`). So the invited
   // artist looked fine and the owner had no route at all.
   //
-  // Flip to true after the 27th to restore scheduling.
-  const SHOW_SCHEDULE_FORM = false;
+  // Artist-owned scheduling is now the default product path. The form is
+  // still gated by `schedulingAvailable`, so a project that has not run
+  // docs/shows_setup.sql gets a useful setup state instead of broken inputs.
+  const SHOW_SCHEDULE_FORM = true;
 
   const upcoming = nextUpcomingShow(shows, now);
   const windowOpen = upcoming ? isWindowOpen(upcoming, now) : false;
@@ -240,7 +395,13 @@ export default function ScheduleShow() {
   const ownsNoLiveShows = shows !== null && shows.filter((s) => s.state !== 'ended').length === 0;
 
   if (!session) {
-    return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="LOG IN" actionHref="/auth" />;
+    return <EmptyState title="Sign in to see your shows" body="Your shows and Kit Check are tied to your artist account." action="ARTIST SIGN IN" actionHref="/auth/artist" />;
+  }
+
+  if (accountRole === null) return <div role="status" style={{ fontSize: 12, color: 'rgba(1,22,39,0.45)' }}>Loading your artist studio…</div>;
+
+  if (accountRole !== 'artist') {
+    return <EmptyState title="Artist scheduling only" body="Show scheduling is available from an artist account." action="BACK TO DASHBOARD" actionHref="/dashboard/fan" />;
   }
 
   if (!SHOW_SCHEDULE_FORM && ownsNoLiveShows) return null;
@@ -301,8 +462,14 @@ export default function ScheduleShow() {
         {' '}Kit Check is always open and never connects to the internet stream — camera, audio and cues only.
       </div>
 
+      {!schedulingAvailable && (
+        <div role="status" style={{ padding: '12px 14px', border: '1px solid rgba(255,159,28,0.45)', background: 'rgba(255,159,28,0.08)', color: INK, fontSize: 12, lineHeight: 1.55 }}>
+          Show scheduling is being set up. Run <strong>docs/shows_setup.sql</strong> in Supabase, then refresh this page.
+        </div>
+      )}
+
       {/* ── Schedule form ───────────────────────────────────── */}
-      {SHOW_SCHEDULE_FORM && (
+      {SHOW_SCHEDULE_FORM && schedulingAvailable && (
       <div style={{ border: '1px solid rgba(1,22,39,0.12)', clipPath: 'polygon(12px 0,100% 0,100% 100%,0 100%,0 12px)', padding: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: INK, marginBottom: 12 }}>Schedule a show</div>
 
@@ -364,7 +531,8 @@ export default function ScheduleShow() {
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setForm((f) => ({ ...f, mode: m }))}
+                  onClick={() => { if (m !== 'versus' || versusAvailable) setForm((f) => ({ ...f, mode: m })); }}
+                  disabled={m === 'versus' && !versusAvailable}
                   style={{
                     flex: 1,
                     padding: '11px 0',
@@ -374,13 +542,15 @@ export default function ScheduleShow() {
                     background: form.mode === m ? 'rgba(46,196,182,0.12)' : 'transparent',
                     color: form.mode === m ? TEAL : 'rgba(1,22,39,0.55)',
                     border: form.mode === m ? `1px solid ${TEAL}` : '1px solid rgba(1,22,39,0.15)',
-                    cursor: 'pointer',
+                    cursor: m === 'versus' && !versusAvailable ? 'not-allowed' : 'pointer',
+                    opacity: m === 'versus' && !versusAvailable ? 0.45 : 1,
                   }}
                 >
                   {m.toUpperCase()}
                 </button>
               ))}
             </div>
+            {versusAvailable === false && <div role="status" style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.48)', marginTop: 6 }}>Versus setup is pending. Run docs/versus_setup.sql in Supabase to enable invitations.</div>}
           </div>
 
           {/* ── THE OPPONENT IS CHOSEN HERE, NOT AFTERWARDS ──────
@@ -504,6 +674,36 @@ export default function ScheduleShow() {
                   </span>
                 </div>
 
+                  {editingId === s.id && (
+                    <div style={{ marginTop: 10, padding: 12, border: '1px solid rgba(46,196,182,0.35)', background: 'rgba(46,196,182,0.04)', display: 'grid', gap: 9 }}>
+                      <div><div style={labelStyle}>TITLE</div><input aria-label="EDIT SHOW TITLE" value={editForm.title} onChange={(event) => setEditForm((value) => ({ ...value, title: event.target.value }))} maxLength={120} style={inputStyle} /></div>
+                      <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                        <div style={{ flex: '1 1 150px' }}><div style={labelStyle}>DATE</div><input aria-label="EDIT SHOW DATE" type="date" value={editForm.date} onChange={(event) => setEditForm((value) => ({ ...value, date: event.target.value }))} style={inputStyle} /></div>
+                        <div style={{ flex: '1 1 120px' }}><div style={labelStyle}>TIME</div><input aria-label="EDIT SHOW TIME" type="time" value={editForm.time} onChange={(event) => setEditForm((value) => ({ ...value, time: event.target.value }))} style={inputStyle} /></div>
+                      </div>
+                      <div><div style={labelStyle}>DURATION</div><select aria-label="EDIT SHOW DURATION" value={editForm.duration} onChange={(event) => setEditForm((value) => ({ ...value, duration: Number(event.target.value) }))} style={inputStyle}>{DURATION_OPTIONS_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes} minutes</option>)}</select></div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <button type="button" onClick={() => setEditingId(null)} disabled={editBusy} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.55)', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>CLOSE</button>
+                        <button type="button" onClick={() => saveEdit(s)} disabled={editBusy} style={{ border: 0, background: INK, color: '#fdfffc', padding: '8px 12px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: editBusy ? 'default' : 'pointer' }}>{editBusy ? 'SAVING…' : 'SAVE CHANGES'}</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {s.state === 'scheduled' && !expired && (
+                    <div style={{ marginTop: 9, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                      {editingId !== s.id && <button type="button" onClick={() => beginEdit(s)} style={{ border: 0, background: 'transparent', color: TEAL, padding: 0, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>EDIT SHOW</button>}
+                      {cancelConfirmId === s.id ? (
+                        <>
+                          <span style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.6)' }}>Cancel this performance?</span>
+                          <button type="button" onClick={() => setCancelConfirmId(null)} disabled={cancelBusyId === s.id} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.55)', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>KEEP SHOW</button>
+                          <button type="button" onClick={() => cancelShow(s)} disabled={cancelBusyId === s.id} style={{ border: '1px solid rgba(231,29,54,0.45)', background: 'rgba(231,29,54,0.06)', color: '#b5122a', padding: '6px 9px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: cancelBusyId === s.id ? 'default' : 'pointer' }}>{cancelBusyId === s.id ? 'CANCELLING…' : 'YES, CANCEL'}</button>
+                        </>
+                      ) : (
+                        <button type="button" onClick={() => setCancelConfirmId(s.id)} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.48)', padding: 0, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>CANCEL SHOW</button>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── VERSUS NEEDS A SECOND PERFORMER ─────────────
                       Selection first, link second. The link took the
                       invitation off the platform and left no record of
@@ -545,7 +745,27 @@ export default function ScheduleShow() {
                       expect. */}
                   {SHOW_SCHEDULE_FORM && (s.performance_mode === 'versus') && !expired && (
                     <div style={{ marginTop: 8 }}>
-                      {invited[s.id] ? (
+                      {lineups[s.id]?.status === 'claimed' ? (
+                        <div style={{ border: '1px solid rgba(46,196,182,0.55)', background: 'rgba(46,196,182,0.07)', padding: '10px 12px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>LINE-UP CONFIRMED</div>
+                          <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.58)', marginTop: 4 }}>
+                            {(lineups[s.id].artist?.displayName || lineups[s.id].artist?.username || 'Your guest artist')} accepted slot B.
+                          </div>
+                        </div>
+                      ) : lineups[s.id]?.status === 'pending' ? (
+                        <div style={{ border: '1px solid rgba(255,159,28,0.45)', background: 'rgba(255,159,28,0.05)', padding: '10px 12px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
+                          <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>INVITATION PENDING</div>
+                          <div style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.58)', marginTop: 4 }}>
+                            Waiting for {(lineups[s.id].artist?.displayName || lineups[s.id].artist?.username || lineups[s.id].invitedUsername || 'the invited artist')} to accept slot B.
+                          </div>
+                          {lineups[s.id].inviteToken && (
+                            <button type="button" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/join/${lineups[s.id].inviteToken}`); setCopiedId(s.id); setTimeout(() => setCopiedId(null), 2000); }} style={{ marginTop: 8, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', color: TEAL, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>{copiedId === s.id ? 'LINK COPIED' : 'COPY INVITE LINK'}</button>
+                          )}
+                          <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                            {withdrawConfirmId === s.id ? <><span style={{ fontSize: 10, color: 'rgba(1,22,39,0.55)' }}>Withdraw this invitation?</span><button type="button" onClick={() => setWithdrawConfirmId(null)} disabled={withdrawBusyId === s.id} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.5)', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>KEEP IT</button><button type="button" onClick={() => withdrawInvite(s)} disabled={withdrawBusyId === s.id} style={{ border: '1px solid rgba(231,29,54,0.4)', background: 'rgba(231,29,54,0.06)', color: '#b5122a', padding: '5px 8px', fontSize: 9, fontWeight: 700, cursor: withdrawBusyId === s.id ? 'default' : 'pointer' }}>{withdrawBusyId === s.id ? 'WITHDRAWING…' : 'YES, WITHDRAW'}</button></> : <button type="button" onClick={() => setWithdrawConfirmId(s.id)} style={{ border: 0, background: 'none', color: 'rgba(1,22,39,0.48)', padding: 0, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', cursor: 'pointer' }}>WITHDRAW INVITE</button>}
+                          </div>
+                        </div>
+                      ) : invited[s.id] ? (
                         <div style={{ border: '1px solid rgba(46,196,182,0.4)', padding: '8px 10px', clipPath: 'polygon(6px 0,100% 0,100% 100%,0 100%,0 6px)' }}>
                           <div style={{ fontSize: 11.5, color: INK, fontWeight: 700 }}>
                             Invited {invited[s.id].name}

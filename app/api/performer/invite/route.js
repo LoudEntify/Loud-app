@@ -83,7 +83,11 @@ export async function POST(request) {
     if (invitedUserId) {
       const { data } = await admin
         .from('profiles')
-        .select('id, username, display_name, role, deactivated_at')
+        // select('*') keeps invitations compatible with account projects
+        // that have not yet added the optional deactivated_at column.
+        // Naming an absent optional column makes PostgREST reject the
+        // entire artist lookup instead of simply yielding undefined.
+        .select('*')
         .eq('id', invitedUserId)
         .maybeSingle();
       if (!data || data.role !== 'artist' || data.deactivated_at) {
@@ -130,7 +134,11 @@ export async function POST(request) {
       const { error: noteErr } = await admin.from('notifications').upsert(
         {
           user_id: invitee.id,
-          kind: 'versus_invite',
+          // `system` is part of the notification contract on every
+          // supported schema. Older pilot code used `versus_invite`, a
+          // value the table's CHECK never allowed, so delivery always
+          // failed even though the slot itself was created.
+          kind: 'system',
           body: `${hostName} invited you to a Versus show`,
           href: `/join/${inviteToken}`,
           // One pending invite per show per person. Re-minting replaces
