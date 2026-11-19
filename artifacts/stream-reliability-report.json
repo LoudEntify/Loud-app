@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "stream-reliability.v1",
+  "generatedAt": "2026-11-19T21:46:36.910Z",
+  "approvedExternalTraffic": false,
+  "environment": {
+    "node": "v26.13.1",
+    "platform": "darwin",
+    "architecture": "arm64"
+  },
+  "profiles": [
+    {
+      "targetConcurrentShows": 5,
+      "testType": "local-synthetic-control-plane",
+      "iterations": 3,
+      "elapsedMs": 21.431333,
+      "cpuMs": 31.839,
+      "cpuUtilizationOneCore": 1.4856285420976847,
+      "rssBytes": {
+        "before": 55689216,
+        "after": 66584576,
+        "delta": 10895360
+      },
+      "measurements": {
+        "attempts": 36,
+        "passed": 36,
+        "errorRate": 0,
+        "recoveryMs": {
+          "p50": 0.0003750000000000142,
+          "p95": 0.002375000000000682,
+          "max": 0.008290999999999826
+        },
+        "inferenceLatencyMs": {
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "frameSamplingThroughputPerSecond": 0,
+        "youtubeApiCalls": 147,
+        "streamStability": {
+          "unexpectedInterruptions": 9,
+          "synthetic": true
+        }
+      },
+      "visualAssessmentBenchmark": {
+        "frameSize": "256x144",
+        "samples": 60,
+        "throughputFramesPerSecond": 2975.268084051323,
+        "imageMetricLatencyMs": {
+          "p50": 0.30387500000000145,
+          "p95": 0.3664999999999985,
+          "max": 1.6057500000000022
+        },
+        "scope": "Task 09 image metrics only; pose-model inference is not included."
+      },
+      "mediaProcessingCostPerShowHour": null,
+      "mediaCostReason": "No encoder or billable cloud media service is invoked by the safe local harness."
+    },
+    {
+      "targetConcurrentShows": 10,
+      "testType": "local-synthetic-control-plane",
+      "iterations": 3,
+      "elapsedMs": 34.204542000000004,
+      "cpuMs": 35.249,
+      "cpuUtilizationOneCore": 1.0305356522534346,
+      "rssBytes": {
+        "before": 66617344,
+        "after": 69648384,
+        "delta": 3031040
+      },
+      "measurements": {
+        "attempts": 36,
+        "passed": 36,
+        "errorRate": 0,
+        "recoveryMs": {
+          "p50": 0.00016699999999758575,
+          "p95": 0.0002920000000017353,
+          "max": 0.0011670000000023606
+        },
+        "inferenceLatencyMs": {
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "frameSamplingThroughputPerSecond": 0,
+        "youtubeApiCalls": 192,
+        "streamStability": {
+          "unexpectedInterruptions": 9,
+          "synthetic": true
+        }
+      },
+      "visualAssessmentBenchmark": {
+        "frameSize": "256x144",
+        "samples": 120,
+        "throughputFramesPerSecond": 3533.8420593464593,
+        "imageMetricLatencyMs": {
+          "p50": 0.2779160000000047,
+          "p95": 0.30579199999999673,
+          "max": 0.35224999999999795
+        },
+        "scope": "Task 09 image metrics only; pose-model inference is not included."
+      },
+      "mediaProcessingCostPerShowHour": null,
+      "mediaCostReason": "No encoder or billable cloud media service is invoked by the safe local harness."
+    },
+    {
+      "targetConcurrentShows": 25,
+      "testType": "local-synthetic-control-plane",
+      "iterations": 3,
+      "elapsedMs": 86.739,
+      "cpuMs": 99.456,
+      "cpuUtilizationOneCore": 1.1466122505447376,
+      "rssBytes": {
+        "before": 69648384,
+        "after": 79888384,
+        "delta": 10240000
+      },
+      "measurements": {
+        "attempts": 36,
+        "passed": 36,
+        "errorRate": 0,
+        "recoveryMs": {
+          "p50": 0.00016700000000469117,
+          "p95": 0.00041699999999877946,
+          "max": 0.0007909999999924366
+        },
+        "inferenceLatencyMs": {
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "frameSamplingThroughputPerSecond": 0,
+        "youtubeApiCalls": 327,
+        "streamStability": {
+          "unexpectedInterruptions": 9,
+          "synthetic": true
+        }
+      },
+      "visualAssessmentBenchmark": {
+        "frameSize": "256x144",
+        "samples": 300,
+        "throughputFramesPerSecond": 3505.285462210622,
+        "imageMetricLatencyMs": {
+          "p50": 0.27795799999999815,
+          "p95": 0.31425000000001546,
+          "max": 0.6090000000000089
+        },
+        "scope": "Task 09 image metrics only; pose-model inference is not included."
+      },
+      "mediaProcessingCostPerShowHour": null,
+      "mediaCostReason": "No encoder or billable cloud media service is invoked by the safe local harness."
+    },
+    {
+      "targetConcurrentShows": 50,
+      "testType": "local-synthetic-control-plane",
+      "iterations": 3,
+      "elapsedMs": 165.682042,
+      "cpuMs": 170.562,
+      "cpuUtilizationOneCore": 1.0294537533524606,
+      "rssBytes": {
+        "before": 79888384,
+        "after": 90488832,
+        "delta": 10600448
+      },
+      "measurements": {
+        "attempts": 36,
+        "passed": 36,
+        "errorRate": 0,
+        "recoveryMs": {
+          "p50": 0.00016600000000721593,
+          "p95": 0.00025000000002251,
+          "max": 0.0010000000000047748
+        },
+        "inferenceLatencyMs": {
+          "p50": null,
+          "p95": null,
+          "max": null
+        },
+        "frameSamplingThroughputPerSecond": 0,
+        "youtubeApiCalls": 552,
+        "streamStability": {
+          "unexpectedInterruptions": 9,
+          "synthetic": true
+        }
+      },
+      "visualAssessmentBenchmark": {
+        "frameSize": "256x144",
+        "samples": 600,
+        "throughputFramesPerSecond": 3631.473076549129,
+        "imageMetricLatencyMs": {
+          "p50": 0.2754589999999837,
+          "p95": 0.30812499999996135,
+          "max": 0.34191699999999514
+        },
+        "scope": "Task 09 image metrics only; pose-model inference is not included."
+      },
+      "mediaProcessingCostPerShowHour": null,
+      "mediaCostReason": "No encoder or billable cloud media service is invoked by the safe local harness."
+    }
+  ],
+  "conclusions": {
+    "productionCapacityProven": false,
+    "note": "Targets are exercised as synthetic orchestration workloads only. Real media stability, bandwidth, encoder saturation, cloud recovery time, and cost require an approved staging test."
+  }
+}
