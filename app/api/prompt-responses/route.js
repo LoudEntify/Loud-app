@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 import { rateLimit, clientKey } from '../../../lib/rateLimit';
 import { rowEnv } from '../../../lib/rowEnv';
+import { verifySession } from '../../../lib/verifyArtistAuth';
+import { boundedLatency, hashInteractionToken, voterKey, votingWindow } from '../../../lib/interactions.mjs';
 
 // ── ITEM 6: WHAT THE AUDIENCE ANSWERED ────────────────────────
 //
@@ -53,11 +55,35 @@ export async function POST(request) {
     // choose what question it is answering or what its answer was called.
     const { data: prompt } = await admin
       .from('show_prompts')
-      .select('id, show_id, room_name, kind, body, options, closed_at')
+      .select('id, show_id, room_name, kind, body, options, pushed_at, opens_at, closes_at, closed_at, latency_allowance_ms')
       .eq('id', promptId)
       .maybeSingle();
     if (!prompt) return NextResponse.json({ error: 'That question is not available.' }, { status: 404 });
-    if (prompt.closed_at) return NextResponse.json({ error: 'That question has closed.' }, { status: 410 });
+    let interactionSession = null;
+    let authoritativeVoterKey = null;
+    if (prompt.kind === 'choice') {
+      const token = request.headers.get('x-interaction-token');
+      if (!token) return NextResponse.json({ error: 'Start an interaction session before voting.' }, { status: 401 });
+      const { data: interaction } = await admin.from('interaction_sessions')
+        .select('id,show_id,user_id,expires_at,revoked_at')
+        .eq('token_hash', hashInteractionToken(token))
+        .maybeSingle();
+      if (!interaction || interaction.show_id !== prompt.show_id || interaction.revoked_at || new Date(interaction.expires_at).getTime() <= Date.now()) {
+        return NextResponse.json({ error: 'Your interaction session expired. Reconnect and try again.' }, { status: 401 });
+      }
+      let authenticatedUserId = interaction.user_id;
+      if ((request.headers.get('authorization') || '').startsWith('Bearer ')) {
+        const auth = await verifySession(request);
+        if (!auth.error) authenticatedUserId = auth.user.id;
+      }
+      interactionSession = interaction;
+      authoritativeVoterKey = voterKey({ userId: authenticatedUserId, sessionId: interaction.id });
+      const window = votingWindow(prompt);
+      if (!window.open) {
+        await admin.from('interaction_audit_events').insert({ show_id: prompt.show_id, prompt_id: prompt.id, interaction_session_id: interaction.id, event_type: 'VOTE_REJECTED', detail: { reason: window.reason } });
+        return NextResponse.json({ error: 'That vote has closed.', reason: window.reason }, { status: 410 });
+      }
+    } else if (prompt.closed_at) return NextResponse.json({ error: 'That question has closed.' }, { status: 410 });
 
     const row = {
       prompt_id: prompt.id,
@@ -69,6 +95,7 @@ export async function POST(request) {
       offset_ms: Number.isFinite(Number(body.offsetMs)) ? Math.max(0, Math.round(Number(body.offsetMs))) : null,
       env: rowEnv(),
       updated_at: new Date().toISOString(),
+      received_at: new Date().toISOString(),
     };
 
     if (prompt.kind === 'choice') {
@@ -82,6 +109,14 @@ export async function POST(request) {
       // alone is meaningless if the options are ever reordered.
       row.choice_label = String(options[idx]);
       row.text_body = null;
+      // Choice identity is server-authoritative. Leaving the legacy,
+      // client-controlled viewer_id on this row would let its older
+      // unique index conflict with a legitimate reconnected session.
+      row.viewer_id = null;
+      row.interaction_session_id = interactionSession.id;
+      row.voter_key = authoritativeVoterKey;
+      row.estimated_latency_ms = boundedLatency(body.estimatedLatencyMs);
+      row.playback_position_ms = Number.isFinite(Number(body.playbackPositionMs)) ? Math.max(0, Math.round(Number(body.playbackPositionMs))) : null;
     } else {
       const text = String(body.textBody || '').trim();
       if (text.length < 1 || text.length > 1000) {
@@ -109,14 +144,18 @@ export async function POST(request) {
     // those rows are the honest limit of this mechanism.
     const { error } = await admin
       .from('prompt_responses')
-      .upsert(row, { onConflict: 'prompt_id,viewer_id' });
+      .upsert(row, { onConflict: prompt.kind === 'choice' ? 'prompt_id,voter_key' : 'prompt_id,viewer_id' });
 
     if (error) {
       console.warn('[prompt-responses] upsert failed:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true });
+    if (prompt.kind === 'choice') {
+      await admin.from('interaction_sessions').update({ last_seen_at: new Date().toISOString() }).eq('id', interactionSession.id);
+      await admin.from('interaction_audit_events').insert({ show_id: prompt.show_id, prompt_id: prompt.id, interaction_session_id: interactionSession.id, event_type: 'VOTE_ACCEPTED', detail: { last_write_wins: true, estimated_latency_ms: row.estimated_latency_ms } });
+    }
+    return NextResponse.json({ ok: true, acceptedAt: row.received_at });
   } catch (err) {
     console.warn('[prompt-responses] request failed:', err);
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });

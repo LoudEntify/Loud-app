@@ -145,6 +145,10 @@ const OWNER_ONLY = [
   { method: 'POST', path: '/api/egress/start',     body: { room: 'probe-room-xyz' } },
   { method: 'POST', path: '/api/egress/stop',      body: { room: 'probe-room-xyz' } },
   { method: 'POST', path: '/api/participants',     body: { show_id: FAKE_UUID, email: 'probe@example.com' } },
+  { method: 'POST', path: '/api/youtube/connect',  body: {} },
+  { method: 'GET',  path: '/api/youtube/connection' },
+  { method: 'DELETE', path: '/api/youtube/connection' },
+  { method: 'GET',  path: '/api/youtube/readiness' },
 ];
 
 function shortLabel({ method, path }) {

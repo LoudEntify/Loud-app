@@ -78,5 +78,5 @@ function DashboardContent({ accountRole }) {
 
 export default function AccountDashboard({ accountRole }) {
   const signInPath = accountRole ? `/auth/${accountRole}` : '/auth';
-  return <RequireAuth signInPath={signInPath}><PageShell active="dashboard"><DashboardContent accountRole={accountRole} /></PageShell></RequireAuth>;
+  return <RequireAuth signInPath={signInPath}><PageShell active="dashboard" showNavbar><DashboardContent accountRole={accountRole} /></PageShell></RequireAuth>;
 }

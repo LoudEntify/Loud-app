@@ -64,7 +64,7 @@ export async function GET(request) {
 
     const { data, error } = await admin
       .from('show_prompts')
-      .select('id, kind, body, options, pushed_at')
+      .select('id, kind, body, options, pushed_at, opens_at, closes_at, latency_allowance_ms')
       .eq('show_id', show.id)
       .eq('env', rowEnv())
       .not('pushed_at', 'is', null)

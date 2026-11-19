@@ -1,14 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import Logo from "./Logo";
+import { getSession, onAuthStateChange } from "../lib/supabaseAuth";
 import styles from "../styles/Navbar.module.css";
 
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const pathname = usePathname();
+  const menuButtonRef = useRef(null);
 
   const closeMenu = () => setMenuOpen(false);
+
+  useEffect(() => {
+    let active = true;
+    getSession().then((session) => { if (active) setSignedIn(Boolean(session)); });
+    const unsubscribe = onAuthStateChange((_event, session) => {
+      if (active) setSignedIn(Boolean(session));
+    });
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
 
   return (
     <header className={styles.navbar}>
@@ -44,10 +76,10 @@ export default function Navbar() {
         {/* DESKTOP ACTIONS */}
         <div className={styles.actions}>
           <Link
-            href="/auth"
+            href={signedIn ? "/dashboard" : "/auth"}
             className={styles.signIn}
           >
-            Sign In
+            {signedIn ? "Open Studio" : "Sign In"}
           </Link>
 
           <Link
@@ -62,6 +94,7 @@ export default function Navbar() {
 
         {/* MOBILE MENU BUTTON */}
         <button
+          ref={menuButtonRef}
           type="button"
           className={`${styles.menuButton} ${
             menuOpen ? styles.menuButtonOpen : ""
@@ -85,6 +118,8 @@ export default function Navbar() {
       {/* MOBILE NAVIGATION */}
       <div
         id="mobile-navigation"
+        aria-hidden={!menuOpen}
+        inert={!menuOpen}
         className={`${styles.mobileMenu} ${
           menuOpen ? styles.mobileMenuOpen : ""
         }`}
@@ -141,11 +176,11 @@ export default function Navbar() {
 
         <div className={styles.mobileActions}>
           <Link
-            href="/auth"
+            href={signedIn ? "/dashboard" : "/auth"}
             className={styles.mobileSignIn}
             onClick={closeMenu}
           >
-            Sign In
+            {signedIn ? "Open Studio" : "Sign In"}
           </Link>
 
           <Link

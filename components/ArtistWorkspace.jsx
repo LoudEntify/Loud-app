@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getSupabase } from '../lib/supabaseClient';
 import InvitedShows from './InvitedShows';
+import YouTubeConnection from './YouTubeConnection';
 import styles from '../styles/AccountDashboard.module.css';
 
 export default function ArtistWorkspace({ profile, accessToken }) {
@@ -40,6 +41,7 @@ export default function ArtistWorkspace({ profile, accessToken }) {
 
   return <div className={styles.workspace}>
     <InvitedShows accessToken={accessToken} className={styles.invitedPanel} />
+    <YouTubeConnection accessToken={accessToken} compact />
     <section className={styles.setupPanel} aria-labelledby="artist-setup-title">
       <div className={styles.panelHeader}><div><span className={styles.eyebrow}>YOUR FIRST STEPS</span><h2 id="artist-setup-title">Get ready for your stage.</h2></div><span className={styles.setupCount}>{completed}/{checks.length}</span></div>
       <progress className={styles.setupProgress} value={completed} max={checks.length} aria-label="Artist profile setup" />
