@@ -5,6 +5,7 @@ import { getSession, getProfile, updateProfile, uploadAvatar, onAuthStateChange 
 import AccountDataControls from './AccountDataControls';
 import AvatarRing from './AvatarRing';
 import GenreSelect from './GenreSelect';
+import YouTubeConnection from './YouTubeConnection';
 
 const INK = '#011627';
 const PORCELAIN = '#fdfffc';
@@ -247,6 +248,8 @@ export default function AccountSettings() {
           {saveError && <p style={{ marginTop: 8, fontSize: 12, color: '#e71d36' }}>{saveError}</p>}
           {saveNotice && <p style={{ marginTop: 8, fontSize: 12, color: TEAL }}>{saveNotice}</p>}
         </div>
+
+        {isArtist && <YouTubeConnection accessToken={session.access_token} />}
 
         <div style={{ marginTop: 28 }}>
           <span style={{ fontSize: 10.5, letterSpacing: '0.12em', color: 'rgba(1,22,39,0.55)' }}>ACCOUNT TYPE</span>

@@ -52,6 +52,7 @@ const AUTH_MARKERS = [
   'hashDeviceSecret',   // paired-device secret, compared against a stored hash
   'session_token',      // show_slots rotating claim token
   'devHarnessAllowed',  // preview-only dev harness gate
+  'consumeYouTubeOAuthState', // one-time, expiring state created by an authenticated artist
 ];
 
 // Routes that have no caller auth. Each needs a reason, and the reason is
