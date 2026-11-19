@@ -55,6 +55,7 @@ export default function ScheduleShow() {
   const [artistName, setArtistName] = useState('');
   const [shows, setShows] = useState(null);
   const [schedulingAvailable, setSchedulingAvailable] = useState(true);
+  const [versusAvailable, setVersusAvailable] = useState(null);
   const [now, setNow] = useState(() => Date.now());
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -72,6 +73,9 @@ export default function ScheduleShow() {
   const [copiedId, setCopiedId] = useState(null);
   const [cancelConfirmId, setCancelConfirmId] = useState(null);
   const [cancelBusyId, setCancelBusyId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editForm, setEditForm] = useState({ title: '', date: '', time: '', duration: DEFAULT_DURATION_MINUTES });
 
   // One-second clock so the countdown and the GO LIVE button flip on
   // their own, without the artist reloading at the critical moment.
@@ -126,6 +130,19 @@ export default function ScheduleShow() {
     })();
     return () => { cancelled = true; };
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { error: slotsError } = await getSupabase().from('show_slots').select('id').limit(0);
+        if (!cancelled) setVersusAvailable(!slotsError);
+      } catch {
+        if (!cancelled) setVersusAvailable(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function createShow() {
     setError('');
@@ -245,6 +262,48 @@ export default function ScheduleShow() {
       setError('Could not cancel that show. Check your connection and try again.');
     } finally {
       setCancelBusyId(null);
+    }
+  }
+
+  function beginEdit(show) {
+    const date = new Date(show.slated_at);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString();
+    setEditForm({
+      title: show.title || '',
+      date: local.slice(0, 10),
+      time: local.slice(11, 16),
+      duration: show.duration_minutes || DEFAULT_DURATION_MINUTES,
+    });
+    setError('');
+    setCancelConfirmId(null);
+    setEditingId(show.id);
+  }
+
+  async function saveEdit(show) {
+    const slated = new Date(`${editForm.date}T${editForm.time}`);
+    if (Number.isNaN(slated.getTime()) || slated.getTime() <= Date.now()) {
+      setError('Choose a date and time in the future.');
+      return;
+    }
+    setEditBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/shows/${show.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ title: editForm.title, slated_at: slated.toISOString(), duration_minutes: editForm.duration }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setError(body.error || 'Could not update that show.');
+        return;
+      }
+      setEditingId(null);
+      await load(session.user.id);
+    } catch {
+      setError('Could not update that show. Check your connection and try again.');
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -416,7 +475,8 @@ export default function ScheduleShow() {
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setForm((f) => ({ ...f, mode: m }))}
+                  onClick={() => { if (m !== 'versus' || versusAvailable) setForm((f) => ({ ...f, mode: m })); }}
+                  disabled={m === 'versus' && !versusAvailable}
                   style={{
                     flex: 1,
                     padding: '11px 0',
@@ -426,13 +486,15 @@ export default function ScheduleShow() {
                     background: form.mode === m ? 'rgba(46,196,182,0.12)' : 'transparent',
                     color: form.mode === m ? TEAL : 'rgba(1,22,39,0.55)',
                     border: form.mode === m ? `1px solid ${TEAL}` : '1px solid rgba(1,22,39,0.15)',
-                    cursor: 'pointer',
+                    cursor: m === 'versus' && !versusAvailable ? 'not-allowed' : 'pointer',
+                    opacity: m === 'versus' && !versusAvailable ? 0.45 : 1,
                   }}
                 >
                   {m.toUpperCase()}
                 </button>
               ))}
             </div>
+            {versusAvailable === false && <div role="status" style={{ fontSize: 9.5, color: 'rgba(1,22,39,0.48)', marginTop: 6 }}>Versus setup is pending. Run docs/versus_setup.sql in Supabase to enable invitations.</div>}
           </div>
 
           {/* ── THE OPPONENT IS CHOSEN HERE, NOT AFTERWARDS ──────
@@ -556,8 +618,24 @@ export default function ScheduleShow() {
                   </span>
                 </div>
 
+                  {editingId === s.id && (
+                    <div style={{ marginTop: 10, padding: 12, border: '1px solid rgba(46,196,182,0.35)', background: 'rgba(46,196,182,0.04)', display: 'grid', gap: 9 }}>
+                      <div><div style={labelStyle}>TITLE</div><input aria-label="EDIT SHOW TITLE" value={editForm.title} onChange={(event) => setEditForm((value) => ({ ...value, title: event.target.value }))} maxLength={120} style={inputStyle} /></div>
+                      <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                        <div style={{ flex: '1 1 150px' }}><div style={labelStyle}>DATE</div><input aria-label="EDIT SHOW DATE" type="date" value={editForm.date} onChange={(event) => setEditForm((value) => ({ ...value, date: event.target.value }))} style={inputStyle} /></div>
+                        <div style={{ flex: '1 1 120px' }}><div style={labelStyle}>TIME</div><input aria-label="EDIT SHOW TIME" type="time" value={editForm.time} onChange={(event) => setEditForm((value) => ({ ...value, time: event.target.value }))} style={inputStyle} /></div>
+                      </div>
+                      <div><div style={labelStyle}>DURATION</div><select aria-label="EDIT SHOW DURATION" value={editForm.duration} onChange={(event) => setEditForm((value) => ({ ...value, duration: Number(event.target.value) }))} style={inputStyle}>{DURATION_OPTIONS_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes} minutes</option>)}</select></div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <button type="button" onClick={() => setEditingId(null)} disabled={editBusy} style={{ border: 0, background: 'transparent', color: 'rgba(1,22,39,0.55)', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>CLOSE</button>
+                        <button type="button" onClick={() => saveEdit(s)} disabled={editBusy} style={{ border: 0, background: INK, color: '#fdfffc', padding: '8px 12px', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: editBusy ? 'default' : 'pointer' }}>{editBusy ? 'SAVING…' : 'SAVE CHANGES'}</button>
+                      </div>
+                    </div>
+                  )}
+
                   {s.state === 'scheduled' && !expired && (
                     <div style={{ marginTop: 9, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                      {editingId !== s.id && <button type="button" onClick={() => beginEdit(s)} style={{ border: 0, background: 'transparent', color: TEAL, padding: 0, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.06em', cursor: 'pointer' }}>EDIT SHOW</button>}
                       {cancelConfirmId === s.id ? (
                         <>
                           <span style={{ fontSize: 10.5, color: 'rgba(1,22,39,0.6)' }}>Cancel this performance?</span>

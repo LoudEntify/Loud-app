@@ -44,16 +44,17 @@ export default function AcceptInvite({ token }) {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/performer/join-show', {
+      const res = await fetch('/api/performer/accept-invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ show_id: invite.showId, invite_token: token }),
+        body: JSON.stringify({ invite_token: token }),
       });
       const body = await res.json();
       if (!res.ok) { setError(body.error || 'Could not accept this invite.'); return; }
-      // The slot is now bound to this account, so the live page can let
-      // them in by account alone -- no token to carry across the redirect.
-      router.push(`/live?show=${invite.showId}`);
+      // Accepting a booking is not the same as opening a LiveKit room.
+      // The dashboard now owns the countdown; joining stays locked until
+      // the show's broadcast window opens.
+      router.push('/dashboard/artist');
     } finally {
       setBusy(false);
     }
@@ -100,7 +101,7 @@ export default function AcceptInvite({ token }) {
                 disabled={busy}
                 style={{ marginTop: 22, width: '100%', padding: '15px 0', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: PORCELAIN, background: 'linear-gradient(90deg,#2ec4b6,#ff9f1c)', border: 'none', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1 }}
               >
-                {busy ? 'ACCEPTING…' : 'ACCEPT AND TAKE SLOT B'}
+                {busy ? 'ACCEPTING…' : 'ACCEPT AND ADD TO MY SHOWS'}
               </button>
             ) : (
               <div style={{ marginTop: 22 }}>

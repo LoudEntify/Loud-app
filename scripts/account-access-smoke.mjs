@@ -26,6 +26,8 @@ const requireResult = (result, label) => {
 
 try {
   requireResult(await admin.from('profiles').select('id,role,display_name,genres,full_name,username,date_of_birth,country').limit(0), 'Account schema');
+  const { error: versusSchemaError } = await admin.from('show_slots').select('id').limit(0);
+  const versusReady = !versusSchemaError;
   browser = await chromium.launch({ headless: true });
   for (const role of ['artist', 'viewer']) {
     const audience = role === 'artist' ? 'artist' : 'fan';
@@ -107,6 +109,7 @@ try {
       await page.goto(`${base}/schedule`);
       await page.getByRole('heading', { name: /Put your next/ }).waitFor();
       await page.getByRole('link', { name: 'SCHEDULE', exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'VERSUS' }).isDisabled(), !versusReady);
       await page.getByPlaceholder('What are you calling this one?').fill(showTitle);
       await page.locator('input[type="date"]').fill(showDate);
       await page.locator('input[type="time"]').fill('12:00');
@@ -118,10 +121,32 @@ try {
       assert.equal(scheduled.duration_minutes, 60);
       assert.equal(scheduled.performance_mode, 'solo');
       pass('artist schedule page creates an owner-scoped show and keeps the sidebar visible');
+      const editedTitle = `${showTitle} edited`;
+      const editedDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      await page.getByRole('button', { name: 'EDIT SHOW' }).click();
+      await page.getByLabel('EDIT SHOW TITLE').fill(editedTitle);
+      await page.getByLabel('EDIT SHOW DATE').fill(editedDate);
+      await page.getByLabel('EDIT SHOW TIME').fill('14:30');
+      await page.getByLabel('EDIT SHOW DURATION').selectOption('90');
+      await page.getByRole('button', { name: 'SAVE CHANGES' }).click();
+      await page.getByText(editedTitle, { exact: true }).waitFor();
+      const edited = requireResult(await admin.from('shows').select('title,slated_at,duration_minutes').eq('artist_id', generated.user.id).eq('title', editedTitle).single(), 'Edited show');
+      assert.equal(edited.duration_minutes, 90);
+      assert.ok(edited.slated_at.startsWith(editedDate));
+      pass('artist can reschedule and edit a show before it starts');
       await page.getByRole('button', { name: 'CANCEL SHOW' }).click();
-      await page.getByRole('button', { name: 'YES, CANCEL' }).click();
-      await page.getByText(showTitle, { exact: true }).waitFor({ state: 'hidden' });
-      const cancelledShow = requireResult(await admin.from('shows').select('state,cancelled_at,cancelled_reason,actual_started_at').eq('artist_id', generated.user.id).eq('title', showTitle).single(), 'Cancelled show');
+      const [cancelResponse] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/api/shows/') && response.url().endsWith('/cancel')),
+        page.getByRole('button', { name: 'YES, CANCEL' }).click(),
+      ]);
+      assert.equal(cancelResponse.status(), 200, await cancelResponse.text());
+      await page.getByText(editedTitle, { exact: true }).waitFor({ state: 'hidden' });
+      let cancelledShow = null;
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        cancelledShow = requireResult(await admin.from('shows').select('state,cancelled_at,cancelled_reason,actual_started_at').eq('artist_id', generated.user.id).eq('title', editedTitle).single(), 'Cancelled show');
+        if (cancelledShow.state === 'ended') break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
       assert.equal(cancelledShow.state, 'ended');
       assert.ok(cancelledShow.cancelled_at);
       assert.equal(cancelledShow.cancelled_reason, 'artist_cancelled');
