@@ -22,6 +22,7 @@ import PairingPanel from './PairingPanel';
 import ReactionLayer from './ReactionLayer';
 import ViewerAudioGate from './ViewerAudioGate';
 import YouTubeLivePlayer from './YouTubeLivePlayer';
+import CameraAssessmentProbe from './CameraAssessmentProbe';
 
 // PILOT 2 — see the render site for why. Flip to true after the 27th.
 const REACTIONS_ENABLED = false;
@@ -6222,6 +6223,9 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
 
   return (
     <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+      {/* EXP-VD-001 observes low-resolution copies only. Its output is
+          telemetry and never enters autoDirector's shot-selection path. */}
+      <CameraAssessmentProbe trackRefs={isShowOperator ? cameraTracksOnly(tracks) : []} />
       {/* Desktop portrait stage (display-only) -- ambient blur-fill,
           hidden entirely below 1025px (reactions.css). Mounted once here
           regardless of role (viewer or artist both get it, item 4/5 of
