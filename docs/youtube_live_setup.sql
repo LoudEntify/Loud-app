@@ -46,8 +46,10 @@ create table if not exists public.youtube_broadcasts (
   artist_id uuid not null references auth.users(id) on delete cascade,
   youtube_broadcast_id text,
   youtube_stream_id text,
+  ingestion_credentials_ciphertext text,
   livekit_egress_id text,
   watch_url text,
+  privacy_status text,
   state text not null default 'pending',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -56,6 +58,8 @@ create table if not exists public.youtube_broadcasts (
   last_error text,
   constraint youtube_broadcasts_state_check check (state in ('pending','prepared','starting','live','stopping','complete','failed'))
 );
+alter table public.youtube_broadcasts add column if not exists ingestion_credentials_ciphertext text;
+alter table public.youtube_broadcasts add column if not exists privacy_status text;
 create unique index if not exists youtube_broadcasts_broadcast_id_idx on public.youtube_broadcasts (youtube_broadcast_id) where youtube_broadcast_id is not null;
 create unique index if not exists youtube_broadcasts_stream_id_idx on public.youtube_broadcasts (youtube_stream_id) where youtube_stream_id is not null;
 
