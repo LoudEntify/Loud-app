@@ -148,6 +148,7 @@ const OWNER_ONLY = [
   { method: 'POST', path: '/api/youtube/connect',  body: {} },
   { method: 'GET',  path: '/api/youtube/connection' },
   { method: 'DELETE', path: '/api/youtube/connection' },
+  { method: 'GET',  path: '/api/youtube/readiness' },
 ];
 
 function shortLabel({ method, path }) {

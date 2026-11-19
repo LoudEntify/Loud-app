@@ -13,6 +13,12 @@ create table if not exists public.youtube_connections (
   connected_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   last_verified_at timestamptz,
+  readiness_status text,
+  readiness_code text,
+  readiness_summary text,
+  readiness_evidence jsonb,
+  readiness_checked_at timestamptz,
+  readiness_expires_at timestamptz,
   revoked_at timestamptz
 );
 
@@ -27,6 +33,12 @@ create table if not exists public.youtube_oauth_states (
 create index if not exists youtube_oauth_states_expiry_idx on public.youtube_oauth_states (expires_at);
 
 alter table public.youtube_connections add column if not exists last_verified_at timestamptz;
+alter table public.youtube_connections add column if not exists readiness_status text;
+alter table public.youtube_connections add column if not exists readiness_code text;
+alter table public.youtube_connections add column if not exists readiness_summary text;
+alter table public.youtube_connections add column if not exists readiness_evidence jsonb;
+alter table public.youtube_connections add column if not exists readiness_checked_at timestamptz;
+alter table public.youtube_connections add column if not exists readiness_expires_at timestamptz;
 alter table public.youtube_oauth_states add column if not exists pkce_verifier_ciphertext text;
 
 create table if not exists public.youtube_broadcasts (

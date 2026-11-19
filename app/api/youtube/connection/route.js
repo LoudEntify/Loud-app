@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { verifyArtistAuth } from '../../../../lib/verifyArtistAuth';
-import { assertYouTubeConnectionOwner, decryptYouTubeRefreshToken, getYouTubeConfig, refreshYouTubeAccessToken, revokeYouTubeToken, youtubeLiveEnabled, youtubeLog } from '../../../../lib/youtubeServer';
-
-const VERIFY_TTL_MS = 15 * 60 * 1000;
+import { assertYouTubeConnectionOwner, decryptYouTubeRefreshToken, getYouTubeConfig, revokeYouTubeToken, youtubeLiveEnabled, youtubeLog } from '../../../../lib/youtubeServer';
 
 // AUTH MODEL: verified artist, owner-scoped to artist_id for every read
 // and delete. Token ciphertext is never included in a response.
@@ -14,7 +12,7 @@ export async function GET(request) {
 
   const { data, error } = await getSupabaseAdmin()
     .from('youtube_connections')
-    .select('artist_id,channel_id,channel_title,connected_at,updated_at,last_verified_at,revoked_at,refresh_token_ciphertext')
+    .select('artist_id,channel_id,channel_title,connected_at,revoked_at')
     .eq('artist_id', auth.user.id)
     .maybeSingle();
   if (error) return NextResponse.json({ error: 'Could not load YouTube connection.' }, { status: 503 });
@@ -22,33 +20,12 @@ export async function GET(request) {
     try { assertYouTubeConnectionOwner(data, auth.user.id); } catch { return NextResponse.json({ error: 'This YouTube connection is not yours.' }, { status: 403 }); }
   }
 
-  let connection = data;
-  const verifiedAt = data?.last_verified_at ? new Date(data.last_verified_at).getTime() : 0;
-  if (data && !data.revoked_at && Date.now() - verifiedAt >= VERIFY_TTL_MS) {
-    try {
-      const config = getYouTubeConfig();
-      await refreshYouTubeAccessToken(decryptYouTubeRefreshToken(data.refresh_token_ciphertext, config), config);
-      const now = new Date().toISOString();
-      await getSupabaseAdmin().from('youtube_connections').update({ last_verified_at: now, updated_at: now }).eq('artist_id', auth.user.id);
-      connection = { ...data, last_verified_at: now };
-    } catch (refreshError) {
-      if (refreshError.status === 400 || /invalid_grant|revoked|expired/i.test(refreshError.reason || refreshError.message)) {
-        const revokedAt = new Date().toISOString();
-        await getSupabaseAdmin().from('youtube_connections').update({ revoked_at: revokedAt, updated_at: revokedAt }).eq('artist_id', auth.user.id);
-        connection = { ...data, revoked_at: revokedAt };
-        youtubeLog('authorization_invalid', { artistId: auth.user.id, status: refreshError.status || null });
-      } else {
-        youtubeLog('authorization_check_failed', { artistId: auth.user.id, status: refreshError.status || null });
-        return NextResponse.json({ error: 'Could not verify YouTube authorization.' }, { status: 503 });
-      }
-    }
-  }
   return NextResponse.json({
     enabled: true,
-    connected: Boolean(connection && !connection.revoked_at),
-    authorizationRequired: Boolean(connection?.revoked_at),
-    channel: connection && !connection.revoked_at ? { id: connection.channel_id, title: connection.channel_title } : null,
-    connectedAt: connection && !connection.revoked_at ? connection.connected_at : null,
+    connected: Boolean(data && !data.revoked_at),
+    authorizationRequired: Boolean(data?.revoked_at),
+    channel: data && !data.revoked_at ? { id: data.channel_id, title: data.channel_title } : null,
+    connectedAt: data && !data.revoked_at ? data.connected_at : null,
   });
 }
 
