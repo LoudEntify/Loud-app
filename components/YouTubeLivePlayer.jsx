@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { initHealthLog, logHealthEvent } from '../lib/healthLog';
+import YouTubeInteractionPanel from './YouTubeInteractionPanel';
 
 let apiPromise;
 function loadYouTubeApi() {
@@ -122,6 +123,8 @@ export default function YouTubeLivePlayer({ experience }) {
             </div>
           )}
         </div>
+
+        {!unavailable && <YouTubeInteractionPanel showId={experience.showId} roomName={experience.roomName} playbackPositionMs={() => Math.max(0, Math.round((playerRef.current?.getCurrentTime?.() || 0) * 1000))} />}
 
         <footer style={{ display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'center', flexWrap: 'wrap', marginTop: 16, color: '#8ba4af', fontSize: 13, lineHeight: 1.6 }}>
           <span>Playback is provided by YouTube. YouTube controls, attribution and advertising remain available in the player.</span>

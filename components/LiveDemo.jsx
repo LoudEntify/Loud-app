@@ -86,6 +86,7 @@ import { isWindowOpen, humanCountdown, msRemainingInShow, msUntilWindow, nextUpc
 import { REACTIONS_COST_TOKENS, chargeReaction, logReaction } from '../lib/reactions';
 import { SPEND_ACTIONS } from '../lib/tokens';
 import { forgetPerformerSession, recallPerformerSession, rememberPerformerSession } from '../lib/sessionResume';
+import { interactionToken } from '../lib/interactionClient';
 import '../styles/reactions.css';
 
 // THE ROOM IS THE SHOW'S ROOM. There is no default.
@@ -5845,7 +5846,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
       }
     };
     read();
-    const t = setInterval(read, 5000);
+    const t = setInterval(read, 2000);
     return () => { cancelled = true; clearInterval(t); };
   }, [isMainPerformer, pushedPromptKeys, votePromptId, roomName]);
 
@@ -6006,9 +6007,12 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
   const answerPrompt = useCallback(async (payload) => {
     if (!activePrompt?.id) return 'That question is no longer open.';
     try {
+      const accessToken = (await getSession())?.access_token || null;
+      const voteToken = activePrompt.kind === 'choice' ? await interactionToken(showId, accessToken) : null;
+      if (activePrompt.kind === 'choice' && !voteToken) return 'Could not start a secure voting session. Try again.';
       const res = await fetch('/api/prompt-responses', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...(voteToken ? { 'X-Interaction-Token': voteToken } : {}) },
         body: JSON.stringify({
           promptId: activePrompt.id,
           viewerId,
@@ -6030,7 +6034,7 @@ function RoomInner({ viewerId, onLeaveBeacon, performanceMode, role, notice, sel
     } catch {
       return 'That did not send. Try once more.';
     }
-  }, [activePrompt, viewerId, room, show]);
+  }, [activePrompt, viewerId, room, show, showId]);
 
   // ── ITEM 8 LAYER C: the unattended end ────────────────────────
   // Covers "the artist closed the laptop without pressing End Show" as

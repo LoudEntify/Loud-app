@@ -76,6 +76,8 @@ export async function POST(request) {
         // ask, so there is no state in which a row here has not been
         // asked. (A composed-but-unpushed draft would set this null.)
         pushed_at: new Date().toISOString(),
+        opens_at: new Date().toISOString(),
+        latency_allowance_ms: 30000,
         // Milliseconds from showOriginMs, computed CLIENT-side because
         // that is where the show row with actual_started_at lives. Item
         // 3 is what makes this measured from the real start rather than
@@ -91,6 +93,8 @@ export async function POST(request) {
       console.warn('[show-prompts] insert failed:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    await admin.from('interaction_audit_events').insert({ show_id: owner.show.id, prompt_id: data.id, event_type: 'WINDOW_OPENED', actor_id: auth.user.id, detail: { latency_allowance_ms: 30000 } });
 
     return NextResponse.json({ ok: true, prompt: data });
   } catch (err) {
@@ -205,7 +209,7 @@ export async function PATCH(request) {
     // identifier they supplied is the shape of the cue-sheets IDOR.
     const { data, error } = await admin
       .from('show_prompts')
-      .update({ closed_at: new Date().toISOString() })
+      .update({ closed_at: new Date().toISOString(), closes_at: new Date().toISOString() })
       .eq('id', promptId)
       .eq('show_id', owner.show.id)
       .is('closed_at', null)          // first close wins; re-closing is a no-op
@@ -219,7 +223,8 @@ export async function PATCH(request) {
     // show. Reported rather than collapsed into a bare ok, because those
     // are different things and a silent success is what made the
     // actual_started_at write undiagnosable.
-    return NextResponse.json({ ok: true, closed: (data?.length ?? 0) === 1, rows: data?.length ?? 0 });
+    if ((data?.length ?? 0) === 1) await admin.from('interaction_audit_events').insert({ show_id: owner.show.id, prompt_id: promptId, event_type: 'WINDOW_CLOSED', actor_id: auth.user.id, detail: { latency_grace_ms: 30000 } });
+    return NextResponse.json({ ok: true, closed: (data?.length ?? 0) === 1, rows: data?.length ?? 0, settlingUntil: (data?.length ?? 0) === 1 ? new Date(Date.now() + 30000).toISOString() : null });
   } catch (err) {
     console.warn('[show-prompts] close request failed:', err);
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
