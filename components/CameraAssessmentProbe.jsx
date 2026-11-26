@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { createVisualAssessmentService } from '../lib/visualAssessmentService';
 import { sourceKey } from '../lib/trackSources';
 import { logHealthEvent } from '../lib/healthLog';
+import { recordCameraFeature } from '../lib/cameraRecommendationRuntime';
 
 const ENABLED = process.env.NEXT_PUBLIC_EXP_VD_001_ENABLED === 'true';
 
@@ -23,7 +24,7 @@ function ObservedCamera({ trackRef, service }) {
 export default function CameraAssessmentProbe({ trackRefs = [] }) {
   const serviceRef = useRef(null);
   if (ENABLED && !serviceRef.current && typeof window !== 'undefined') {
-    serviceRef.current = createVisualAssessmentService({ onFeature(feature) { logHealthEvent('visual_camera_assessment', feature); window.dispatchEvent(new CustomEvent('loudentify:camera-feature', { detail: feature })); } });
+    serviceRef.current = createVisualAssessmentService({ onFeature(feature) { recordCameraFeature(feature); logHealthEvent('visual_camera_assessment', feature); window.dispatchEvent(new CustomEvent('loudentify:camera-feature', { detail: feature })); } });
   }
   useEffect(() => () => serviceRef.current?.stop(), []);
   if (!ENABLED || !serviceRef.current) return null;
